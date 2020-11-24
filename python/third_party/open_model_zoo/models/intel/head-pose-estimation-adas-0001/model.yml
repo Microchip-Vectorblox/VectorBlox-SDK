@@ -1,0 +1,44 @@
+# Copyright (c) 2020 Intel Corporation
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+description: >-
+  Vanilla CNN trained from scratch yaw + pitch + roll + landmarks
+task_type: head_pose_estimation
+files:
+  - name: FP32/head-pose-estimation-adas-0001.xml
+    size: 56291
+    sha256: a152270b9bcb1c31fd72b1e26f4ce5211485ff62866be1de03b879e07479d152
+    source: https://download.01.org/opencv/2021/openvinotoolkit/2021.1/open_model_zoo/models_bin/2/head-pose-estimation-adas-0001/FP32/head-pose-estimation-adas-0001.xml
+  - name: FP32/head-pose-estimation-adas-0001.bin
+    size: 7647608
+    sha256: 00980a823b345c73a9b1aae80ea203b56a43929c27807a8994f3b1c029c70ab3
+    source: https://download.01.org/opencv/2021/openvinotoolkit/2021.1/open_model_zoo/models_bin/2/head-pose-estimation-adas-0001/FP32/head-pose-estimation-adas-0001.bin
+  - name: FP16/head-pose-estimation-adas-0001.xml
+    size: 56278
+    sha256: 3725f0c8641ac4a15ae26c117bc5c6020b3a12cc6a5258d0f6577318cfb24d2f
+    source: https://download.01.org/opencv/2021/openvinotoolkit/2021.1/open_model_zoo/models_bin/2/head-pose-estimation-adas-0001/FP16/head-pose-estimation-adas-0001.xml
+  - name: FP16/head-pose-estimation-adas-0001.bin
+    size: 3823814
+    sha256: cb28630bd002b5881443ab20b01bc13150aee2db917ef91fa970e54ebe0430a5
+    source: https://download.01.org/opencv/2021/openvinotoolkit/2021.1/open_model_zoo/models_bin/2/head-pose-estimation-adas-0001/FP16/head-pose-estimation-adas-0001.bin
+  - name: FP16-INT8/head-pose-estimation-adas-0001.xml
+    size: 90448
+    sha256: 0df611970f47d26f257d472cc8939a84769911c9d8780890913577287cfc67ef
+    source: https://download.01.org/opencv/2021/openvinotoolkit/2021.1/open_model_zoo/models_bin/2/head-pose-estimation-adas-0001/FP16-INT8/head-pose-estimation-adas-0001.xml
+  - name: FP16-INT8/head-pose-estimation-adas-0001.bin
+    size: 2080036
+    sha256: 02deed13f1a94135bdac6f9a428c693b19d5e643bcf635e60fd576255b76de0a
+    source: https://download.01.org/opencv/2021/openvinotoolkit/2021.1/open_model_zoo/models_bin/2/head-pose-estimation-adas-0001/FP16-INT8/head-pose-estimation-adas-0001.bin
+framework: dldt
+license: https://raw.githubusercontent.com/opencv/open_model_zoo/master/LICENSE

@@ -1,0 +1,41 @@
+import vbx.sim
+import cv2
+import numpy as np
+import argparse
+import os
+import math
+
+def cosine_distance(arr0, arr1):
+    return np.sum(arr0*arr1)/(np.sqrt(np.sum(arr0*arr0)) * np.sqrt(np.sum(arr1*arr1)))
+
+def get_embeddings_from_image(model,image_path):
+    input_size = (96,112)
+    if not os.path.isfile(image_path):
+        print('Error: {} could not be read'.format(image_path))
+        os._exit(1)
+    img = cv2.imread(image_path)
+    if img.shape != (input_size, input_size, 3):
+        img_resized = cv2.resize(img, input_size).clip(0, 255)
+    else:
+        img_resized = img
+    flattened = img_resized.transpose(0,1,2).flatten()
+    outputs = model.run([flattened])
+    return outputs[0]*model.output_scale_factor[0]
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('model')
+    parser.add_argument('image1')
+    parser.add_argument('image2')
+    args = parser.parse_args()
+
+    with open(args.model, 'rb') as mf:
+        model = vbx.sim.Model(mf.read())
+
+    image1_out = get_embeddings_from_image(model,args.image1)
+    image2_out = get_embeddings_from_image(model,args.image2)
+
+    print("image similiarity = {:.3f}".format(cosine_distance(image2_out,image1_out)))
+    
+    print("bandwidth per run = {}".format(model.get_bandwidth_per_run()))
+    print("estimated {} seconds at 100MHz".format(model.get_estimated_runtime(100E6)))
