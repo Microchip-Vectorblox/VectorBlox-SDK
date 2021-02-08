@@ -2238,7 +2238,7 @@ def json_to_graph(json_string, preset, io_info=None, script_dir=None, output_byt
         except Exception:
             sys.stderr.write("ERROR: An unexpected error occurred, please contact Microchip for support\n")
             sys.exit(1)
-        instr_count=sum([s for s in m.stats.instruction_count])
+        instr_count=vbx.sim.c.vbxsim_get_instructions()
         replay_size = instr_count*16
         adjustment = graph.replay_buffer_size - replay_size;
 

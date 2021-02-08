@@ -1,7 +1,7 @@
 # Prerequisites
 
-> Ubuntu 16.04 / 18.04 supported
-> If using WSL, ensure you are running from your home directory or have permissions set
+ Ubuntu 16.04 / 18.04 supported
+ If using WSL, ensure you are running from your home directory or have permissions set
 
 # Downloading the SDK
 
@@ -20,13 +20,13 @@ There are two options for downloading the sdk:
     If during `source setup_vars.sh` you get an error about "No module named 'mxnet'"
     chances are git-lfs is not configured correctly.
      
-## Installs required dependencies (requires sudo permission)
+## Install required dependencies (requires sudo permission)
 
 ```
 bash install_dependencies.sh
 ```
 
-## Activates (and installs if needed) Python virtual environment, and sets necessary environment variables
+## Activate (and installs if needed) Python virtual environment, and sets necessary environment variables
 ```
 source setup_vars.sh
 ```

@@ -701,7 +701,7 @@ def generate_mxp_graph(model_name, activations, stats, first_node_name, last_nod
         elif node.op_type == "Reshape":
             dims = get_tensor(inits, node.input[1])
 
-            if len(dims) == 6 and dims[-1] == 2:
+            if len(dims) == 4 and dims[-1] == 2:
                 idx += 6
                 node = nodes[idx]
                 output_id = node.output[0]

@@ -105,45 +105,31 @@ def onnx_activations_batched(model_name, input_array, batch=2, stats_only=False)
 
     activations = {}
     stats = {}
-    with tqdm.tqdm(total=batch*num_passes) as t:
-        for i in range(0, batch*num_passes, batch):
-            outputs = session.run([], {i0: input_array[i:i+batch]})
-            for out, arr in zip(session.get_outputs(), outputs):
-                if stats_only:
-                    reduce_axis = tuple((i for i in range(len(arr.shape)) if i != 1))
-                    stat = {"mean":np.mean(arr,axis=reduce_axis) / (input_array.shape[0]/arr.shape[0]),
-                            "min":np.min(arr,axis=reduce_axis),
-                            "max":np.max(arr,axis=reduce_axis)}
-                    old_stat = stat
-                    if out.name in stats:
-                        old_stat = stats[out.name]
-                    stats[out.name] = {"mean":stat['mean'] + old_stat['mean'],
-                                       "min":np.minimum(stat['min'],old_stat['min']),
-                                       "max":np.maximum(stat['max'],old_stat['max'])}
-                else:
-                    if out.name in activations:
-                        activations[out.name] = np.vstack((activations[out.name], arr))
-                    else:                    
-                        activations[out.name] = arr
-            t.update(batch)
+    
+    for i in range(0, batch*num_passes, batch):
+        outputs = session.run([], {i0: input_array[i:i+batch]})
+        for out, arr in zip(session.get_outputs(), outputs):
+            if stats_only:
+                reduce_axis = tuple((i for i in range(len(arr.shape)) if i != 1))
+                stat = {"mean":np.mean(arr,axis=reduce_axis) / (input_array.shape[0]/arr.shape[0]),
+                        "min":np.min(arr,axis=reduce_axis),
+                        "max":np.max(arr,axis=reduce_axis)}
+                old_stat = stat
+                if out.name in stats:
+                    old_stat = stats[out.name]
+                stats[out.name] = {"mean":stat['mean'] + old_stat['mean'],
+                                   "min":np.minimum(stat['min'],old_stat['min']),
+                                   "max":np.maximum(stat['max'],old_stat['max'])}
+            else:
+                if out.name in activations:
+                    activations[out.name] = np.vstack((activations[out.name], arr))
+                else:                    
+                    activations[out.name] = arr
+    
 
     return stats if stats_only else activations 
 
 
-    session = onnxruntime.InferenceSession(onnx_name, None)
-    input_name = session.get_inputs()[0].name
-    outputs = None
-
-    with tqdm.tqdm(total=batch*num_passes) as t:
-        for i in range(0, batch*num_passes, batch):
-            output = session.run([], {input_name: input_array[i:i+batch]})[0]
-            if outputs is None:
-                outputs = output
-            else:
-                outputs = np.vstack((outputs, output))
-            t.update(batch)
-
-    return outputs
 
 
 def onnx_infer_batched(onnx_name, input_array, batch=8):

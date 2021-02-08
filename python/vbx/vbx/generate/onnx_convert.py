@@ -621,6 +621,7 @@ def gen_const(vinode):
     return nodes, inits
 
 
+# this function is no longer used with the darknet_to_onnx tool
 def gen_extract(vinode):
     nodes, inits = [], []
     inputs, outputs = io(vinode)
@@ -1473,7 +1474,7 @@ def gen_transpose(vinode, vinodes):
         #transpose is equivalent to reshape
         return gen_reshape(vinode)
 
-    if perm not in ([0,2,3,1],):
+    if (perm not in ([0,2,3,1],)) and ('reorg' not in vinode.name.lower()):
         sys.stderr.write("ERROR:Node {}: permutation '{}' not supported\n".format(vinode.name,perm))
         sys.exit(1)
     inputs = inputs[:1]
