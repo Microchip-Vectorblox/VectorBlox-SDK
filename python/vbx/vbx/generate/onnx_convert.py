@@ -9,7 +9,6 @@ from  . import onnx_helper
 from onnx import checker, helper
 from .onnx_helper import onnx_save_model
 from .openvino_parse_xml import parse_openvino_xml
-from .onnx_infer import onnx_infer, onnx_activations, onnx_random_infer, onnx_random_input, load_image
 from .onnx_infer import onnx_infer, onnx_activations_batched, onnx_random_infer, onnx_random_input, load_image
 from .utils import *
 import sys
@@ -29,7 +28,6 @@ def gather_stats(onnx_model, nodes, folder, count, scale):
 
     channels = input_shape[0]
     input_shape = (input_shape[2],input_shape[1])
-    # input_arrays = np.vstack([load_image(i, scale=scale, input_shape=input_shape) for i in images])
     input_arrays = np.vstack([load_image(i, input_shape=input_shape,channels=channels) for i in images])
     stats = onnx_activations_batched(onnx_model, input_arrays, stats_only=True)
 

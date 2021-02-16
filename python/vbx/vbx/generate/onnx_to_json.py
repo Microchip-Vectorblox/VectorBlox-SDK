@@ -16,6 +16,8 @@ np.set_printoptions(suppress=True, precision=4, linewidth=120)
 NETWORK_VERSION = 0.8
 DO_STRIDES = True
 CLIP_UNSIGNED = True
+CVI_1x1 = False
+INLINE_DEPTHWISE = True
 
 
 multipath_nodes = [
@@ -145,8 +147,32 @@ def mxp_set_cvi(network):
             if layer['group'] == layer['kernels']:
                 if layer['strides'] in [[1,1], [2,2]] and layer['dilations'] == [1,1]:
                     network['layers'][l]['use_depthwise'] = 1
-            if layer['m'] == 1 and layer['n'] == 1:
-                network['layers'][l]['use_cvi'] = 0
+            if not CVI_1x1:
+                if layer['m'] == 1 and layer['n'] == 1:
+                    network['layers'][l]['use_cvi'] = 0
+
+    return network
+
+
+def mxp_gemm_to_conv(network):
+    for l, layer in enumerate(network['layers']):
+        if layer['op_type'] == 'Gemm':
+            channels = network['layers'][l]['input_size']
+            kernels = network['layers'][l]['output_shape'][0]
+
+            network['layers'][l]['op_type'] = "Conv"
+            network['layers'][l]['output_shape'] = (kernels, 1, 1)
+            network['layers'][l]['channels'] = channels
+            network['layers'][l]['kernels'] = kernels
+            network['layers'][l]['kernel_shape'] = [1,1]
+            network['layers'][l]['dilations'] = [1,1]
+            network['layers'][l]['strides'] = [1,1]
+            network['layers'][l]['group'] = 1
+            network['layers'][l]['m'] = 1
+            network['layers'][l]['n'] = 1
+            network['layers'][l]['use_cvi'] = 0
+            network['layers'][l]['use_depthwise'] = 0
+            network['layers'][l]['use_strided'] = 0
 
     return network
 
@@ -173,7 +199,8 @@ def mxp_set_unsigned(network, use_uint8_inputs=False):
         first = network['layers'][0]
         first_sublayers = [_['op_type'] for _ in first['sublayers']]
         first['input_unsigned'] = 1
-        if first['op_type'] == 'Identity' and 'Add' not in first_sublayers and 'Mul' not in first_sublayers:
+        # if first['op_type'] == 'Identity' and 'Add' not in first_sublayers and 'Mul' not in first_sublayers:
+        if first['op_type'] == 'Identity' and 'Add' not in first_sublayers:
             next_layer_ids = [n for n, next in enumerate(network['layers']) if first['output_id'] == next['input_id']]
             if all([network['layers'][n]['op_type'] == 'Conv' for n in next_layer_ids]):
                 if all([network['layers'][n]['use_cvi'] for n in next_layer_ids]):
@@ -191,13 +218,13 @@ def mxp_set_unsigned(network, use_uint8_inputs=False):
                 id_sublayer_ops = [_['op_type'] for _ in id_layer['sublayers']]
                 id_next_layer_ids = [n for n, next in enumerate(network['layers']) if id_layer['output_id'] == next['input_id']]
                 valid_clip = False
-                if CLIP_UNSIGNED and 'Clip' in sublayer_ops:
+                if CLIP_UNSIGNED and 'Clip' in id_sublayer_ops:
                     clip = [_ for _ in id_layer['sublayers'] if _['op_type'] == 'Clip'][0]
                     if clip['min'] == 0.0 and clip['max'] == 1.0:
                         valid_clip = True
 
                 if (('Relu' in id_sublayer_ops or valid_clip)
-                    and 'AveragePool' not in id_sublayer_ops
+                    and 'AveragePool' not in sublayer_ops
                     and 'Add' not in id_sublayer_ops):
                     if all([network['layers'][n]['op_type'] in ['Conv'] for n in id_next_layer_ids]):
                         if all([network['layers'][n]['use_cvi'] for n in id_next_layer_ids]):
@@ -217,10 +244,38 @@ def mxp_set_unsigned(network, use_uint8_inputs=False):
                         if all([network['layers'][n]['use_cvi'] for n in next_layer_ids]):
                             set_unsigned(network, ([l], next_layer_ids))
 
+    return network
 
-    
+
+def fuse_layers(network, fuse_pairs):
+    for p, f in fuse_pairs:
+        previous_layer = network['layers'][p]
+        fuse_layer = network['layers'][f]
+
+        previous_layer['output_id'] = fuse_layer['output_id']
+        sublayers = fuse_layer['sublayers']
+
+        fuse_layer['sublayers'] = []
+        previous_layer['sublayers'].append(fuse_layer)
+        previous_layer['sublayers'] += sublayers
+
+    for _, f in fuse_pairs[::-1]:
+        network['layers'] = network['layers'][:f] + network['layers'][f+1:]
 
 
+def mxp_inline_depthwise(network):
+    if INLINE_DEPTHWISE:
+        fuse_pairs = []
+        for l, layer in enumerate(network['layers']):
+            if layer['op_type'] == 'Conv' and layer['use_cvi'] and not layer['use_depthwise']:
+                next_layers = [n for n,next in enumerate(network['layers']) if layer['output_id'] == next['input_id']]
+                if len(next_layers) == 1:
+                    next_layer = network['layers'][next_layers[0]]
+                    if next_layer['op_type'] == 'Conv' and next_layer['use_cvi'] and next_layer['use_depthwise']:
+                        if layer['strides'] == [1,1]:
+                            fuse_pairs.append((l, next_layers[0]))
+
+        fuse_layers(network, fuse_pairs)
 
     return network
 
@@ -262,7 +317,7 @@ def shape3d(shape):
 
 
 def generate_mxp_graph(model_name, activations, stats, first_node_name, last_node_name, io_info,
-                       input_type, ignore_strides=False, verbose=False):
+                       input_type, ignore_strides=False, inline_depthwise=False, verbose=False):
     """activations+pooling merged into subgraphs"""
     network = {}
     network['layers'] = []
@@ -340,7 +395,8 @@ def generate_mxp_graph(model_name, activations, stats, first_node_name, last_nod
                     if int(np.prod(input_shapes[0])) != int(c*m*n):
                         if verbose:
                             print('adjusting size for strided maps')
-                        previous['output_size'] = int(c*m*n)
+                        previous['output_size'] = int(c*4*m//strides[0]*n//strides[1])
+                        previous['output_shape'] = (c*4,m//strides[0],n//strides[1])
 
             w = get_tensor(inits, node.input[1])
             kernels, channels, _, _ = w.shape
@@ -398,7 +454,7 @@ def generate_mxp_graph(model_name, activations, stats, first_node_name, last_nod
                     'use_replay': 1,
                     'input_size': int(np.prod(input_shapes[0])),
                     'output_size': int(np.prod(output_shape)),
-                    'output_shape':output_shape,
+                    'output_shape': output_shape,
                     'gemm_input_size': input_size,
                     'gemm_output_size': output_size,
                     'input_id': input_id,
@@ -850,9 +906,16 @@ def generate_mxp_graph(model_name, activations, stats, first_node_name, last_nod
             break
 
     unsigned_network_inputs = input_type == np.uint8
+
+    if CVI_1x1:
+        network = mxp_gemm_to_conv(network)
+
     network = mxp_set_replay(network, io_info)
     network = mxp_set_cvi(network)
     network = mxp_set_unsigned(network, unsigned_network_inputs)
+
+    if inline_depthwise:
+        network = mxp_inline_depthwise(network)
 
     network = mxp_describe_layers(network)
     network = mxp_number_buffers(network)
@@ -866,7 +929,7 @@ def generate_mxp_graph(model_name, activations, stats, first_node_name, last_nod
 
 
 def run_generate_graph(model_src, model_stats, io_info,  input_image,
-                       input_scale=1.,input_type=np.uint8, ignore_strides=False):
+                       input_scale=1.,input_type=np.uint8, ignore_strides=False, inline_depthwise=False):
     assert input_type in (np.int8,np.uint8)
     stats = None
     if model_stats:
@@ -883,7 +946,7 @@ def run_generate_graph(model_src, model_stats, io_info,  input_image,
     nodes = graph.node
 
     # generate graph from onnx
-    graph_mxp = generate_mxp_graph(model_src, activations, stats, nodes[0].name, nodes[-1].name, io_info, input_type, ignore_strides)
+    graph_mxp = generate_mxp_graph(model_src, activations, stats, nodes[0].name, nodes[-1].name, io_info, input_type, ignore_strides, inline_depthwise)
     graph_mxp['version'] = NETWORK_VERSION
 
     # set test inputs / outputs

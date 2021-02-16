@@ -7,7 +7,6 @@ import numpy as np
 import os
 import json
 from multiprocessing import Pool
-import subprocess, shlex
 import argparse
 
 Q32 = 16
@@ -79,7 +78,8 @@ def jslayers_to_adjust(js):
     for l, layer in enumerate(js['layers']):
         if layer['op_type'] == "Conv":
             if layer['use_cvi']:
-                layers.append(l)
+                if layer['m'] > 1 and layer['n'] > 1:
+                    layers.append(l)
         elif layer['op_type'] == "Identity":
             if len(layer['sublayers']) and layer['sublayers'][-1]['op_type'] == 'Add':
                 layers.append(l)
@@ -169,29 +169,8 @@ def run_subgraph_biases(input_ids, output_id, vnnx_fname, input_shape, images, t
     args = [(vnnx_fname, input_ids, output_id, input_shape, image, tmp_dir) for image in images]
     with Pool() as p:
         p.map(vnnx_run_image, args)
-
-    # import vbx.sim
-    # with open(vnnx_fname, 'rb') as mf:
-    #     vnnx_model = vbx.sim.Model(mf.read())
-
-    # for image in images:
-    #     inames = ['{}.{}.npy'.format(os.path.join(tmp_dir, os.path.basename(image)), i) for i in input_ids]
-    #     oname = '{}.{}.npy'.format(os.path.join(tmp_dir, os.path.basename(image)), output_id)
-
-    #     vnnx_input = []
-    #     for input_id, iname in zip(input_ids, inames):
-    #         if input_id == 0:
-    #             input_channels = input_shape[0]
-    #             input_height = input_shape[1]
-    #             input_width = input_shape[2]
-    #             vnnx_input += vnnx_load_image(image, input_channels, (input_height, input_width))
-    #         else:
-    #             with open(iname, 'rb') as f:
-    #                 vnnx_input.append(np.load(f))
-
-    #     vnnx_arr = vnnx_model.run(vnnx_input)[0]
-    #     with open(oname, 'wb') as f:
-    #         np.save(f, vnnx_arr)
+    p.close()
+    p.join()
 
 
 def onnx_save_activations(onnx_fname, input_shape, images, tmp_dir):
@@ -247,9 +226,7 @@ def vnnx_bias_corrections(json_string, onnx_model, size_conf, io_info, output_by
         with open(vnnx_fname, "wb") as output_file:
             output_file.write(graph_binary)
 
-
-        subprocess.check_call(['python', __file__, 'subgraph.json'])
-        # run_subgraph_biases(input_ids, output_id, vnnx_fname, input_shape, images, tmp_dir)
+        run_subgraph_biases(input_ids, output_id, vnnx_fname, input_shape, images, tmp_dir)
 
         biases = update_subgraph_biases(js_node, output_id, images, tmp_dir)
         if bl == bias_correction_nodes[0]:
@@ -269,33 +246,7 @@ def vnnx_bias_corrections(json_string, onnx_model, size_conf, io_info, output_by
         with open(vnnx_fname, "wb") as output_file:
             output_file.write(graph_binary)
 
-        subprocess.check_call(['python', __file__, 'subgraph.json'])
-
-        if False:
-            corrected_biases = update_subgraph_biases(js_node, output_id, images, tmp_dir)
-
-            for key in biases:
-                x = biases[key]
-                y = corrected_biases[key]
-
-                for i in range(x.size):
-                    xi = float(x[i])
-                    yi = float(y[i])
-                    if abs(yi) > abs(xi):
-                        current_biases[key][i] = 0.
-                    else:
-                        current_biases[key][i] = xi + yi
-
-            with open('biases_correction.json', 'w') as f:
-                json.dump(current_biases, f, indent=2)
-
-            bias_corrections = 'biases_correction.json'
-            graph_binary = json_to_graph.json_to_graph(json_string, size_conf, io_info=io_info, output_bytes=output_bytes, bias_corrections=bias_corrections, bias_correction_nodes=(current_nodes, bias_correction_nodes))
-            with open(vnnx_fname, "wb") as output_file:
-                output_file.write(graph_binary)
-
-            subprocess.check_call(['python', __file__, 'subgraph.json'])
-
+        run_subgraph_biases(input_ids, output_id, vnnx_fname, input_shape, images, tmp_dir)
 
 def main():
     parser = argparse.ArgumentParser()

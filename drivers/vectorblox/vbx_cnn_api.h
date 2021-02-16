@@ -1,6 +1,6 @@
 /*!
  * \file
- * \brief API for interacting with Core VectorBlox 
+ * \brief API for interacting with Core VectorBlox
  */
 
 #ifndef VBX_CNN_API_H
@@ -8,6 +8,9 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include "vnnx-types.h"
+#if defined(__riscv) && defined(__linux)
+#define VBX_SOC_DRIVER 1
+#endif
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -19,8 +22,7 @@ extern "C" {
  * the network blob, and any input or output buffers.
  * In order to reduce bugs users should also ensure that these buffers are not in the host's cachable memory.
  */
-
-#define INSTRUCTION_SIZE (2*1024*1024)
+#define VBX_INSTRUCTION_SIZE (2*1024*1024)
 typedef uint64_t vbx_cnn_io_ptr_t;
 struct model_struct;
 typedef struct model_struct model_t;
@@ -62,9 +64,18 @@ typedef struct {
 	uint32_t size;/*vbx_cnn_size_conf_e*/
 	void* instruction_blob;
 	volatile uint32_t* ctrl_reg;
+  int debug_print_ptr;
+#if VBX_SOC_DRIVER
+    uint8_t* dma_buffer;
+    uint8_t* dma_buffer_end;
+  size_t  dma_phys_trans_offset;
+#endif
+
 }vbx_cnn_t;
 
-
+#if VBX_SOC_DRIVER
+  void* vbx_allocate_dma_buffer(vbx_cnn_t* vbx_cnn,size_t request_size,size_t align);
+#endif
 /**
  * Initialize vbx_cnn IP Core.
  * After this, the core will accept instructions.
@@ -79,7 +90,7 @@ typedef struct {
  * @return A vbx_cnn_t structure. On success .initialized is set, otherwise it is zero;
  *
  */
-vbx_cnn_t* vbx_cnn_init(volatile void* ctrl_reg_addr,void* firmware_blob);
+vbx_cnn_t* vbx_cnn_init(void* ctrl_reg_addr,void* firmware_blob);
 
 /**
  * Read error register and return the error
@@ -121,13 +132,13 @@ typedef enum{
  * Query vbx_cnn to see if there is a model running
  *
  * @param vbx_cnn The vbx_cnn object to use
- * @return current state of the core. One of:     
+ * @return current state of the core. One of:
          READY =1 (Can accept model immediately)
          RUNNING = 2       (Model Running,can accept model eventually)
          RUNNING_READY = 3  (Model Running,can accept model immediately)
          FULL = 6          (Cannot accept model)
          ERROR = 8          (IP Core stopped.)
- 
+
  */
 vbx_cnn_state_e vbx_cnn_get_state(vbx_cnn_t* vbx_cnn);
 
@@ -219,7 +230,7 @@ vbx_cnn_size_conf_e model_get_size_conf(const model_t* model);
  *
  * @param model The model to query
  * @param the size required to store the data part of the model
- */ 
+ */
 size_t model_get_data_bytes(const model_t* model);
 /**
  * Get size required to store the entire model, include temporary buffers

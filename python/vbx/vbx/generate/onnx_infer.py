@@ -8,6 +8,7 @@ from vbx.postprocess import classifier, yolo,dataset
 from vbx.sim.model import Fletcher32
 import sys
 import onnx
+import re
 from onnx import numpy_helper, helper, checker, shape_inference
 from onnx import optimizer, version_converter
 
@@ -70,6 +71,7 @@ def extend_model_outputs(model):
 
     return model_
 
+
 def onnx_activations(model_name, input_array=None):
     model = onnx.load(model_name)
     onnx.checker.check_model(model)
@@ -91,7 +93,11 @@ def onnx_activations(model_name, input_array=None):
     activations = {}
     for node, arr in zip(session.get_outputs(), outputs):
         activations[node.name] = arr
-    return activations
+
+    sorted_activations = dict(sorted(activations.items()))
+
+    np.savez('onnx.npz', **sorted_activations)
+    return sorted_activations
 
 
 def onnx_activations_batched(model_name, input_array, batch=2, stats_only=False):
@@ -225,7 +231,7 @@ def main():
 
     args = parser.parse_args()
 
-    input_array = load_image(args.image, args.scale)
+    input_array = load_image(args.image, args.scale, channels=args.channels)
 
     if args.activations:
         activations = onnx_activations(args.onnx, input_array)
@@ -255,10 +261,12 @@ def main():
         output = onnx_infer(args.onnx, input_array)
         if len(output.flatten())==1001:
             classes = dataset.imagenet_classes_with_nul
-        else:
+            classifier.print_topk(output[0].flatten(),classes=classes)
+        elif len(output.flatten())==1000:
             classes = dataset.imagenet_classes
-
-        classifier.print_topk(output[0].flatten(),classes=classes)
+            classifier.print_topk(output[0].flatten(),classes=classes)
+        else:
+            print(output)
 
 
 if __name__ == "__main__":

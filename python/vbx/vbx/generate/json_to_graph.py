@@ -5,7 +5,7 @@ import struct
 import sys
 import os.path
 import base64
-from math import ceil,log2
+from math import floor,ceil,log2
 import argparse
 import numpy as np
 import hashlib
@@ -58,6 +58,7 @@ Node_struct = [('int32_t', 'type'),
                ('int32_t', 'output_size'),
                ('int32_t[2]', 'output_strides'),
                ('int32_t', 'scratchpad_bytes'),
+               ('int32_t', 'dma_split'),
                ('int32_t', 'dma_channel_offset'),
                ('int32_t', 'dma_buffer_offset'),
                ('offset', 'input_data'),
@@ -76,6 +77,7 @@ Node_struct = [('int32_t', 'type'),
                ('int32_t', 'sublayer_shape_last'),
                ('int32_t', 'sublayer_rows'),
                ('int32_t', 'sublayer_columns'),
+               ('int32_t', 'sublayer_scratchpad_per_map'),
                # replay is an offset in vnnx-types.h,
                # but not here so it stays initialized to zero
                ('int32_t', 'use_replay'),
@@ -99,6 +101,8 @@ Node_struct = [('int32_t', 'type'),
                                    ('int32_t', 'maps'),
                                    ('int32_t', 'acc_maps'),
                                    ('int32_t', 'rows'),
+                                   ('int32_t', 'inc_rows'),
+                                   ('int32_t', 'conv_rows'),
                                    ('int32_t', 'core_split'),
                                    ('int32_t', 'core_maps'),
                                    ('int32_t', 'core_m'),
@@ -168,13 +172,17 @@ Node_struct = [('int32_t', 'type'),
 Subnode_struct = [('int32_t', 'type'),
                   ('int32_t', 'input_data_type'),
                   ('int32_t', 'output_data_type'),
-                  ('int32_t[2]', 'strides'),  # 12
-                  ('int32_t[2]', 'kernel_shape'),  # 20
-                  ('int32_t[6]', 'pads'),  # 28
-                  ('int32_t', 'maps'),  # 52
-                  ('union', {"pad_const": [('float', 'value')],  # 56
+                  ('int32_t[2]', 'strides'), 
+                  ('int32_t[2]', 'kernel_shape'),
+                  ('int32_t[2]', 'dilations'),
+                  ('int32_t[6]', 'pads'),  
+                  ('int32_t', 'maps'), 
+                  ('union', {"pad_const": [('float', 'value')],
                              "clip": [('float', 'min'),
                                       ('float', 'max')],
+                             "depthwise": [('int32_t', 'unsigned_input'),
+                                           ('int32_t', 'unsigned_output'),
+                                           ('offset', 'weights')],
                              "prelu":[('offset', 'slope')],
                              "leakyrelu":[('int32_t', 'alpha')],
                              "mul_bc3":[("int32_t", "use_xl"),
@@ -190,7 +198,8 @@ Subnode_struct = [('int32_t', 'type'),
                              "mul_bc2":[('int32_t', 'use_xl'),
                                         ('offset', 'array'),
                                         ('offset', 'array_xl')],
-                             "cast":[('int32_t', 'scale')]}
+                             "cast":[('int32_t', 'scale')],
+                             "prefetch":[('offset', 'memory_offset')]}
                    )]
 
 def type_string_to_fmt(t):
@@ -324,6 +333,7 @@ class Node(Struct):
         self.replay_buffer =0;
         self.replay_buffer_size = 0;
         self.output_strides = [1,1];
+        self.dma_split = 1;
 
 
 class Subnode(Struct):
@@ -331,6 +341,7 @@ class Subnode(Struct):
         super().__init__(Subnode_struct)
         self.kernel_shape=[1,1]
         self.strides = [1,1]
+        self.dilations = [1,1]
         self.pads = [0,0,0,0,0,0]
         self.maps = 0
 
@@ -407,47 +418,55 @@ class layer_type(enum.IntEnum):
     ABS_I16 = 3
     CLIP_I8 = 4
     CLIP_I16 = 5
-    AVGPOOL_I8 = 6
-    AVGPOOL_I16 = 7
-    MAXPOOL_U8 = 8
-    MAXPOOL_I8 = 9
-    MAXPOOL_I16 = 10
-    CAST_I16_I8 = 11
-    CAST_I16_I32 = 12
-    CAST_I32_I16 = 13
-    CAST_U8_I16 = 14
-    CAST_U8_I8 = 15
-    CAST_I8_I16 = 16
-    CAST_I8_I32 = 17
-    LEAKYRELU_I8 = 18
-    LEAKYRELU_I16 = 19
-    RELU_I8 = 20
-    RELU_I16 = 21
-    PRELU_I8 = 22
-    PRELU_I16 = 23
-    PADCONST_U8 = 24
-    PADCONST_I8 = 25
-    PADCONST_I16 = 26
-    MUL_BC3_I8 = 27
-    MUL_BC3_I16 = 28
-    MUL_BC3_U8 = 29
-    MUL_BC3_U16 = 30
-    MUL_BC2_I8 = 31
-    MUL_BC2_I16 = 32
-    ADD_I8 = 33
-    ADD_I16 = 34
-    LAYER_UNKNOWN = 35
+    AVGPOOL_U8 = 6
+    AVGPOOL_I8 = 7
+    AVGPOOL_I16 = 8
+    MAXPOOL_U8 = 9
+    MAXPOOL_I8 = 10
+    MAXPOOL_I16 = 11
+    CAST_I16_I8 = 12
+    CAST_I16_I32 = 13
+    CAST_I32_I16 = 14
+    CAST_U8_I16 = 15
+    CAST_U8_I8 = 16
+    CAST_U8_I32 = 17
+    CAST_I8_I16 = 18
+    CAST_I8_I32 = 19
+    DEPTHWISE_CONV_I8 = 20
+    LEAKYRELU_I8 = 21
+    LEAKYRELU_I16 = 22
+    RELU_I8 = 23
+    RELU_I16 = 24
+    PRELU_I8 = 25
+    PRELU_I16 = 26
+    PADCONST_U8 = 27
+    PADCONST_I8 = 28
+    PADCONST_I16 = 29
+    MUL_BC3_I8 = 30
+    MUL_BC3_I16 = 31
+    MUL_BC3_U8 = 32
+    MUL_BC3_U16 = 33
+    MUL_BC2_I8 = 34
+    MUL_BC2_I16 = 35
+    ADD_U8 = 36
+    ADD_I8 = 37
+    ADD_I16 = 38
+    PREFETCH = 39
+    LAYER_UNKNOWN = 40
 
 
 def sublayer_bytes(l):
     if l in {layer_type.GLOBAL_AVGPOOL_I8 ,
              layer_type.ABS_I8 ,
              layer_type.CLIP_I8 ,
+             layer_type.DEPTHWISE_CONV_I8,
+             layer_type.AVGPOOL_U8 ,
              layer_type.AVGPOOL_I8 ,
              layer_type.MAXPOOL_U8 ,
              layer_type.MAXPOOL_I8 ,
              layer_type.CAST_I16_I8 ,
              layer_type.CAST_U8_I8 ,
+             layer_type.CAST_U8_I32 ,
              layer_type.CAST_I8_I32 ,
              layer_type.LEAKYRELU_I8 ,
              layer_type.RELU_I8 ,
@@ -457,7 +476,9 @@ def sublayer_bytes(l):
              layer_type.MUL_BC3_I8 ,
              layer_type.MUL_BC3_U8 ,
              layer_type.MUL_BC2_I8 ,
-             layer_type.ADD_I8 }:
+             layer_type.ADD_I8,
+             layer_type.PREFETCH,
+             }:
         return 1
 
     if l in {layer_type.GLOBAL_AVGPOOL_I16 ,
@@ -500,6 +521,7 @@ def enum_to_union_name(e):
                    (layer_type.ABS_I16, ""),
                    (layer_type.CLIP_I8, "clip"),
                    (layer_type.CLIP_I16, "clip"),
+                   (layer_type.DEPTHWISE_CONV_I8, "depthwise"),
                    (layer_type.AVGPOOL_I8, ""),
                    (layer_type.AVGPOOL_I16, ""),
                    (layer_type.MAXPOOL_U8, ""),
@@ -512,6 +534,7 @@ def enum_to_union_name(e):
                    (layer_type.CAST_U8_I8, "cast"),
                    (layer_type.CAST_I8_I16, "cast"),
                    (layer_type.CAST_I8_I32, "cast"),
+                   (layer_type.CAST_U8_I32, "cast"),
                    (layer_type.LEAKYRELU_I8, "leakyrelu"),
                    (layer_type.LEAKYRELU_I16, "leakyrelu"),
                    (layer_type.RELU_I8, ""),
@@ -529,6 +552,7 @@ def enum_to_union_name(e):
                    (layer_type.MUL_BC2_I16, "mul_bc2"),
                    (layer_type.ADD_I8, "add_bc2"),
                    (layer_type.ADD_I16, "add_bc2"),
+                   (layer_type.PREFETCH, "prefetch"),
                    (layer_type.LAYER_UNKNOWN, "")]
     for t, n in union_names:
         if type(t) == type(e) and t == e:
@@ -709,14 +733,17 @@ def round_down_pwr_2(v):
     return v - (v >> 1)
 
 
-def set_sublayer_attributes(sg, sl_array):
+def set_sublayer_attributes(node, sl_array):
     shape = 0
     shape_0 = 0
     shape_last = 0
     shape_full = 0
 
     max_rows = 0
+    scratchpad_per_map = 0
     max_columns = 0
+    max_maps = 0
+    maps = 0
     rows = 0
     columns = 0
     stride = 1
@@ -741,30 +768,37 @@ def set_sublayer_attributes(sg, sl_array):
                  sl.strides[0])
         if (rows > max_rows):
             max_rows = rows
+        maps += sl.pads[0] + sl.pads[3]
+        if (maps > max_maps):
+            max_maps = maps
 
-    sg.sublayer_shape = shape
-    sg.sublayer_shape_full = shape_full
-    sg.sublayer_shape_last = shape_last
-    sg.sublayer_shape_0 = shape_0
-    sg.sublayer_stride = stride
-    sg.sublayer_columns = max_columns
-    sg.sublayer_rows = max_rows
+        if sl.type == layer_type.DEPTHWISE_CONV_I8:
+            scratchpad_per_map += (sl.kernel_shape[0]*sl.kernel_shape[1]+5)
+
+    node.sublayer_shape = shape
+    node.sublayer_shape_full = shape_full
+    node.sublayer_shape_last = shape_last
+    node.sublayer_shape_0 = shape_0
+    node.sublayer_stride = stride
+    node.sublayer_columns = max_columns
+    node.sublayer_rows = max_rows
+    node.sublayer_maps = max_maps
+    node.sublayer_scratchpad_per_map = scratchpad_per_map
 
 
-def elements_to_process(m, n, shape, dilations):
-    start_output_element = (
-        (shape[0] // 2) * dilations[0] * n) + (shape[1] // 2 * dilations[1])
-    end_output_element = (m * n) - ((((shape[0] - 1) // 2) * dilations[0] * n) +
-                                    ((shape[1] - 1) // 2) * dilations[1])
-    return end_output_element - start_output_element
-
-
-def strided_elements_to_process(m, n, shape, dilations, strides):
-    m0 = (m + (strides[0]-1)) // strides[0]
-    n0 = (n + (strides[1]-1)) // strides[1]
-    start_output_element = ((shape[0] // 2 // strides[0]) * dilations[0] * n0) + (shape[1] // 2 // strides[1] * dilations[1])
-    end_output_element = (m0*n0) - ((((shape[0]-1) // 2 // strides[0]) * dilations[0] * n0) + ((shape[1]-1) // 2 // strides[1]) * dilations[1])
-    return end_output_element-start_output_element
+def elements(m, n, shape, dilations, strides, use_strided_maps):
+    if use_strided_maps:
+        m0 = (m + (strides[0]-1)) // strides[0]
+        n0 = (n + (strides[1]-1)) // strides[1]
+        start_output_element = ((shape[0] // 2 // strides[0]) * dilations[0] * n0) + (shape[1] // 2 // strides[1] * dilations[1])
+        end_output_element = (m0*n0) - ((((shape[0]-1) // 2 // strides[0]) * dilations[0] * n0) + ((shape[1]-1) // 2 // strides[1]) * dilations[1])
+        return end_output_element-start_output_element
+    else:
+        start_output_element = (
+            (shape[0] // 2) * dilations[0] * n) + (shape[1] // 2 * dilations[1])
+        end_output_element = (m * n) - ((((shape[0] - 1) // 2) * dilations[0] * n) +
+                                        ((shape[1] - 1) // 2) * dilations[1])
+        return end_output_element - start_output_element
 
 
 def pad_weights16(src, kernels, channels, group, kernel_height, kernel_width,
@@ -919,6 +953,91 @@ class weight_array(bytearray):
         return self
 
 
+def set_conv_vbx(node, sp_size):
+    conv = node.conv
+
+    m = conv.m
+    n = conv.n
+    kernel_height = conv.kernel_shape[0]
+    kernel_width = conv.kernel_shape[1]
+    n_extra = node.sublayer_columns
+    m_extra = node.sublayer_rows
+    conv_input_bytes = 1
+    if node.input_data_type == calc_type.INT16:
+        conv_input_bytes = 2
+    conv_output_bytes = 1
+    if node.output_data_type == calc_type.INT16:
+        conv_output_bytes = 2
+
+    conv.core_m = conv.m
+    conv.core_split = 1
+    conv.core_maps = ceil(conv.kernels / CORES)
+
+    # calculte the max maps
+    max_maps = -1
+    coeff_width = ceil(kernel_width*COEFFICIENT_BITS*4 /8)
+    m0, n0 = (m-(kernel_height-1), n-(kernel_width-1))
+    if conv_input_bytes == 1:
+        max_maps = (sp_size - (2*m*n + 2*m0*n0))/(2*2*m*n)
+    elif conv_input_bytes == 2:
+        max_maps = (sp_size - (4*m*n + 2*m0*n0))/(2*2*m*n)
+    elif conv_input_bytes == 4:
+        max_maps = (sp_size - (8*m*n+4*m0*n0)) / (4*m0*n0)
+
+    if conv.group > 1 and max_maps > (conv.kernels/conv.group):
+        # adjust max_maps to cap at 1 filter group at a time
+        if conv.group == conv.kernels and conv.group == conv.channels:
+            pass  # depthwise
+        else:
+            max_maps = conv.kernels/conv.group
+
+    if conv.m == 1 and conv.n == 1:
+        conv.imaps = int((sp_size - (2*(conv.channels+conv.kernels))) / (2*2*conv.channels))
+        while (conv.kernels % conv.imaps) > 0:
+            conv.imaps -= 1
+
+    if max_maps > 1:
+        conv.maps = conv.core_maps
+        while conv.maps > max_maps:
+            conv.maps /= 2
+        conv.maps = int(conv.maps)
+        if conv.group > 1:  # TODO handle multi-core
+            while (conv.kernels % conv.maps) != 0:
+                conv.maps -= 1
+            assert(conv.maps >= 1)
+    else:
+        conv.maps = 1
+
+    # calculate max rows
+    def max_conv_rows(kernels, n):
+        n0 = n - (kernel_width-1)
+        m = -1
+        if (conv_input_bytes == 1):
+            m = sp_size // (2*n + 2*n0 + 2*kernels*2*n)
+        elif (conv_input_bytes == 2):
+            m = sp_size // (4*n + 2*n0 + 2*kernels*2*n)
+        elif (conv_input_bytes == 4):
+            m = sp_size // (8*n+4*n0+kernels*4*n0)
+        return m
+
+
+    conv.rows = max_conv_rows(conv.maps, n+n_extra)
+    if conv.m == 1 and conv.n == 1:
+        conv.rows = 1
+
+    if conv.rows >= conv.m:
+        conv.rows = conv.m
+    else:
+        while (conv.rows - offset) % inc:
+            conv.rows -= 1
+        assert conv.rows >= min_rows
+
+    node.scratchpad_bytes = conv.maps*(conv.rows+m_extra)*(conv.n+n_extra)*2
+    return True
+
+
+
+
 def conv_populate_attributes(node, json_node, conv_cvi, sp_size, vector_lanes, filter_copies, parallel_output_maps):
     conv = node.conv
     conv.use_cvi = conv_cvi
@@ -939,15 +1058,25 @@ def conv_populate_attributes(node, json_node, conv_cvi, sp_size, vector_lanes, f
     n_extra = node.sublayer_columns
     m_extra = node.sublayer_rows
     conv_input_bytes = 1
-    conv_output_bytes = 1
-    if node.input_data_type == calc_type.INT16 or conv_cvi and INPUT_SIZE_BYTES == 2:
+    if node.input_data_type == calc_type.INT16 or conv.use_cvi and INPUT_SIZE_BYTES == 2:
         conv_input_bytes = 2
-    if node.output_data_type == calc_type.INT16 or conv_cvi and OUTPUT_SIZE_BYTES == 2:
+
+    conv_output_bytes = 1
+    if node.output_data_type == calc_type.INT16 or conv.use_cvi and OUTPUT_SIZE_BYTES == 2:
         conv_output_bytes = 2
 
+    layer_output_bytes = 1
+    if node.output_data_type == calc_type.INT32:
+        layer_output_bytes = 4
+    elif node.output_data_type == calc_type.INT16 or conv_output_bytes == 2:
+        layer_output_bytes = 2
+
     def vci_conv_rows(conv, imaps, maps):
+
         if conv.use_depthwise:
             channels = imaps
+            if channels < maps:
+                channels *= 2  # double-buffered
             coeff_stride = ceil(COEFFICIENT_BITS*maps/8)
             remaining = sp_size
             remaining -= aligned_size((conv.kernel_shape[0]*conv.kernel_shape[1]+5)*coeff_stride, vector_lanes)  # v_w0
@@ -979,19 +1108,129 @@ def conv_populate_attributes(node, json_node, conv_cvi, sp_size, vector_lanes, f
             remaining -= aligned_size(imaps*conv.kernel_shape[0] *
                                       conv.kernel_shape[1]*coeff_stride, vector_lanes)  # v_w1
             remaining -= vector_lanes*4  # Padding wavefront
+        elif conv.use_depthwise and imaps < maps:
+            # double-buffered
+            remaining -= vector_lanes*4  # Padding wavefront
+            remaining -= aligned_size(imaps*(conv.kernel_shape[0]*conv.kernel_shape[1]+5)*coeff_stride, vector_lanes)  # v_w1
+            remaining -= vector_lanes*4  # Padding wavefront
 
+        strides_n = 1
+        if conv.use_strided:
+            strides_n = conv.strides[1]
+        size_per_irow = aligned_size(conv_input_bytes*channels*n, vector_lanes)
+        size_per_orow = aligned_size(layer_output_bytes*maps*((n+strides_n-1)//strides_n+n_extra), vector_lanes)
 
-        size_per_row = (aligned_size(conv_output_bytes*maps*(n+n_extra), vector_lanes) +
-                        aligned_size(conv_input_bytes*channels*n, vector_lanes))
-        rows = (remaining // size_per_row) - m_extra
+        rows = (remaining - m_extra * size_per_orow) // (size_per_irow + size_per_orow)
 
         if conv.use_strided and rows % conv.strides[0]:
             rows -= 1
         return rows
 
 
-    def vci_post_rows(maps):
-        return sp_size//(2*conv_output_bytes*maps*(n+n_extra)) - m_extra
+    def vci_conv_rows_db(conv, imaps, maps, irows):
+        coeff_stride = ceil(COEFFICIENT_BITS*maps/8)
+
+        remaining = sp_size
+        remaining -= vector_lanes*4  # v_zero_wavefront
+        remaining -= aligned_size(coeff_stride, vector_lanes)  # v_bias
+        remaining -= vector_lanes*4  # Padding wavefront
+        remaining -= aligned_size(coeff_stride, vector_lanes)  # v_bias_lower
+        remaining -= vector_lanes*4  # Padding wavefront
+        remaining -= aligned_size(coeff_stride, vector_lanes)  # v_scale
+        remaining -= vector_lanes*4  # Padding wavefront
+        # v_in0 (depends on conv_rows)
+
+        remaining -= aligned_size(imaps*conv.kernel_shape[0] *
+                                  conv.kernel_shape[1]*coeff_stride, vector_lanes)  # v_w0
+        remaining -= vector_lanes*4  # Padding wavefront
+
+        strides_n = 1
+        if conv.use_strided:
+            strides_n = conv.strides[1]
+
+        size_per_irow = aligned_size(conv_input_bytes*imaps*n, vector_lanes)
+        remaining -= vector_lanes*4  # Padding wavefront
+        size_per_irow += aligned_size(conv_input_bytes*imaps*n, vector_lanes)
+
+        remaining -= irows * size_per_irow
+        size_per_orow = aligned_size(layer_output_bytes*maps*((n+strides_n-1)//strides_n+n_extra), vector_lanes)
+
+        rows = (remaining // size_per_orow) - m_extra
+
+        if conv.use_strided and rows % conv.strides[0]:
+            rows -= 1
+        return rows
+
+
+    def invalid_number_of_rows(rows, conv_rows, post_rows):
+        return (not (conv_rows >= rows) or not (post_rows >= rows))
+
+
+    def vci_post_rows(node, maps, dma_split=1):
+        conv = node.conv
+        strides_n = 1
+        if conv.use_strided:
+            strides_n = conv.strides[1]
+
+        rows =  (sp_size - ((maps+(dma_split-1))//dma_split*node.sublayer_scratchpad_per_map))//((maps+((maps+(dma_split-1))//dma_split))*layer_output_bytes*((n+strides_n-1)//strides_n+n_extra)) - m_extra
+
+        return rows
+
+
+
+
+    def set_conv_cvi_depthwise(node, sp_size, min_rows, inc):
+        conv = node.conv
+        row_offset = min_rows - inc
+        # determine if full maps can be done at once
+        depth_split = 1
+        vci_fit_full_maps = True
+        if vci_conv_rows(conv, 1, depth_split) < conv.m:
+            vci_fit_full_maps = False
+
+        # initially set maps to be kernels (pow2), currently ignoring core split
+        conv.core_maps = round_up_pwr_2(conv.kernels)
+        conv.core_split = 1
+        conv.maps = conv.core_maps
+        conv.core_m = conv.m
+        conv.acc_maps = 1
+
+        # initially set imaps to maps / split
+        conv.imaps = conv.maps 
+        if conv.maps % depth_split == 0:
+            conv.imaps = conv.maps // depth_split
+
+        # if full maps, set rows to m, else to min_rows
+        if vci_fit_full_maps:
+            rows = conv.m
+        else:
+            rows = min_rows
+
+        conv_rows = vci_conv_rows(conv, conv.imaps, conv.maps)
+        post_rows = vci_post_rows(node, conv.maps)
+
+        # reduce imaps/maps until rows are valid
+        while invalid_number_of_rows(rows, conv_rows, post_rows) and conv.imaps > 1:
+            conv.imaps = ceil(conv.imaps/2)
+            conv.maps = conv.imaps * depth_split
+            conv_rows = vci_conv_rows(conv, conv.imaps, conv.maps)
+            post_rows = vci_post_rows(node, conv.maps)
+
+        # increase rows as much as possible
+        if rows != conv.m:
+            while not invalid_number_of_rows(rows+inc, conv_rows, post_rows):
+                rows += inc
+                if rows > conv.m + row_offset:
+                    rows = conv.m + row_offset
+                    break
+            while (rows - row_offset) % inc:
+                rows-= 1
+
+        conv.conv_rows = 0
+        conv.rows = rows
+        node.scratchpad_bytes = layer_output_bytes*conv.maps*(conv.rows+m_extra)*(conv.n+n_extra)
+        return True
+
 
     conv.maps = -1
     conv.imaps = -1
@@ -1000,193 +1239,275 @@ def conv_populate_attributes(node, json_node, conv_cvi, sp_size, vector_lanes, f
     min_rows = (1+(conv.kernel_shape[0]-1)*conv.dilations[0] +
                 node.sublayer_shape*conv.strides[0])
     inc = conv.strides[0] * node.sublayer_stride
-    offset = (min_rows - inc)
+    conv.inc_rows = conv.strides[0]
+    conv.conv_rows = 0
+    row_offset = (min_rows - inc)
 
-
-    if not conv_cvi:
-        conv.core_m = conv.m
-        conv.core_split = 1
-        conv.core_maps = ceil(conv.kernels / CORES)
-
-        # calculte the max maps
-        max_maps = -1
-        coeff_width = ceil(kernel_width*COEFFICIENT_BITS*4 /8)
-        m0, n0 = (m-(kernel_height-1), n-(kernel_width-1))
-        if conv_input_bytes == 1 and conv_cvi:
-            max_maps = (sp_size-8*m*n) / (2*m0*n0 + 2*coeff_width*kernel_height + 2*m*n0)
-            max_maps = round_down_pwr_2(max_maps)
-        elif conv_input_bytes == 2 and conv_cvi:
-            max_maps = sp_size / (2*m0*n0 + 2*(coeff_width*kernel_height+m*n0) + 16*m*n)
-        elif conv_input_bytes == 1 and not conv_cvi:
-            max_maps = (sp_size - (2*m*n + 2*m0*n0))/(2*2*m*n)
-        elif conv_input_bytes == 2 and not conv_cvi:
-            max_maps = (sp_size - (4*m*n + 2*m0*n0))/(2*2*m*n)
-        elif conv_input_bytes == 4 and not conv_cvi:
-            max_maps = (sp_size - (8*m*n+4*m0*n0)) / (4*m0*n0)
-
-        if conv.group > 1 and max_maps > (conv.kernels/conv.group):
-            # adjust max_maps to cap at 1 filter group at a time
-            if conv.group == conv.kernels and conv.group == conv.channels:
-                pass  # depthwise
-            else:
-                max_maps = conv.kernels/conv.group
-
-        if conv.m == 1 and conv.n == 1:
-            conv.imaps = int((sp_size - (2*(conv.channels+conv.kernels))) / (2*2*conv.channels))
-            while (conv.kernels % conv.imaps) > 0:
-                conv.imaps -= 1
-
-        if max_maps > 1:
-            conv.maps = conv.core_maps
-            while conv.maps > max_maps:
-                conv.maps /= 2
-            conv.maps = int(conv.maps)
-            if conv.group > 1:  # TODO handle multi-core
-                while (conv.kernels % conv.maps) != 0:
-                    conv.maps -= 1
-                assert(conv.maps >= 1)
-        else:
-            conv.maps = 1
-
-        # calculate max rows
-        def max_conv_rows(kernels, n):
-            n0 = n - (kernel_width-1)
-            m = -1
-            if (conv_input_bytes == 1):
-                m = sp_size // (2*n + 2*n0 + 2*kernels*2*n)
-            elif (conv_input_bytes == 2):
-                m = sp_size // (4*n + 2*n0 + 2*kernels*2*n)
-            elif (conv_input_bytes == 4):
-                m = sp_size // (8*n+4*n0+kernels*4*n0)
-            return m
-
-
-        conv.rows = max_conv_rows(conv.maps, n+n_extra)
-        if conv.m == 1 and conv.n == 1:
-            conv.rows = 1
-
-        if conv.rows >= conv.m:
-            conv.rows = conv.m
-        else:
-            while (conv.rows - offset) % inc:
-                conv.rows -= 1
-            assert conv.rows >= min_rows
-
-        node.scratchpad_bytes = conv.maps*(conv.rows+m_extra)*(conv.n+n_extra)*2
+    is_set = False
+    if not conv.use_cvi:
+        is_set = set_conv_vbx(node, sp_size)
     else:
+        if conv.use_depthwise:
+            is_set = set_conv_cvi_depthwise(node, sp_size, min_rows, inc)
+        else:
+            max_elements = filter_copies*ACCUMULATORS
+            elems_to_process = elements(m, n, conv.kernel_shape, conv.dilations, conv.strides, conv.use_strided)
+            vci_fit_full_maps = max_elements > elems_to_process
+            conv.core_m = conv.m
+            conv.core_split = 1
+            conv.maps = round_up_pwr_2(conv.kernels)
+            if (conv.group > 1 and conv.maps > conv.kernels/conv.group):
+                conv.maps = conv.kernels//conv.group
+
+            if len(node.subnode_array):
+                dma_split = 4
+            else:
+                dma_split = 1
+
+            if vci_fit_full_maps:
+                rows = conv.m
+
+                # maximize number of output maps at once
+                conv.acc_maps = ACCUMULATORS // ceil(elems_to_process/filter_copies)
+                max_output_maps = parallel_output_maps * conv.acc_maps
+                if conv.maps > max_output_maps:
+                    conv.maps = max_output_maps
+
+                conv.imaps = conv.channels // conv.group
+                # split channels to force double buffering
+                if (conv.channels // conv.group) % 8 == 0:
+                    if (conv.channels // conv.group) // 8 < 32:
+                        conv.imaps = 32
+                    else:
+                        conv.imaps = (conv.channels // conv.group) // 8
+
+                conv_rows = vci_conv_rows(conv, conv.imaps, conv.maps)
+                post_rows = vci_post_rows(node, conv.maps, dma_split)
+
+                # reduce imaps until full maps fit
+                if invalid_number_of_rows(rows, conv_rows, post_rows) and conv.imaps > 1:
+                    while invalid_number_of_rows(rows, conv_rows, post_rows) and conv.imaps > 1:
+                        conv.imaps = ceil(conv.imaps//2)
+                        conv_rows = vci_conv_rows(conv, conv.imaps, conv.maps)
+                        post_rows = vci_post_rows(node, conv.maps, dma_split)
+
+                if not invalid_number_of_rows(rows, conv_rows, post_rows):
+                    conv.conv_rows = 0
+                    conv.rows = rows
+                    node.dma_split = dma_split
+                    node.scratchpad_bytes = layer_output_bytes*conv.maps*(conv.rows+m_extra)*(conv.n+n_extra)
+                    if conv.use_strided:
+                        node.scratchpad_bytes = layer_output_bytes*conv.maps*(conv.rows+m_extra)*((conv.n+conv.strides[1]-1)//conv.strides[1]+n_extra)
+                    is_set = True
+            else:
+                rows = max(4, min_rows)
+                irows = min_rows
+                while irows < 4:
+                    irows += conv.inc_rows
+
+                conv.acc_maps = 1
+                max_output_maps = parallel_output_maps
+                if conv.maps > max_output_maps:
+                    conv.maps = max_output_maps
+
+                # double buffer across rows, fitting all input maps
+                conv.imaps = conv.channels // conv.group
+
+                conv_rows2 = vci_conv_rows_db(conv, conv.imaps, conv.maps, irows)
+                post_rows = vci_post_rows(node, conv.maps, dma_split)
+
+                vci_fit_all_imaps = True
+                if invalid_number_of_rows(rows, conv_rows2, post_rows):
+                    vci_fit_all_imaps = False
+
+                if vci_fit_all_imaps:
+                    # fix full maps
+                    if post_rows > 2*conv.m and conv_rows2 > 2*conv.m:
+                        rows = conv.m
+
+                    # check if possible to increase output maps in scratch:
+                    while conv.maps*2 <= conv.kernels and conv.maps // dma_split >= 1: 
+                        conv_rows2 = vci_conv_rows_db(conv, conv.imaps, conv.maps*2, irows)
+                        if dma_split > 1:
+                            post_rows = vci_post_rows(node, conv.maps*2, dma_split*2)
+                        else:
+                            post_rows = vci_post_rows(node, conv.maps*2, dma_split)
+
+                        if invalid_number_of_rows(rows, conv_rows2, post_rows):
+                            break
+                        else:
+                            conv.maps *= 2
+                            if dma_split > 1:
+                                dma_split *= 2
+
+                    conv_rows2 = vci_conv_rows_db(conv, conv.imaps, conv.maps, irows)
+                    post_rows = vci_post_rows(node, conv.maps, dma_split)
+                    rows = min(conv_rows2, post_rows, conv.m)
+
+                    # increase number of inputs rows, keeping full maps
+                    ratio = 1.9
+                    while True:
+                        conv_rows2 = vci_conv_rows_db(conv, conv.imaps, conv.maps, irows+conv.inc_rows)
+                        if not invalid_number_of_rows(rows, conv_rows2, post_rows) and (irows+conv.inc_rows-(conv.kernel_shape[0]-1))*ratio < min(conv_rows2, post_rows, conv.m):
+                            irows += conv.inc_rows
+                        else:
+                            break
+
+                    conv_rows2 = vci_conv_rows_db(conv, conv.imaps, conv.maps, irows)
+                    post_rows = vci_post_rows(node, conv.maps, dma_split)
+                    rows = min(conv_rows2, post_rows, conv.m)
+
+                    # decrease rows if leaves small final row
+                    if rows < conv.m:
+                        split = ceil(conv.m/rows)
+                        rows = (conv.m + (split-1)) // split
+
+                    if rows < conv.m:
+                        if rows > conv.core_m + row_offset:
+                            rows = conv.core_m + row_offset
+                        while (rows - row_offset) % inc:
+                            rows -= 1
+
+                    if conv.use_strided and irows % conv.strides[0]:
+                        irows -= 1
+
+                    # minimize split once max rows determined
+                    while dma_split > 4 and vci_post_rows(node, conv.maps, dma_split // 2) >= rows:
+                        dma_split //= 2
+
+                    conv.rows = rows
+                    conv.conv_rows = irows
+                    node.dma_split = dma_split
+                    node.scratchpad_bytes = layer_output_bytes*conv.maps*(conv.rows+m_extra)*(conv.n+n_extra)
+                    if conv.use_strided:
+                        node.scratchpad_bytes = layer_output_bytes*conv.maps*(conv.rows+m_extra)*((conv.n+conv.strides[1]-1)//conv.strides[1]+n_extra)
+                    if conv.kernel_shape == [1,1] and conv.strides == [1, 1]:
+                        is_set = True
+
         # conv_cvi
-        max_elements = filter_copies*ACCUMULATORS
-        elems_to_process = elements_to_process(m, n, conv.kernel_shape, conv.dilations)
-        if conv.use_strided:
-            elems_to_process = strided_elements_to_process(m, n, conv.kernel_shape, conv.dilations, conv.strides)
-        if conv.use_depthwise:
-            elems_to_process = 0
+        if not is_set:
+            max_elements = filter_copies*ACCUMULATORS
+            elems_to_process = elements(m, n, conv.kernel_shape, conv.dilations, conv.strides, conv.use_strided)
+            if conv.use_depthwise:
+                elems_to_process = 0
 
-        vci_fit_full_maps = max_elements > elems_to_process
-        if conv.use_depthwise:
-            if vci_conv_rows(conv, 1, 1) < conv.m:
-                vci_fit_full_maps = False
+            vci_fit_full_maps = max_elements > elems_to_process
+            if conv.use_depthwise:
+                if vci_conv_rows(conv, 1, 1) < conv.m:
+                    vci_fit_full_maps = False
 
-        conv.core_maps = round_up_pwr_2(conv.kernels)
-        if max_elements < elems_to_process:
-            conv.acc_maps = 1
-        elif conv.use_depthwise:
-            conv.acc_maps = 1
-        else:
-            conv.acc_maps = ACCUMULATORS // ceil(elems_to_process/filter_copies)
-        # divide maps if entire output map can't fit
-        max_output_maps = parallel_output_maps * conv.acc_maps
-        conv.core_m = conv.m
-        conv.core_split = 1
-        if vci_fit_full_maps:
-            rows = conv.m
-            conv.core_maps = ceil(conv.core_maps/CORES)
-        else:
-            c = CORES
-            while c > 1:
-                if conv.core_maps > 2*max_output_maps:
-                    conv.core_maps //= 2
-                else:
-                    conv.core_split *= 2
-                c /= 2
-            if conv.core_split > 1:
-                conv.core_m = ceil(m / conv.core_split)
-            while conv.core_m % inc:
-                conv.core_m += 1
-            rows = min_rows
+            conv.core_maps = round_up_pwr_2(conv.kernels)
+            if max_elements < elems_to_process:
+                conv.acc_maps = 1
+            elif conv.use_depthwise:
+                conv.acc_maps = 1
+            else:
+                conv.acc_maps = ACCUMULATORS // ceil(elems_to_process/filter_copies)
+            # divide maps if entire output map can't fit
+            max_output_maps = parallel_output_maps * conv.acc_maps
+            conv.core_m = conv.m
+            conv.core_split = 1
 
-        # ensure only 1 filter group at a time
-        conv.maps = conv.core_maps
+            if vci_fit_full_maps:
+                rows = conv.m
+                conv.core_maps = ceil(conv.core_maps/CORES)
+            else:
+                c = CORES
+                while c > 1:
+                    if conv.core_maps > 2*max_output_maps:
+                        conv.core_maps //= 2
+                    else:
+                        conv.core_split *= 2
+                    c /= 2
+                if conv.core_split > 1:
+                    conv.core_m = ceil(m / conv.core_split)
+                while conv.core_m % inc:
+                    conv.core_m += 1
+                rows = min_rows
 
-        if not conv.use_depthwise and (conv.group > 1 and conv.maps > conv.kernels/conv.group):
-            conv.maps = conv.kernels//conv.group
-        if not conv.use_depthwise and conv.maps > max_output_maps:
-            conv.maps = max_output_maps
-        # set input maps
-        if conv.use_depthwise:
-            conv.imaps = conv.maps
-        else:
-            conv.imaps = conv.channels // conv.group
-            # empirically shown to run faster if capped as it improves double
-            # buffering with latge numbers of output maps
-            if conv.imaps > 2*parallel_output_maps and conv.imaps > conv.kernels:
-                conv.imaps = parallel_output_maps
+            # ensure only 1 filter group at a time
+            conv.maps = conv.core_maps
+            if not conv.use_depthwise and (conv.group > 1 and conv.maps > conv.kernels/conv.group):
+                conv.maps = conv.kernels//conv.group
+            if not conv.use_depthwise and conv.maps > max_output_maps:
+                conv.maps = max_output_maps
 
-        def rows_check():
-            # TODO name this better
-            return (not (conv_rows >= rows) or not (post_rows >= rows))
+            # set input maps
+            if conv.use_depthwise:
+                conv.imaps = conv.maps 
+            else:
+                conv.imaps = conv.channels // conv.group
 
-        conv_rows = vci_conv_rows(conv, conv.imaps, conv.maps)
-        post_rows = vci_post_rows(conv.maps)
-        if conv.imaps < conv.channels/conv.group:
-            if rows_check() and conv.imaps > 0:
-                while rows_check() and conv.maps > 1:
-                    conv.maps = ceil(conv.maps/2)
-                    conv_rows = vci_conv_rows(conv, conv.imaps, conv.maps)
-                    post_rows = vci_post_rows(conv.maps)
+                # empirically shown to run faster if capped as it improves double
+                # buffering with large numbers of output maps
+                if conv.imaps > 2*parallel_output_maps and conv.imaps > conv.kernels:
+                    conv.imaps = parallel_output_maps
 
-        if rows_check() and conv.imaps > 0:
+            if len(node.subnode_array) and not conv.use_depthwise:  
+                dma_split = 4
+            else:
+                dma_split = 1
+
             conv_rows = vci_conv_rows(conv, conv.imaps, conv.maps)
-            post_rows = vci_post_rows(conv.maps)
+            post_rows = vci_post_rows(node, conv.maps, dma_split)
 
-            while conv_rows < rows and (conv.use_depthwise or conv.imaps > 2*parallel_output_maps):
-                conv.imaps = ceil(conv.imaps/2)
-                if conv.use_depthwise:
-                    conv.maps = conv.imaps
+            if conv.imaps < conv.channels/conv.group:
+                if invalid_number_of_rows(rows, conv_rows, post_rows) and conv.imaps > 0:
+                    while invalid_number_of_rows(rows, conv_rows, post_rows) and conv.maps > 1:
+                        conv.maps = ceil(conv.maps/2)
+                        conv_rows = vci_conv_rows(conv, conv.imaps, conv.maps)
+                        post_rows = vci_post_rows(node, conv.maps, dma_split)
+
+            if invalid_number_of_rows(rows, conv_rows, post_rows) and conv.imaps > 0:
                 conv_rows = vci_conv_rows(conv, conv.imaps, conv.maps)
-                post_rows = vci_post_rows(conv.maps)
+                post_rows = vci_post_rows(node, conv.maps, dma_split)
 
-            while rows_check() and conv.maps > 1:
-                conv.maps = ceil(conv.maps/2)
-                if conv.use_depthwise:
-                    conv.imaps = conv.maps
-                conv_rows = vci_conv_rows(conv, conv.imaps, conv.maps)
-                post_rows = vci_post_rows(conv.maps)
-        assert conv_rows >= rows
-        assert post_rows >= rows
-        assert conv.imaps != 0
+                while conv_rows < rows and (conv.use_depthwise or conv.imaps > 2*parallel_output_maps):
+                    conv.imaps = ceil(conv.imaps/2)
+                    if conv.use_depthwise:
+                        conv.maps = conv.imaps
+                    conv_rows = vci_conv_rows(conv, conv.imaps, conv.maps)
+                    post_rows = vci_post_rows(node, conv.maps, dma_split)
 
-        if not vci_fit_full_maps and rows != conv.m:
-            all_imaps = (conv.imaps == conv.channels//conv.group) or conv.use_depthwise
-            elems_to_process = elements_to_process(rows + inc, n, conv.kernel_shape, conv.dilations)
+                while invalid_number_of_rows(rows, conv_rows, post_rows) and conv.maps > 1:
+                    conv.maps = ceil(conv.maps/2)
+                    if conv.use_depthwise:
+                        conv.imaps = conv.maps
+                    conv_rows = vci_conv_rows(conv, conv.imaps, conv.maps)
+                    post_rows = vci_post_rows(node, conv.maps, dma_split)
+
+            assert conv_rows >= rows
+            assert post_rows >= rows
+            assert conv.imaps != 0
+
+            if not vci_fit_full_maps and rows != conv.m:
+                all_imaps = (conv.imaps == conv.channels//conv.group) or conv.use_depthwise
+                if not all_imaps:
+                    elems_to_process = elements(rows, n, conv.kernel_shape, conv.dilations, conv.strides, conv.use_strided)
+                    if not (max_elements >= elems_to_process):
+                        raise NotImplementedError("Convolution CVI cannot hold minimum rows required")
+
+                elems_to_process = elements(rows + inc, n, conv.kernel_shape, conv.dilations, conv.strides, conv.use_strided)
+                inc_elements = int(all_imaps or max_elements >= elems_to_process)
+
+                while conv_rows >= (rows+inc) and post_rows >= (rows+inc) and inc_elements:
+                    rows += inc
+                    elems_to_process = elements(rows + inc, n, conv.kernel_shape, conv.dilations, conv.strides, conv.use_strided)
+                    inc_elements = int(all_imaps or (max_elements > elems_to_process))
+                    if rows > conv.core_m + row_offset:
+                        break
+
+                if rows > conv.core_m + row_offset:
+                    rows = conv.core_m + row_offset
+                while (rows - row_offset) % inc:
+                    rows -= 1
+                
+            node.dma_split = dma_split
+            conv.rows = rows
+            conv.conv_rows = 0
+            node.scratchpad_bytes = layer_output_bytes*conv.maps*(conv.rows+m_extra)*(conv.n+n_extra)
             if conv.use_strided:
-                elems_to_process = strided_elements_to_process(rows + inc, n, conv.kernel_shape, conv.dilations, conv.strides)
-            inc_elements = int(all_imaps or max_elements >= elems_to_process)
-
-            while conv_rows >= (rows+inc) and post_rows >= (rows+inc) and inc_elements:
-                rows += inc
-                elems_to_process = elements_to_process(rows + inc, n, conv.kernel_shape, conv.dilations)
-                if conv.use_strided:
-                    elems_to_process = strided_elements_to_process(rows + inc, n, conv.kernel_shape, conv.dilations, conv.strides)
-                inc_elements = int(all_imaps or (max_elements > elems_to_process))
-                if rows > conv.core_m + offset:
-                    break
-            if rows > conv.core_m + offset:
-                rows = conv.core_m + offset
-            while (rows - offset) % inc:
-                rows-= 1
-        conv.rows = rows
-        node.scratchpad_bytes = conv_output_bytes*conv.maps*(conv.rows+m_extra)*(conv.n+n_extra)
+                node.scratchpad_bytes = layer_output_bytes*conv.maps*(conv.rows+m_extra)*((conv.n+conv.strides[1]-1)//conv.strides[1]+n_extra)
 
     if(conv.group > 2 and conv.group < conv.kernels):
         sys.stderr.write("WARNING: quick fix. group/maps overlap\n")
@@ -1211,8 +1532,8 @@ def ignore_cvi(json_node):
     return 0
 
 
-def max_ident_maps(m, n, sp_size, bytes):
-    return sp_size // (m*n*2*bytes)
+def max_ident_maps(m, n, sp_size, bytes, dma_split=1):
+    return sp_size // ceil(m*n*(1.+1./dma_split)*bytes)
 
 
 def max_gemm_columns(gemm, sp_size, bytes):
@@ -1222,6 +1543,252 @@ def max_gemm_columns(gemm, sp_size, bytes):
         max_input_size = (max_input_size + 1) // 2
         r = (sp_size - (max_input_size*3*bytes)) // (2*bytes)
     return max_input_size
+
+
+def conv_pack_parameters(weights, conv_cvi, padded_kernels, maps, input_unsigned, output_unsigned, conv, json_node, corrections, all_corrections, all_corrections_names):
+    # COEFFICIENTS
+    num_padded_weights = (
+        conv.kernel_shape[0]*conv.kernel_shape[1] *
+        (conv.channels//conv.group) * padded_kernels)
+
+    num_weights = (conv.kernel_shape[0]*conv.kernel_shape[1] *
+                   (conv.channels/conv.group) * conv.kernels)
+    weights_f32 = base64_to_float_nparray(json_node['weights'])
+    layer_max_weight = np.max(np.abs(weights_f32))
+    assert num_weights == len(weights_f32)
+
+    weights_per_kernel = ((conv.channels//conv.group) *
+                          conv.kernel_shape[0]*conv.kernel_shape[1])
+
+    num_biases = conv.kernels
+    biases_f32 = base64_to_float_nparray(json_node['biases'])
+    assert num_biases == len(biases_f32)
+
+    corr = None
+    if not(corrections is None):
+        desc = json_node['name']
+        if desc in corrections:
+            corr = np.asarray(corrections[desc])
+            biases_f32 = biases_f32 + corr
+
+    if INPUT_SIZE_BYTES == 1:
+        if input_unsigned:
+            conv.bias_scalar = (1 << U8) - 1
+            conv.bias_lower_scalar = 1
+        else:
+            conv.bias_scalar = -((1 << Q8) - 1)
+            conv.bias_lower_scalar = -1
+    else:
+        conv.bias_scalar = -(1 << Q16)
+        conv.bias_lower_scalar = 0
+
+    QWEIGHT = 7
+    QSCALE = 7
+    QEXTRA = QWEIGHT + QSCALE - ACCUMULATOR_FXP_BITS - SCALE_FXP_BITS
+
+    if input_unsigned and not output_unsigned:
+        QEXTRA += 1
+    if output_unsigned and not input_unsigned:
+        QEXTRA -= 1
+
+    # skipped = 0
+    min_weight = 1.0 / (1 << 16)
+
+    scale_f32 = [0. for k in range(conv.kernels)]
+    scale_i16 = [0 for k in range(conv.kernels)]
+    shift_i16 = [QEXTRA for k in range(conv.kernels)]
+    weights_i16 = float_to_fixed_np(weights_f32, calc_type.INT16)
+    weights_i32 = float_to_fixed_np(weights_f32, calc_type.INT32)
+    biases_i16 = [float_to_fixed(f, calc_type.INT16) for f in biases_f32]
+    biases_lower_i16 = [0 for _ in biases_i16]
+
+    no_correction = corr is None and all_corrections is None
+    no_potential_correction = all_corrections and not (json_node['name'] in all_corrections_names)
+    use_bias_lower = False 
+    USE_ROUNDING = False
+    if no_correction or no_potential_correction:
+        USE_ROUNDING = True
+        use_bias_lower = True
+        for k in range(conv.kernels):
+            k_weights = weights_f32[k*weights_per_kernel:(k+1)*weights_per_kernel]
+            max_weight = np.max(np.abs(k_weights))
+
+            if abs(biases_f32[k]) > max_weight:
+                use_bias_lower = False
+
+    if VERBOSE:
+        weights_big = False
+        q_max = 0
+        weights_small = False
+        q_min = 8
+
+    for k in range(conv.kernels):
+        k_weights = weights_f32[k*weights_per_kernel:(k+1)*weights_per_kernel]
+        max_weight = np.max(np.abs(k_weights))
+        if abs(biases_f32[k]) > max_weight:
+            max_weight = abs(biases_f32[k])
+
+
+        qweight = QWEIGHT
+        qin = 7
+        qout = 7
+        if input_unsigned:
+            qin = 8
+        if output_unsigned:
+            qout = 8
+        mweight = max_weight
+        qdiff = ACCUMULATOR_FXP_BITS + SCALE_FXP_BITS + qout - qin
+        qfactor = log2(mweight) + qweight
+        qscale = qdiff + log2(mweight) - qweight
+
+        if VERBOSE:
+            if qscale > q_max:
+                q_max = qscale
+            if qscale < q_min:
+                q_min = qscale
+
+        if qscale < 0:
+            if VERBOSE:
+                print('small', node_n, k, qscale, max_weight, input_unsigned, output_unsigned)
+                weights_small = True
+            qscale = 0
+        if qscale > 8:
+            if VERBOSE:
+                print('big', node_n, k, qscale, max_weight, input_unsigned, output_unsigned)
+                weights_big = True
+            qscale = 8
+        if conv_cvi:
+            scale_i16[k] = int(ceil(2**qscale)) - 1
+            reqscale = log2(scale_i16[k]+1)
+            scale_f32[k] = 2**(reqscale+qweight-qdiff)
+
+        if conv_cvi:
+            if scale_f32[k] == 0.:
+                k_weights_i16 = [0 for w in k_weights]
+                weights_i16[k*weights_per_kernel:(k+1)*weights_per_kernel] = k_weights_i16
+                biases_i16[k] = 0
+            else:
+                k_weights_i16 = float_to_fixed_np(k_weights/scale_f32[k], calc_type.INT16, COEFFICIENT_BITS-1, qweight)
+                weights_i16[k*weights_per_kernel:(k+1)*weights_per_kernel] = k_weights_i16
+
+                if input_unsigned:
+                    biases_i16[k] = float_to_fixed(biases_f32[k]/scale_f32[k], calc_type.INT16, COEFFICIENT_BITS-1, qweight, ROUNDING=USE_ROUNDING)
+                else:
+                    biases_i16[k] = float_to_fixed(-biases_f32[k]/scale_f32[k], calc_type.INT16, COEFFICIENT_BITS-1, qweight, ROUNDING=USE_ROUNDING)
+
+                if INPUT_SIZE_BYTES == 1 and use_bias_lower:
+                    if input_unsigned:
+                        biases_i16[k] = float_to_fixed(biases_f32[k]/scale_f32[k], calc_type.INT16, COEFFICIENT_BITS-1, qweight)
+                        biases_lower_i16[k] = float_to_fixed(1./255.*biases_f32[k]/scale_f32[k], calc_type.INT16, COEFFICIENT_BITS-1, qweight)
+                    else:
+                        biases_i16[k] = float_to_fixed(-biases_f32[k]/scale_f32[k], calc_type.INT16, COEFFICIENT_BITS-1, qweight)
+                        biases_lower_i16[k] = float_to_fixed(-1./127.*biases_f32[k]/scale_f32[k], calc_type.INT16, COEFFICIENT_BITS-1, qweight)
+
+    if not use_bias_lower:
+        conv.bias_lower_scalar = 0
+
+    if VERBOSE:
+        print('{}\t{:3.2f}\t{:3.2f}'.format(node_n, q_max, q_min))
+        if weights_big:
+            print('big', node_n, input_unsigned, output_unsigned)
+        if weights_small:
+            print('small', node_n, node.unsigned_input, node.unsigned_output)
+
+    type_size = 2 if INPUT_SIZE_BYTES == 1 else 1
+    if conv_cvi:
+        padded_scale = pad_weights16(scale_i16, conv.kernels, 1, 1, 1, 1, padded_kernels, 1)
+        packed_scales = np.zeros(padded_kernels*type_size, dtype=np.uint8)
+        for k in range(0, padded_kernels, maps):
+            iscales = interleave_weights(padded_scale[k:k+maps],
+                                         1, maps, 1, 1)
+            packed_scales[k*type_size:(k*type_size)+maps] = iscales
+        conv.scale = len(weights)
+        weights += packed_scales.tobytes()
+
+    else:
+        conv.scale = len(weights)
+        padded_scales = scale_i16 + [0]*(padded_kernels-conv.kernels)
+        weights += struct.pack("{}H".format(padded_kernels),
+                               *padded_scales)
+
+    if conv_cvi:
+        padded_weights = pad_weights16(weights_i16.tolist(), conv.kernels,
+                                       conv.channels//conv.group,
+                                       conv.group,
+                                       conv.kernel_shape[0],
+                                       conv.kernel_shape[1],
+                                       padded_kernels,
+                                       conv.channels//conv.group)
+        assert num_padded_weights == len(padded_weights)
+
+        packed_weights = np.zeros(num_padded_weights*type_size, dtype=np.uint8)
+
+
+        offset = ((conv.channels//conv.group) *
+                  conv.kernel_shape[0]*conv.kernel_shape[1])
+
+        for k in range(0, padded_kernels, maps):
+            pack_weights(padded_weights[k*offset:], packed_weights[k*type_size*offset:], conv.kernel_shape[0], conv.kernel_shape[1], conv.channels//conv.group, maps, 1, maps)
+
+        if conv.use_depthwise:
+            packed_weights = np.zeros(num_padded_weights*type_size + padded_kernels*type_size*5, dtype=np.uint8)
+            depthwise_pack_weights(padded_weights, packed_weights, scale_i16, conv.bias_scalar, biases_i16, conv.bias_lower_scalar, biases_lower_i16, conv.kernel_shape[0], conv.kernel_shape[1], conv.channels, padded_kernels, conv.group)
+
+        conv.weights = len(weights)
+        weights += packed_weights.tobytes()
+
+    else:
+        conv.acc_maps = 0
+
+        conv.weights = len(weights)
+        fmt = "{}h".format(num_padded_weights)
+        weights += struct.pack(fmt,
+                               *weights_i16)
+        conv.weights32 = len(weights)
+        fmt = "{}i".format(num_padded_weights)
+        weights += struct.pack(fmt,
+                               *weights_i32)
+    if not conv_cvi:
+        conv.use_weights32 = 1 if layer_max_weight > 1.0 * (1 << ((16-1)-Q16)) else 0
+
+    packed_biases = []
+    packed_biases_lower = []
+
+    if conv_cvi:
+        padded_biases = pad_weights16(biases_i16,
+                                      conv.kernels, 1, 1, 1, 1,
+                                      padded_kernels, 1)
+        packed_biases = np.zeros(padded_kernels*type_size, dtype=np.uint8)
+        offset = 1
+        for k in range(0, padded_kernels, maps):
+            interleaved_biases = interleave_weights(padded_biases[k:k+maps],
+                                                    1, maps,
+                                                    1, 1)
+            packed_biases[k*type_size:k*type_size + maps] = interleaved_biases
+        conv.biases = len(weights)
+        weights += packed_biases.tobytes()
+
+        padded_biases_lower = pad_weights16(biases_lower_i16,
+                                            conv.kernels, 1, 1, 1, 1,
+                                            padded_kernels, 1)
+        packed_biases_lower = np.zeros(padded_kernels*type_size, dtype=np.uint8)
+        offset = 1
+        for k in range(0, padded_kernels, maps):
+            interleaved_biases_lower = interleave_weights(padded_biases_lower[k:k+maps],
+                                                          1, maps,
+                                                          1, 1)
+            packed_biases_lower[k*type_size:k*type_size + maps] = interleaved_biases_lower
+
+        conv.biases_lower = len(weights)
+        weights += packed_biases_lower.tobytes()
+    else:
+        conv.biases = len(weights)
+        weights += struct.pack("{}h".format(len(biases_i16)),
+                               *biases_i16)
+        conv.biases_lower = len(weights)
+        weights += struct.pack("{}h".format(len(biases_i16)),
+                               *biases_i16)
+    return
 
 
 def json_to_graph(json_string, preset, io_info=None, script_dir=None, output_bytes=4, bias_corrections=None, bias_correction_nodes=(None, None)):
@@ -1297,6 +1864,8 @@ def json_to_graph(json_string, preset, io_info=None, script_dir=None, output_byt
             else:
                 output_bytes = 1
         all_corrections_names = [js['layers'][_]['name'] for _ in all_corrections]
+    else:
+        all_corrections_names = []
 
     inputs = [l['input_id'] for l in js_layers]
     outputs = [l['output_id'] for l in js_layers]
@@ -1368,7 +1937,7 @@ def json_to_graph(json_string, preset, io_info=None, script_dir=None, output_byt
 
         if current_data_type == None:
             current_data_type = node.input_data_type
-        if(node.type == subgraph_type.CONV and not conv_cvi and INPUT_SIZE_BYTES == 1):
+        if (node.type == subgraph_type.CONV and not conv_cvi and INPUT_SIZE_BYTES == 1):
             current_data_type = calc_type.INT16
 
         printv("layer_type =", json_node['op_type'], current_data_type)
@@ -1399,7 +1968,6 @@ def json_to_graph(json_string, preset, io_info=None, script_dir=None, output_byt
                 sublayers = [_ for _ in json_node['sublayers'] if _['op_type'] in ['Add', 'Mul']]
                 sn.cast.scale = 1
                 if len(sublayers):
-                    # print('u8 to i16')
                     sn.type = layer_type.CAST_U8_I16
                     current_data_type = calc_type.INT16
                 else:
@@ -1438,6 +2006,8 @@ def json_to_graph(json_string, preset, io_info=None, script_dir=None, output_byt
                         sn.type = layer_type.AVGPOOL_I8
                     elif current_data_type == calc_type.INT16:
                         sn.type = layer_type.AVGPOOL_I16
+                    elif current_data_type == calc_type.UINT8:
+                        sn.type = layer_type.AVGPOOL_U8
                     else:
                         print('error for averagepool')
 
@@ -1445,6 +2015,37 @@ def json_to_graph(json_string, preset, io_info=None, script_dir=None, output_byt
                 sn.type = layer_type.ABS_I16
                 if current_data_type == calc_type.INT8:
                     sn.type = layer_type.ABS_I8
+
+            elif op_type == 'Conv':
+                assert(json_sl['use_depthwise'])
+
+                attrs = ('kernels', 'channels', 'group', 'm', 'n',
+                         'kernel_shape', 'strides', 'dilations',
+                         'use_cvi', 'use_strided', 'use_depthwise')
+                for a in attrs:
+                    setattr(sn.depthwise, a, json_sl[a])
+
+                sn.depthwise.unsigned_input = json_sl['input_unsigned']
+                sn.depthwise.unsigned_output = json_sl['output_unsigned']
+                sn.kernel_shape = json_sl['kernel_shape']
+                sn.strides = json_sl['strides']
+                sn.dilation = json_sl['dilations']
+                sn.depthwise.weights = 0
+
+                if current_data_type == calc_type.INT8:
+                    assert(sn.depthwise.unsigned_input == 0)
+                elif current_data_type == calc_type.INT8:
+                    assert(sn.depthwise.unsigned_input == 1)
+
+                if current_data_type == calc_type.INT8:
+                    if sn.depthwise.unsigned_output == 1:
+                        current_data_type = calc_type.UINT8
+
+                if current_data_type == calc_type.UINT8:
+                    if sn.depthwise.unsigned_output == 0:
+                        current_data_type = calc_type.INT8
+
+                sn.type = layer_type.DEPTHWISE_CONV_I8
 
             elif op_type == 'PRelu':
                 sn.prelu.slope = len(weights)
@@ -1578,6 +2179,10 @@ def json_to_graph(json_string, preset, io_info=None, script_dir=None, output_byt
                     sn.type = layer_type.CAST_I16_I32
                     sn.cast.scale = int(scale_factor * (1 << (Q32-Q16)))
                     current_data_type = calc_type.INT32
+                elif type_conv == (calc_type.UINT8, calc_type.INT32):
+                    sn.type = layer_type.CAST_U8_I32
+                    sn.cast.scale = int(scale_factor * (1 << (Q32-U8)))
+                    current_data_type = calc_type.INT32
                 else:
                     print(current_data_type, node.output_data_type)
                     assert False, "BAD TYPES"
@@ -1596,8 +2201,10 @@ def json_to_graph(json_string, preset, io_info=None, script_dir=None, output_byt
 
         set_sublayer_attributes(node, node.subnode_array)
 
-        if(node.type == subgraph_type.CONV):
+        if node.type != subgraph_type.IDENTITY and node.sublayer_maps > 1:
+            raise NotImplementedError("Padding that adds channels must be in Identity layer")
 
+        if(node.type == subgraph_type.CONV):
             attrs = ('kernels', 'channels', 'group', 'm', 'n',
                      'kernel_shape', 'strides', 'dilations',
                      'use_cvi', 'use_strided', 'use_depthwise')
@@ -1607,266 +2214,9 @@ def json_to_graph(json_string, preset, io_info=None, script_dir=None, output_byt
             conv_populate_attributes(node, json_node, conv_cvi, sp_size, VECTOR_LANES, FILTER_COPIES, PARALLEL_OUTPUT_MAPS)
 
             conv = node.conv
-            # COEFFICIENTS
-            num_padded_weights = (
-                conv.kernel_shape[0]*conv.kernel_shape[1] *
-                (conv.channels//conv.group) * conv.padded_kernels)
 
-            num_weights = (conv.kernel_shape[0]*conv.kernel_shape[1] *
-                           (conv.channels/conv.group) * conv.kernels)
-            weights_f32 = base64_to_float_nparray(json_node['weights'])
-            layer_max_weight = np.max(np.abs(weights_f32))
-            assert num_weights == len(weights_f32)
-
-            weights_per_kernel = ((conv.channels//conv.group) *
-                                  conv.kernel_shape[0]*conv.kernel_shape[1])
-
-            num_biases = conv.kernels
-            biases_f32 = base64_to_float_nparray(json_node['biases'])
-            assert num_biases == len(biases_f32)
-
-            corr = None
-            if not(corrections is None):
-                desc = json_node['name']
-                if desc in corrections:
-                    corr = np.asarray(corrections[desc])
-                    biases_f32 = biases_f32 + corr
-
-            if INPUT_SIZE_BYTES == 1:
-                if node.input_unsigned:
-                    conv.bias_scalar = (1 << U8) - 1
-                    conv.bias_lower_scalar = 1
-                else:
-                    conv.bias_scalar = -((1 << Q8) - 1)
-                    conv.bias_lower_scalar = -1
-            else:
-                conv.bias_scalar = -(1 << Q16)
-                conv.bias_lower_scalar = 0
-
-            pow2 = False
-            QWEIGHT = 7
-            QSCALE = 7
-            QEXTRA = QWEIGHT + QSCALE - ACCUMULATOR_FXP_BITS - SCALE_FXP_BITS
-
-            if node.input_unsigned and not node.output_unsigned:
-                QEXTRA += 1
-            if node.output_unsigned and not node.input_unsigned:
-                QEXTRA -= 1
-
-            # skipped = 0
-            min_weight = 1.0 / (1 << 16)
-
-            scale_f32 = [0. for k in range(conv.kernels)]
-            scale_i16 = [0 for k in range(conv.kernels)]
-            shift_i16 = [QEXTRA for k in range(conv.kernels)]
-            weights_i16 = float_to_fixed_np(weights_f32, calc_type.INT16)
-            weights_i32 = float_to_fixed_np(weights_f32, calc_type.INT32)
-            biases_i16 = [float_to_fixed(f, calc_type.INT16) for f in biases_f32]
-            biases_lower_i16 = [0 for _ in biases_i16]
-
-            no_correction = corr is None and all_corrections is None
-            no_potential_correction = all_corrections and not (json_node['name'] in all_corrections_names)
-            use_bias_lower = False 
-            USE_ROUNDING = False
-            if no_correction or no_potential_correction:
-                USE_ROUNDING = True
-                use_bias_lower = True
-                for k in range(conv.kernels):
-                    k_weights = weights_f32[k*weights_per_kernel:(k+1)*weights_per_kernel]
-                    max_weight = np.max(np.abs(k_weights))
-
-                    if abs(biases_f32[k]) > max_weight:
-                        use_bias_lower = False
-
-            if VERBOSE:
-                weights_big = False
-                q_max = 0
-                weights_small = False
-                q_min = 8
-
-            for k in range(conv.kernels):
-                k_weights = weights_f32[k*weights_per_kernel:(k+1)*weights_per_kernel]
-                max_weight = np.max(np.abs(k_weights))
-                if abs(biases_f32[k]) > max_weight:
-                    max_weight = abs(biases_f32[k])
-
-
-                qweight = QWEIGHT
-                if NEXT:
-                    qin = 7
-                    qout = 7
-                    if node.input_unsigned:
-                        qin = 8
-                    if node.output_unsigned:
-                        qout = 8
-                    # mweight = 127./128*max_weight
-                    # mweight = 128./127*max_weight
-                    mweight = max_weight
-                    qdiff = ACCUMULATOR_FXP_BITS + SCALE_FXP_BITS + qout - qin
-                    qfactor = log2(mweight) + qweight
-                    qscale = qdiff + log2(mweight) - qweight
-
-                    if VERBOSE:
-                        if qscale > q_max:
-                            q_max = qscale
-                        if qscale < q_min:
-                            q_min = qscale
-
-                    if qscale < 0:
-                        if VERBOSE:
-                            print('small', node_n, k, qscale, max_weight, node.input_unsigned, node.output_unsigned)
-                            weights_small = True
-                        qscale = 0
-                    if qscale > 8:
-                        if VERBOSE:
-                            print('big', node_n, k, qscale, max_weight, node.input_unsigned, node.output_unsigned)
-                            weights_big = True
-                        qscale = 8
-                    if conv_cvi:
-                        scale_i16[k] = int(ceil(2**qscale)) - 1
-                        reqscale = log2(scale_i16[k]+1)
-                        scale_f32[k] = 2**(reqscale+qweight-qdiff)
-                else:
-                    if conv_cvi:
-                        if max_weight != 0.0:
-                            shift_i16 = max(QEXTRA, int(ceil(log2(max_weight * (1 << QSCALE)))))
-                            factor_i16 = max(QEXTRA, log2(max_weight * ((1 << QSCALE) + (1 << (QSCALE-QEXTRA-1)))))
-                        else:
-                            shift_i16 = QEXTRA
-                            factor_i16 = QEXTRA
-                        if pow2:
-                            scale_i16[k] = (1 << (shift_i16 - QEXTRA))-1
-                        else:
-                            scale_i16[k] = int(ceil(2**(factor_i16 - QEXTRA)))-1
-                        scale_f32[k] = 1.0 * (scale_i16[k]+1) / (1 << (QSCALE-QEXTRA))
-
-                if conv_cvi:
-                    if scale_f32[k] == 0.:
-                        k_weights_i16 = [0 for w in k_weights]
-                        weights_i16[k*weights_per_kernel:(k+1)*weights_per_kernel] = k_weights_i16
-                        biases_i16[k] = 0
-                    else:
-                        k_weights_i16 = float_to_fixed_np(k_weights/scale_f32[k], calc_type.INT16, COEFFICIENT_BITS-1, qweight)
-                        weights_i16[k*weights_per_kernel:(k+1)*weights_per_kernel] = k_weights_i16
-
-                        if node.input_unsigned:
-                            biases_i16[k] = float_to_fixed(biases_f32[k]/scale_f32[k], calc_type.INT16, COEFFICIENT_BITS-1, qweight, ROUNDING=USE_ROUNDING)
-                        else:
-                            biases_i16[k] = float_to_fixed(-biases_f32[k]/scale_f32[k], calc_type.INT16, COEFFICIENT_BITS-1, qweight, ROUNDING=USE_ROUNDING)
-
-                        if INPUT_SIZE_BYTES == 1 and use_bias_lower:
-                            if node.input_unsigned:
-                                biases_i16[k] = float_to_fixed(biases_f32[k]/scale_f32[k], calc_type.INT16, COEFFICIENT_BITS-1, qweight)
-                                biases_lower_i16[k] = float_to_fixed(1./255.*biases_f32[k]/scale_f32[k], calc_type.INT16, COEFFICIENT_BITS-1, qweight)
-                            else:
-                                biases_i16[k] = float_to_fixed(-biases_f32[k]/scale_f32[k], calc_type.INT16, COEFFICIENT_BITS-1, qweight)
-                                biases_lower_i16[k] = float_to_fixed(-1./127.*biases_f32[k]/scale_f32[k], calc_type.INT16, COEFFICIENT_BITS-1, qweight)
-
-            if not use_bias_lower:
-                conv.bias_lower_scalar = 0
-
-            if VERBOSE:
-                print('{}\t{:3.2f}\t{:3.2f}'.format(node_n, q_max, q_min))
-                if weights_big:
-                    print('big', node_n, node.input_unsigned, node.output_unsigned)
-                if weights_small:
-                    print('small', node_n, node.unsigned_input, node.unsigned_output)
-
-            type_size = 2 if INPUT_SIZE_BYTES == 1 else 1
-            if conv_cvi:
-                padded_scale = pad_weights16(scale_i16, conv.kernels, 1, 1, 1, 1, conv.padded_kernels, 1)
-                packed_scales = np.zeros(conv.padded_kernels*type_size, dtype=np.uint8)
-                for k in range(0, conv.padded_kernels, conv.maps):
-                    iscales = interleave_weights(padded_scale[k:k+conv.maps],
-                                                 1, conv.maps, 1, 1)
-                    packed_scales[k*type_size:(k*type_size)+conv.maps] = iscales
-                conv.scale = len(weights)
-                weights += packed_scales.tobytes()
-
-            else:
-                conv.scale = len(weights)
-                padded_scales = scale_i16 + [0]*(conv.padded_kernels-conv.kernels)
-                weights += struct.pack("{}H".format(conv.padded_kernels),
-                                       *padded_scales)
-
-            if conv_cvi:
-                padded_weights = pad_weights16(weights_i16.tolist(), conv.kernels,
-                                               conv.channels//conv.group,
-                                               conv.group,
-                                               conv.kernel_shape[0],
-                                               conv.kernel_shape[1],
-                                               conv.padded_kernels,
-                                               conv.channels//conv.group)
-                assert num_padded_weights == len(padded_weights)
-
-                packed_weights = np.zeros(num_padded_weights*type_size, dtype=np.uint8)
-
-
-                offset = ((conv.channels//conv.group) *
-                          conv.kernel_shape[0]*conv.kernel_shape[1])
-
-                for k in range(0, conv.padded_kernels, conv.maps):
-                    pack_weights(padded_weights[k*offset:], packed_weights[k*type_size*offset:], conv.kernel_shape[0], conv.kernel_shape[1], conv.channels//conv.group, conv.maps, 1, conv.maps)
-
-                if conv.use_depthwise:
-                    packed_weights = np.zeros(num_padded_weights*type_size + conv.padded_kernels*type_size*5, dtype=np.uint8)
-                    depthwise_pack_weights(padded_weights, packed_weights, scale_i16, conv.bias_scalar, biases_i16, conv.bias_lower_scalar, biases_lower_i16, conv.kernel_shape[0], conv.kernel_shape[1], conv.channels, conv.padded_kernels, conv.group)
-
-                conv.weights = len(weights)
-                weights += packed_weights.tobytes()
-
-            else:
-                conv.acc_maps = 0
-
-                conv.weights = len(weights)
-                fmt = "{}h".format(num_padded_weights)
-                weights += struct.pack(fmt,
-                                       *weights_i16)
-                conv.weights32 = len(weights)
-                fmt = "{}i".format(num_padded_weights)
-                weights += struct.pack(fmt,
-                                       *weights_i32)
-            if not conv_cvi:
-                conv.use_weights32 = 1 if layer_max_weight > 1.0 * (1 << ((16-1)-Q16)) else 0
-
-            packed_biases = []
-            packed_biases_lower = []
-
-            if conv_cvi:
-                padded_biases = pad_weights16(biases_i16,
-                                              conv.kernels, 1, 1, 1, 1,
-                                              conv.padded_kernels, 1)
-                packed_biases = np.zeros(conv.padded_kernels*type_size, dtype=np.uint8)
-                offset = 1
-                for k in range(0, conv.padded_kernels, conv.maps):
-                    interleaved_biases = interleave_weights(padded_biases[k:k+conv.maps],
-                                                            1, conv.maps,
-                                                            1, 1)
-                    packed_biases[k*type_size:k*type_size + conv.maps] = interleaved_biases
-                conv.biases = len(weights)
-                weights += packed_biases.tobytes()
-
-                padded_biases_lower = pad_weights16(biases_lower_i16,
-                                                    conv.kernels, 1, 1, 1, 1,
-                                                    conv.padded_kernels, 1)
-                packed_biases_lower = np.zeros(conv.padded_kernels*type_size, dtype=np.uint8)
-                offset = 1
-                for k in range(0, conv.padded_kernels, conv.maps):
-                    interleaved_biases_lower = interleave_weights(padded_biases_lower[k:k+conv.maps],
-                                                                  1, conv.maps,
-                                                                  1, 1)
-                    packed_biases_lower[k*type_size:k*type_size + conv.maps] = interleaved_biases_lower
-
-                conv.biases_lower = len(weights)
-                weights += packed_biases_lower.tobytes()
-            else:
-                conv.biases = len(weights)
-                weights += struct.pack("{}h".format(len(biases_i16)),
-                                       *biases_i16)
-                conv.biases_lower = len(weights)
-                weights += struct.pack("{}h".format(len(biases_i16)),
-                                       *biases_i16)
-
+            conv_pack_parameters(weights, conv_cvi, conv.padded_kernels, conv.maps, node.input_unsigned, node.output_unsigned, conv, json_node, corrections, all_corrections, all_corrections_names)
+                
         elif node.type == subgraph_type.IDENTITY:
             identity = node.identity
             identity_bytes = 1
@@ -1885,15 +2235,27 @@ def json_to_graph(json_string, preset, io_info=None, script_dir=None, output_byt
             identity.core_split = 1
             identity.core_maps = ceil(identity.maps / CORES)
 
-            max_maps = max_ident_maps(identity.m + node.sublayer_rows, identity.n + node.sublayer_columns, sp_size, identity_bytes)
-            if max_maps > 1:
+            if len(node.subnode_array):
+                dma_split = 4
+                if dma_split > identity.maps:
+                    dma_split = identity.maps
+            else:
+                dma_split = 1
+            dma_split = 1 #TODO
+
+            max_maps = max_ident_maps(identity.m + node.sublayer_rows, identity.n + node.sublayer_columns, sp_size, identity_bytes, dma_split)
+            if max_maps - node.sublayer_maps > 1:
                 identity.maps = identity.core_maps
-                while identity.maps > max_maps:
+                while identity.maps > max_maps - node.sublayer_maps:
                     identity.maps //= 2
             else:
                 identity.maps = 1
 
-            identity.rows = max_ident_maps(identity.maps, identity.n + node.sublayer_columns, sp_size, identity_bytes)-node.sublayer_rows
+            if dma_split > identity.maps:
+                dma_split = identity.maps
+
+
+            identity.rows = max_ident_maps(identity.maps + node.sublayer_maps, identity.n + node.sublayer_columns, sp_size, identity_bytes, dma_split) - node.sublayer_rows
 
             if identity.rows > identity.m:
                 identity.rows = identity.m
@@ -1906,7 +2268,9 @@ def json_to_graph(json_string, preset, io_info=None, script_dir=None, output_byt
 
             node.scratchpad_bytes = ((identity.rows + node.sublayer_rows) *
                                      (identity.n + node.sublayer_columns) *
-                                     identity.maps * identity_bytes)
+                                     (identity.maps + node.sublayer_maps)* identity_bytes)
+
+            node.dma_split = dma_split
 
         elif node.type == subgraph_type.SUM:
             # Dont use shortcut here since sum is a builtin name
@@ -1969,12 +2333,12 @@ def json_to_graph(json_string, preset, io_info=None, script_dir=None, output_byt
                                   *[sublayer_bytes(sn.type) for sn in node.subnode_array])
             map_size = node.output_shape[1]*node.output_shape[2]
             maps_at_once= sp_size//(2*map_size*calc_bytes)
-            if maps_at_once >node.output_shape[0]:
+            if maps_at_once > node.output_shape[0]:
                 maps_at_once = node.output_shape[0]
 
-            node.transpose.permutation=json_node['permutation']
-            node.transpose.out_maps_at_once=maps_at_once;
-            node.scratchpad_bytes = maps_at_once*map_size*calc_bytes;
+            node.transpose.permutation = json_node['permutation']
+            node.transpose.out_maps_at_once = maps_at_once
+            node.scratchpad_bytes = maps_at_once*map_size*calc_bytes
         elif node.type == subgraph_type.RESIZE:
             node.resize.channels = json_node["channels"]
             node.resize.mode = {"nearest":resize_mode.NEAREST,
@@ -2032,6 +2396,20 @@ def json_to_graph(json_string, preset, io_info=None, script_dir=None, output_byt
             weights += float_array_to_weights(biases_f32, calc_type.INT16)
             node.scratchpad_bytes = 2*gemm.max_output_size
 
+        prefetch_subnodes = []
+        for sn in node.subnode_array:
+            if sn.type == layer_type.DEPTHWISE_CONV_I8:
+                json_nodes = [json_sl for json_sl in  json_node['sublayers'] if json_sl['op_type'] == "Conv"]
+                assert(len(json_nodes) == 1)
+                json_node = json_nodes[0]
+                conv_pack_parameters(weights, True, node.conv.padded_kernels, node.conv.maps//node.dma_split, sn.depthwise.unsigned_input, sn.depthwise.unsigned_output, sn.depthwise, json_node, corrections, all_corrections, all_corrections_names)
+
+                prefetch_sn = Subnode()
+                prefetch_sn.type = layer_type.PREFETCH
+                prefetch_sn.prefetch.memory_offset = sn.depthwise.weights
+                prefetch_subnodes.append(prefetch_sn)
+        node.subnode_array = prefetch_subnodes + node.subnode_array
+
 
     # setup graph object
     graph = Graph()
@@ -2043,7 +2421,7 @@ def json_to_graph(json_string, preset, io_info=None, script_dir=None, output_byt
     weights += io_nodes.tobytes()
 
     io_buffer_size = [sz for sz in js['buffers']]
-    
+
     REUSE_IO_MEMORY = all_corrections is None
     if REUSE_IO_MEMORY:
         # determine when each i/o buffer should be allocated and deallocated, and find its size in bytes
@@ -2208,8 +2586,6 @@ def json_to_graph(json_string, preset, io_info=None, script_dir=None, output_byt
         n.sublayers = subnode_offset
         n.num_sublayers = len(n.subnode_array)
         subnode_offset += len(n.subnode_array)*subnode_size
-
-    # print('l, sl:', len(Nodes), len(all_subnode_array))
 
     for sn in all_subnode_array:
         sn.update_offsets(weights_offset)

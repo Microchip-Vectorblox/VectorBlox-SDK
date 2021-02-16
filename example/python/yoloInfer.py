@@ -34,7 +34,6 @@ if __name__ == "__main__":
             
     # pre-processing
     img = cv2.imread(args.image)
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     imgDims = np.array(img.shape[:2])
     inputDims = np.array([ioCfg[0]['height'], ioCfg[0]['width']])
     resizeRatio = np.min(inputDims/imgDims)
@@ -135,5 +134,5 @@ if __name__ == "__main__":
         short_name = class_name.split(',')[0]
         cv2.putText(imgOut, short_name, pText, cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2, cv2.LINE_AA)
     
-    cv2.imwrite(args.output, cv2.cvtColor(imgOut, cv2.COLOR_RGB2BGR))
+    cv2.imwrite(args.output, imgOut)
     

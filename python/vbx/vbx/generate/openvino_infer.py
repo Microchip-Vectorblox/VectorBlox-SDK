@@ -11,21 +11,6 @@ np.set_printoptions(suppress=True, precision=4, linewidth=120)
 np.random.seed(1337)
 
 
-#def load_image(image_src, scale=255.0, channels=3):
-#    if channels == 3:
-#        img = cv2.imread(image_src)
-#        arr = img.swapaxes(1, 2).swapaxes(0, 1).astype(np.float32)
-#    else:
-#        img = cv2.imread(image_src, 0)
-#        arr = img.astype(np.float32)
-#        arr = np.expand_dims(arr, axis=0)
-#    if scale != 255.0:
-#        arr = arr / 255. * scale
-#    arr = np.expand_dims(arr, axis=0)
-#
-#    return arr
-
-
 def openvino_activations(xml, weights, input_array, extension=None):
     core = ie.IECore()
     net = core.read_network(model=xml, weights=weights)
@@ -94,7 +79,7 @@ def main():
     args = parser.parse_args()
 
     weights=args.xml.replace('.xml', '.bin')
-    input_array = load_image(args.image, args.scale)
+    input_array = load_image(args.image, args.scale, channels=args.channels)
     if args.yolo:
         outputs = openvino_infer(args.xml, weights, input_array, args.extension, True)
         if '2' in args.xml and 'tiny' not in args.xml:

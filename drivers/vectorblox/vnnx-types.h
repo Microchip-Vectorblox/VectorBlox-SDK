@@ -42,36 +42,41 @@ typedef enum {
 	ABS_I16=3,
 	CLIP_I8=4,
 	CLIP_I16=5,
-	AVGPOOL_I8=6,  ///< AVERAGE POOL with bytes
-	AVGPOOL_I16=7,  ///< AVERAGE POOL with halfs
-	MAXPOOL_U8 =8,  ///< MAXPOOL with bytes and stride or size greater than 2
-	MAXPOOL_I8 =9,  ///< MAXPOOL with bytes and stride or size greater than 2
-	MAXPOOL_I16=10, ///< MAXPOOL with halfwords and stride or size greater than 2
-	CAST_I16_I8=11,  ///< Convert type from halfs to bytes
-	CAST_I16_I32=12,  ///< Convert type from halfs to bytes
-	CAST_I32_I16=13,  ///< Convert type from words to halfs
-	CAST_U8_I16=14,  ///< Convert type from ubytes to halfs
-	CAST_U8_I8=15,  ///< Convert type from ubytes to bytes
-	CAST_I8_I16=16,  ///< Convert type from bytes to halfs
-	CAST_I8_I32=17,  ///< Convert type from bytes to halfs
-	LEAKYRELU_I8=18, ///< Leaky Relu on bytes
-	LEAKYRELU_I16=19, ///< Leaky Relu on halfwords
-	RELU_I8=20, ///< Relu on bytes
-	RELU_I16=21, ///< Relu on halfwords
-	PRELU_I8=22, ///< PRelu on bytes
-	PRELU_I16=23, ///< PRelu on halfwords
-	PADCONST_U8=24,  ///< Pad Const with bytes
-	PADCONST_I8=25,  ///< Pad Const with bytes
-	PADCONST_I16=26, ///< Pad Const with halfwords
-	MUL_BC3_I8=27,  ///< Multiply const with bytes
-	MUL_BC3_I16=28, ///< Multiply const with halfwords
-	MUL_BC3_U8=29,  ///< Multiply const with unsigned bytes
-	MUL_BC3_U16=30, ///< Multiply const with unsigned halfwords
-	MUL_BC2_I8=31,  ///< Multiply consts per channel with bytes
-	MUL_BC2_I16=32, ///< Multiply consts per channel with halfwords
-	ADD_I8 =33,  ///< Add consts per channel with bytes
-	ADD_I16=34, ///< Add consts per channel with halfwords
-	LAYER_UNKNOWN=35
+	AVGPOOL_U8=6,  ///< AVERAGE POOL with unsigned bytes
+	AVGPOOL_I8=7,  ///< AVERAGE POOL with bytes
+	AVGPOOL_I16=8,  ///< AVERAGE POOL with halfs
+	MAXPOOL_U8 =9,  ///< MAXPOOL with bytes and stride or size greater than 2
+	MAXPOOL_I8 =10,  ///< MAXPOOL with bytes and stride or size greater than 2
+	MAXPOOL_I16=11, ///< MAXPOOL with halfwords and stride or size greater than 2
+	CAST_I16_I8=12,  ///< Convert type from halfs to bytes
+	CAST_I16_I32=13,  ///< Convert type from halfs to bytes
+	CAST_I32_I16=14,  ///< Convert type from words to halfs
+	CAST_U8_I16=15,  ///< Convert type from ubytes to halfs
+	CAST_U8_I8=16,  ///< Convert type from ubytes to bytes
+	CAST_U8_I32=17,  ///< Convert type from ubytes to bytes
+	CAST_I8_I16=18,  ///< Convert type from bytes to halfs
+	CAST_I8_I32=19,  ///< Convert type from bytes to halfs
+	DEPTHWISE_CONV_I8=20,  ///< In-scratch Depthwise Convolution CVI
+	LEAKYRELU_I8=21, ///< Leaky Relu on bytes
+	LEAKYRELU_I16=22, ///< Leaky Relu on halfwords
+	RELU_I8=23, ///< Relu on bytes
+	RELU_I16=24, ///< Relu on halfwords
+	PRELU_I8=25, ///< PRelu on bytes
+	PRELU_I16=26, ///< PRelu on halfwords
+	PADCONST_U8=27,  ///< Pad Const with bytes
+	PADCONST_I8=28,  ///< Pad Const with bytes
+	PADCONST_I16=29, ///< Pad Const with halfwords
+	MUL_BC3_I8=30,  ///< Multiply const with bytes
+	MUL_BC3_I16=31, ///< Multiply const with halfwords
+	MUL_BC3_U8=32,  ///< Multiply const with unsigned bytes
+	MUL_BC3_U16=33, ///< Multiply const with unsigned halfwords
+	MUL_BC2_I8=34,  ///< Multiply consts per channel with bytes
+	MUL_BC2_I16=35, ///< Multiply consts per channel with halfwords
+	ADD_U8 =36,  ///< Add consts per channel with unsigned bytes
+	ADD_I8 =37,  ///< Add consts per channel with bytes
+	ADD_I16=38, ///< Add consts per channel with halfwords
+	PREFETCH=39, ///< Prefetch DMA for later sublayer
+	LAYER_UNKNOWN=40
 } layer_type_e;
 
 /**
@@ -83,7 +88,9 @@ typedef struct {
     int total_input_channels;
 	void* sp_in;
 	void* sp_out;
+	void* sp_prefetch;
 	int32_t sp_bytes;
+	int32_t sp_prefetch_bytes_per_map;
 	int64_t graph_pointer;
 } vnnx_layer_info_t;
 
@@ -100,6 +107,7 @@ typedef STRUCT_PACKED vnnx_layer{
 	int32_t output_data_type;
 	int32_t strides[2];
 	int32_t kernel_shape[2];
+	int32_t dilations[2];
 	int32_t pads[6];
 	int32_t maps;
 	union{
@@ -110,6 +118,11 @@ typedef STRUCT_PACKED vnnx_layer{
 			float min;
 			float max;
 		}clip;
+		STRUCT_PACKED{
+			int32_t unsigned_input;
+			int32_t unsigned_output;
+			obj_off_t weights;
+		}depthwise;
 		STRUCT_PACKED{
 			obj_off_t slope;
 		}prelu;
@@ -140,6 +153,9 @@ typedef STRUCT_PACKED vnnx_layer{
 		STRUCT_PACKED{
 			int ceil_mode;
 		}pool;
+		STRUCT_PACKED{
+			obj_off_t memory_offset;
+		}prefetch;
 	};
 } vnnx_layer_t;
 
@@ -160,6 +176,7 @@ typedef STRUCT_PACKED vnnx_subgraph_node {
 	int32_t output_size;
 	int32_t output_strides[2];
 	int32_t scratchpad_bytes;
+	int32_t dma_split;
 	int32_t dma_channel_offset;
 	int32_t dma_buffer_offset;
 
@@ -179,6 +196,7 @@ typedef STRUCT_PACKED vnnx_subgraph_node {
 	int32_t sublayer_shape_last;
 	int32_t sublayer_rows;
 	int32_t sublayer_columns;
+	int32_t sublayer_scratchpad_per_map;
 	int32_t use_replay;
 	obj_off_t replay_buffer;
 	int32_t replay_buffer_size;
@@ -202,6 +220,8 @@ typedef STRUCT_PACKED vnnx_subgraph_node {
 			int32_t maps;
 			int32_t acc_maps;
 			int32_t rows;
+			int32_t inc_rows;
+			int32_t conv_rows;
 			int32_t core_split;
 			int32_t core_maps;
 			int32_t core_m;

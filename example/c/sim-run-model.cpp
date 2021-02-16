@@ -63,7 +63,7 @@ int main(int argc, char** argv){
 
 	//On hardware these two variables would be set with real values
 	//because this is for the simulator, we use NULL
-	volatile void* ctrl_reg_addr = NULL;
+	void* ctrl_reg_addr = NULL;
 	void* firmware_blob = NULL;
 	vbx_cnn_t* vbx_cnn = vbx_cnn_init(ctrl_reg_addr,firmware_blob);
 

@@ -81,7 +81,7 @@ def generate_vnnx(xml_filename,
 
 
     # convert ONNX to graph binary
-    json_string = onnx_to_json.run_generate_graph(onnx_model_post, onnx_stats, io_info, image)
+    json_string = onnx_to_json.run_generate_graph(onnx_model_post, onnx_stats, io_info, image, inline_depthwise=True)
     with open(graph_json, 'w') as jf:
         jf.write(json_string)
     if bias_correction:

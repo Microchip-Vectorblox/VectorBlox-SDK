@@ -33,6 +33,7 @@ converter --input_model yolov2-tiny-voc.onnx \
 --framework onnx \
 --input_shape [1,3,416,416] \
 --scale_values=[255.] \
+--reverse_input_channels \
 --static_shape
 
 echo "Generating VNNX for V1000 configuration..."
