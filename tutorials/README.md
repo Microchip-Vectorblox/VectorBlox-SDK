@@ -11,9 +11,9 @@ Below is a list of included tutorials
 
 | Tutorial Name | Source Framework| Task  |Accuracy Metric|Accuracy Score|V1000 kcycles|V500 kcycles|V250 kcycles| More information |
 | ------------- |-----------------|-------|---------------|--------------|------------|-----------|-----------|----|
-|[mobilenet-v1-1.0-224](caffe/mobilenet-v1-1.0-224/mobilenet-v1-1.0-224.sh)|caffe|Classification|topk|65.4|1623|2538||[More Info](https://github.com/opencv/open_model_zoo/blob/2019_R3.1/models/public/mobilenet-v1-1.0-224/mobilenet-v1-1.0-224.md)|
+|[mobilenet-v1-1.0-224](caffe/mobilenet-v1-1.0-224/mobilenet-v1-1.0-224.sh)|caffe|Classification|topk|65.4|1623|2538|6010|[More Info](https://github.com/opencv/open_model_zoo/blob/2019_R3.1/models/public/mobilenet-v1-1.0-224/mobilenet-v1-1.0-224.md)|
 |[mobilenet-v2](caffe/mobilenet-v2/mobilenet-v2.sh)|caffe|Classification|topk|70|2037|2757|6143|[More Info](https://github.com/opencv/open_model_zoo/blob/2019_R3.1/models/public/mobilenet-v2/mobilenet-v2.md)|
-|[mobilenet-v1-1.0-224-tf](tensorflow/mobilenet-v1-1.0-224-tf/mobilenet-v1-1.0-224-tf.sh)|tensorflow|Classification|topk|68.8|1613|2505||[More Info](https://github.com/opencv/open_model_zoo/blob/2019_R3.1/models/public/mobilenet-v1-1.0-224-tf/mobilenet-v1-1.0-224-tf.md)|
+|[mobilenet-v1-1.0-224-tf](tensorflow/mobilenet-v1-1.0-224-tf/mobilenet-v1-1.0-224-tf.sh)|tensorflow|Classification|topk|68.8|1613|2505|5641|[More Info](https://github.com/opencv/open_model_zoo/blob/2019_R3.1/models/public/mobilenet-v1-1.0-224-tf/mobilenet-v1-1.0-224-tf.md)|
 |[mobilenet-v2-1.0-224](tensorflow/mobilenet-v2-1.0-224/mobilenet-v2-1.0-224.sh)|tensorflow|Classification|topk|69|1710|2191|4538|[More Info](https://github.com/opencv/open_model_zoo/blob/2019_R3.1/models/public/mobilenet-v2-1.0-224/mobilenet-v2-1.0-224.md)|
 |[mobilenet-v2-1.4-224](tensorflow/mobilenet-v2-1.4-224/mobilenet-v2-1.4-224.sh)|tensorflow|Classification|topk|74.8|2625|3575|7665|[More Info](https://github.com/opencv/open_model_zoo/blob/2019_R3.1/models/public/mobilenet-v2-1.4-224/mobilenet-v2-1.4-224.md)|
 |[resnet-50-tf](tensorflow/resnet-50-tf/resnet-50-tf.sh)|tensorflow|Classification|topk|75.2|8786|16999|35505|[More Info](https://github.com/openvinotoolkit/open_model_zoo/blob/master/models/public/resnet-50-tf/resnet-50-tf.md)|
