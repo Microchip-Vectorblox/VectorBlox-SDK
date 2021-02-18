@@ -24,9 +24,9 @@ Below is a list of included tutorials
 |[mnist](onnx/mnist/mnist.sh)|onnx|Classification|||21|20|27|[More Info](https://github.com/onnx/models/tree/master/vision/classification/mnist)|
 |[torchvision_resnet50](pytorch/torchvision_resnet50/torchvision_resnet50.sh)|pytorch|Classification|topk|75.2|8909|17116|35766|[More Info](https://pytorch.org/docs/stable/torchvision/models.html)|
 |[torchvision_wide_resnet50_2](pytorch/torchvision_wide_resnet50_2/torchvision_wide_resnet50_2.sh)|pytorch|Classification|topk|76.2||||[More Info](https://pytorch.org/docs/stable/torchvision/models.html)|
-|[yolov2-tiny-voc](darknet/yolov2-tiny-voc/yolov2-tiny-voc.sh)|darknet|Object Detection|VOCmAP|54.06|8907|10303|19703|[More Info](https://pjreddie.com/darknet/yolo/)|
-|[yolov2-tiny](darknet/yolov2-tiny/yolov2-tiny.sh)|darknet|Object Detection|COCOmAP|27.02|9056||16058|[More Info](https://pjreddie.com/darknet/yolo/)|
-|[yolov3-tiny](darknet/yolov3-tiny/yolov3-tiny.sh)|darknet|Object Detection|COCOmAP|39.71|10147|8365|16805|[More Info](https://pjreddie.com/darknet/yolo/)|
+|[yolov2-tiny-voc](darknet/yolov2-tiny-voc/yolov2-tiny-voc.sh)|darknet|Object Detection|VOCmAP|54.06|5852|10303|19703|[More Info](https://pjreddie.com/darknet/yolo/)|
+|[yolov2-tiny](darknet/yolov2-tiny/yolov2-tiny.sh)|darknet|Object Detection|COCOmAP|27.02|4844|8300|16058|[More Info](https://pjreddie.com/darknet/yolo/)|
+|[yolov3-tiny](darknet/yolov3-tiny/yolov3-tiny.sh)|darknet|Object Detection|COCOmAP|39.71|4895|8365|16805|[More Info](https://pjreddie.com/darknet/yolo/)|
 |[yolov2-voc](darknet/yolov2-voc/yolov2-voc.sh)|darknet|Object Detection|VOCmAP|69.99||||[More Info](https://pjreddie.com/darknet/yolo/)|
 |[yolov3](darknet/yolov3/yolov3.sh)|darknet|Object Detection||||||[More Info](https://pjreddie.com/darknet/yolo/)|
 |[yolov2](darknet/yolov2/yolov2.sh)|darknet|Object Detection|||43905||199662|[More Info](https://pjreddie.com/darknet/yolo/)|
