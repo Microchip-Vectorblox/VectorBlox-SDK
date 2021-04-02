@@ -22,7 +22,7 @@ fi
 source $VBX_SDK/vbx_env/bin/activate
 
 echo "Downloading mnist..."
-wget https://media.githubusercontent.com/media/onnx/models/master/vision/classification/mnist/model/mnist-1.onnx
+wget https://media.githubusercontent.com/media/onnx/models/master/vision/classification/mnist/model/mnist-1.onnx -O mnist-1.onnx
 
 echo "Running Model Optimizer..."
 # model details @ https://github.com/onnx/models/tree/master/vision/classification/mnist

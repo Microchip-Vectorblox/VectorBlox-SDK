@@ -13,7 +13,12 @@ from .onnx_infer import onnx_infer, onnx_activations_batched, onnx_random_infer,
 from .utils import *
 import sys
 
+
 np.set_printoptions(suppress=True, precision=4, linewidth=120)
+
+
+def trunc(arr, decimals=8):
+    return np.trunc(arr*10**decimals)/(10**decimals)
 
 
 def gather_stats(onnx_model, nodes, folder, count, scale):
@@ -27,8 +32,9 @@ def gather_stats(onnx_model, nodes, folder, count, scale):
     input_shape = onnx_helper.get_model_input_shape(onnx_model)
 
     channels = input_shape[0]
-    input_shape = (input_shape[2],input_shape[1])
-    input_arrays = np.vstack([load_image(i, input_shape=input_shape,channels=channels) for i in images])
+    height = input_shape[1]
+    width = input_shape[2]
+    input_arrays = np.vstack([load_image(i, scale, channels, height, width) for i in images])
     stats = onnx_activations_batched(onnx_model, input_arrays, stats_only=True)
 
     stats_list = []
@@ -151,14 +157,14 @@ def gen_conv(vinode):
         tensor = onnx.helper.make_tensor('W{}'.format(vinode.id),
                 onnx.TensorProto.FLOAT,
                 weights_shape,
-                vinode.weights['arr'].tolist(),
+                trunc(vinode.weights['arr']).tolist(),
                 )
         inits.append(tensor)
     if vinode.biases:
         tensor = onnx.helper.make_tensor('b{}'.format(vinode.id),
                 onnx.TensorProto.FLOAT,
                 (as_int(vinode.data['output']),),
-                vinode.biases['arr'].tolist(),
+                trunc(vinode.biases['arr']).tolist(),
                 )
         inits.append(tensor)
 
@@ -237,7 +243,7 @@ def gen_conv_10(vinode, bias_vinode, vinodes):
         tensor = onnx.helper.make_tensor('W{}'.format(node_id),
                 onnx.TensorProto.FLOAT,
                 as_int(weights.data['shape']),
-                weights.data['arr'].tolist(),
+                trunc(weights.data['arr']).tolist(),
                 )
         inits.append(tensor)
 
@@ -245,7 +251,7 @@ def gen_conv_10(vinode, bias_vinode, vinodes):
         tensor = onnx.helper.make_tensor('b{}'.format(node_id),
                 onnx.TensorProto.FLOAT,
                 as_int(biases.data['shape'])[1:2],
-                biases.data['arr'].tolist(),
+                trunc(biases.data['arr']).tolist(),
                 )
         inits.append(tensor)
 
@@ -305,7 +311,7 @@ def gen_group_conv_10(vinode, bias_vinode, vinodes):
         tensor = onnx.helper.make_tensor('W{}'.format(node_id),
                 onnx.TensorProto.FLOAT,
                 kernel_shape,
-                weights.data['arr'].tolist(),
+                trunc(weights.data['arr']).tolist(),
                 )
         inits.append(tensor)
 
@@ -313,7 +319,7 @@ def gen_group_conv_10(vinode, bias_vinode, vinodes):
         tensor = onnx.helper.make_tensor('b{}'.format(node_id),
                 onnx.TensorProto.FLOAT,
                 as_int(biases.data['shape'])[1:2],
-                biases.data['arr'].tolist(),
+                trunc(biases.data['arr']).tolist(),
                 )
         inits.append(tensor)
 
@@ -445,7 +451,7 @@ def gen_multiply_10(vinode, vinodes):
         tensor = onnx.helper.make_tensor('W{}'.format(vinode.id),
                 onnx.TensorProto.FLOAT,
                 as_int(weights.data['shape'])[1:],
-                weights.data['arr'].tolist(),
+                trunc(weights.data['arr']).tolist(),
                 )
         inits.append(tensor)
 
@@ -488,7 +494,7 @@ def gen_add_10(vinode, vinodes):
             tensor = onnx.helper.make_tensor('b{}'.format(vinode.id),
                     onnx.TensorProto.FLOAT,
                     as_int(biases.data['shape'])[1:],
-                    biases.data['arr'].tolist(),
+                    trunc(biases.data['arr']).tolist(),
                     )
             inits.append(tensor)
 
@@ -1067,7 +1073,7 @@ def gen_scaleshift(vinode):
         tensor = onnx.helper.make_tensor('W{}'.format(vinode.id),
                 onnx.TensorProto.FLOAT,
                 shape,
-                vinode.weights['arr'].tolist(),
+                trunc(vinode.weights['arr']).tolist(),
                 )
         inits.append(tensor)
 
@@ -1075,7 +1081,7 @@ def gen_scaleshift(vinode):
         tensor = onnx.helper.make_tensor('b{}'.format(vinode.id),
                 onnx.TensorProto.FLOAT,
                 shape,
-                vinode.biases['arr'].tolist(),
+                trunc(vinode.biases['arr']).tolist(),
                 )
         inits.append(tensor)
 
@@ -1232,14 +1238,14 @@ def gen_fullyconnected(vinode, prev_vinode):
         tensor = onnx.helper.make_tensor('W{}'.format(vinode.id),
                 onnx.TensorProto.FLOAT,
                 (output_size, input_size),
-                vinode.weights['arr'].tolist(),
+                trunc(vinode.weights['arr']).tolist(),
                 )
         inits.append(tensor)
     if vinode.biases:
         tensor = onnx.helper.make_tensor('b{}'.format(vinode.id),
                 onnx.TensorProto.FLOAT,
                 (output_size,),
-                vinode.biases['arr'].tolist(),
+                trunc(vinode.biases['arr']).tolist(),
                 )
         inits.append(tensor)
 
@@ -1293,14 +1299,14 @@ def gen_matmul(vinode, prev_vinode):
         tensor = onnx.helper.make_tensor('W{}'.format(vinode.id),
                 onnx.TensorProto.FLOAT,
                 (output_size, input_size),
-                vinode.weights['arr'].tolist(),
+                trunc(vinode.weights['arr']).tolist(),
                 )
         inits.append(tensor)
     if vinode.biases:
         tensor = onnx.helper.make_tensor('b{}'.format(vinode.id),
                 onnx.TensorProto.FLOAT,
                 (output_size,),
-                vinode.biases['arr'].tolist(),
+                trunc(vinode.biases['arr']).tolist(),
                 )
         inits.append(tensor)
 
@@ -1363,7 +1369,7 @@ def gen_matmul_10(vinode, bias_vinode, prev_vinode, vinodes):
         tensor = onnx.helper.make_tensor('W{}'.format(vinode.id),
                 onnx.TensorProto.FLOAT,
                 as_int(weights.data['shape']),
-                weights.data['arr'].tolist(),
+                trunc(weights.data['arr']).tolist(),
                 )
         inits.append(tensor)
 
@@ -1371,7 +1377,7 @@ def gen_matmul_10(vinode, bias_vinode, prev_vinode, vinodes):
         tensor = onnx.helper.make_tensor('b{}'.format(vinode.id),
                 onnx.TensorProto.FLOAT,
                 as_int(biases.data['shape'])[1:2],
-                biases.data['arr'].tolist(),
+                trunc(biases.data['arr']).tolist(),
                 )
         inits.append(tensor)
 

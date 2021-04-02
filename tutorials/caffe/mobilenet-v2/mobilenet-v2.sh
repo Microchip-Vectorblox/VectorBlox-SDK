@@ -31,7 +31,7 @@ converter --input_model public/mobilenet-v2/mobilenet-v2.caffemodel \
 --scale_values [58.82]
 
 echo "Generating VNNX for V1000 configuration..."
-generate_vnnx -x mobilenet-v2.xml  -c V1000 -f ../../sample_images -o mobilenet-v2.vnnx
+generate_vnnx -x mobilenet-v2.xml  -c V1000 -f ../../sample_images -o mobilenet-v2.vnnx --bias-correction
 
 echo "Running Simulation..."
 python $VBX_SDK/example/python/imagenet.py mobilenet-v2.vnnx ../../oreo.224.jpg

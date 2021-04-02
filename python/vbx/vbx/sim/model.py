@@ -100,7 +100,7 @@ class Model:
             return cycles/Hz
         else :
             return cycles
-def main(model_bytes,expected_checksum):
+def main(model_bytes,expected_checksum,verbose=True):
 
 
     m = Model(model_bytes)
@@ -109,11 +109,12 @@ def main(model_bytes,expected_checksum):
     checksum = Fletcher32(odata[0])
     for od in odata[1:]:
         checksum = checksum ^ Fletcher32(od)
-    print("dma_bytes = {}".format(m.get_bandwidth_per_run()))
-    print("instr_cycles = {}".format(m.get_estimated_runtime()))
-    print("checksum = {:x}".format(checksum))
+    if verbose:
+        print("dma_bytes = {}".format(m.get_bandwidth_per_run()))
+        print("instr_cycles = {}".format(m.get_estimated_runtime()))
+        print("checksum = {:x}".format(checksum))
 
     if expected_checksum is not None:
         if checksum != expected_checksum:
-            return 1
+            return checksum
     return 0

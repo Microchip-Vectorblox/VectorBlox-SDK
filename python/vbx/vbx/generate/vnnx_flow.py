@@ -89,12 +89,16 @@ def generate_vnnx(xml_filename,
     else:
         graph_binary = json_to_graph.json_to_graph(json_string, size_conf, io_info=io_info, output_bytes=output_bytes)
 
+    # clean up
+    if not keep_temp:
+        tmp_dir_obj.cleanup()
+
     if output_filename:
         import subprocess
         with open(output_filename, "wb") as output_file:
             output_file.write(graph_binary)
         hexfile = os.path.splitext(output_filename)[0]+".hex"
         subprocess.check_call(["objcopy", "-Ibinary","-Oihex", output_filename, hexfile])
-
     else:
         return graph_binary
+

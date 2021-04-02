@@ -1638,8 +1638,11 @@ def conv_pack_parameters(weights, conv_cvi, padded_kernels, maps, input_unsigned
             qout = 8
         mweight = max_weight
         qdiff = ACCUMULATOR_FXP_BITS + SCALE_FXP_BITS + qout - qin
-        qfactor = log2(mweight) + qweight
-        qscale = qdiff + log2(mweight) - qweight
+
+        if mweight == 0:
+            qscale = 0
+        else:
+            qscale = qdiff + log2(mweight) - qweight
 
         if VERBOSE:
             if qscale > q_max:

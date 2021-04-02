@@ -47,7 +47,7 @@ converter --input_model blazeface.onnx \
 --static_shape
 
 echo "Generating VNNX for V1000 configuration..."
-generate_vnnx -x blazeface.xml  -c V1000 -f ../../sample_images -o BlazeFace.vnnx
+generate_vnnx -x blazeface.xml  -c V1000 -f ../../sample_images -o BlazeFace.vnnx --bias-correction
 
 echo "Running Simulation..."
 python $VBX_SDK/example/python/blazeface.py -a BlazeFace-PyTorch/anchors.npy BlazeFace.vnnx BlazeFace-PyTorch/3faces.png

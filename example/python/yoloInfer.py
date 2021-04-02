@@ -14,6 +14,9 @@ if __name__ == "__main__":
     parser.add_argument('-j', '--json', default=None)
     parser.add_argument('-l', '--labels', default=None)
     parser.add_argument('-o', '--output', default="output.png")
+    parser.add_argument('-t', '--threshold', type=float, default=0.5)
+    parser.add_argument('-i', '--iou', type=float, default=0.4)
+    parser.add_argument('-p', '--padding', action='store_true')
     args = parser.parse_args()
     
     if not args.json:
@@ -36,15 +39,19 @@ if __name__ == "__main__":
     img = cv2.imread(args.image)
     imgDims = np.array(img.shape[:2])
     inputDims = np.array([ioCfg[0]['height'], ioCfg[0]['width']])
-    resizeRatio = np.min(inputDims/imgDims)
-    resizeDims = np.round(imgDims * resizeRatio).astype('int')
-    imgResize = cv2.resize(img.astype('float32'), (resizeDims[1],resizeDims[0]), interpolation=cv2.INTER_LINEAR)
-    padTop = int((inputDims[0]-resizeDims[0])/2)
-    padBottom = inputDims[0]-resizeDims[0] - padTop
-    padLeft = int((inputDims[1]-resizeDims[1])/2)
-    padRight = inputDims[1]-resizeDims[1] - padLeft
-    imgPad = cv2.copyMakeBorder(imgResize/255.0, padTop, padBottom, padLeft, padRight, cv2.BORDER_CONSTANT, value=[0.5,0.5,0.5])
-    modelInput = imgPad.swapaxes(0,2).swapaxes(1,2)
+    if args.padding:
+        resizeRatio = np.min(inputDims/imgDims)
+        resizeDims = np.round(imgDims * resizeRatio).astype('int')
+        imgResize = cv2.resize(img.astype('float32'), (resizeDims[1],resizeDims[0]), interpolation=cv2.INTER_LINEAR)
+        padTop = int((inputDims[0]-resizeDims[0])/2)
+        padBottom = inputDims[0]-resizeDims[0] - padTop
+        padLeft = int((inputDims[1]-resizeDims[1])/2)
+        padRight = inputDims[1]-resizeDims[1] - padLeft
+        imgPad = cv2.copyMakeBorder(imgResize/255.0, padTop, padBottom, padLeft, padRight, cv2.BORDER_CONSTANT, value=[0.5,0.5,0.5])
+        modelInput = imgPad.swapaxes(0,2).swapaxes(1,2)
+    else:
+        imgResize = cv2.resize(img.astype('float32'), (ioCfg[0]['width'], ioCfg[0]['height']), interpolation=cv2.INTER_LINEAR)
+        modelInput = imgResize.swapaxes(0,2).swapaxes(1,2) / 255.
     modelInput = np.expand_dims(modelInput, axis=0)
     
     # model
@@ -76,8 +83,6 @@ if __name__ == "__main__":
         print("estimated {} seconds at 100MHz".format(model.get_estimated_runtime(100E6)))
     
     # post-processing
-    threshold=0.5
-    iou=0.4
     params = {}
     blobs = {}
     for layer in ioCfg:
@@ -111,13 +116,19 @@ if __name__ == "__main__":
         version = 2
     else:
         version = 3
-    predictions = yolo.yolo_post_process(blobs, params, inputDims[0], inputDims[1], threshold, iou, version, True, True)
+    predictions = yolo.yolo_post_process(blobs, params, inputDims[0], inputDims[1], args.threshold, args.iou, version, True, True)
     for p in predictions:
         p['class_label'] = classLabel[p['class_id']]
-        p['xmin'] = int(round((p['xmin']-padLeft)/resizeRatio))
-        p['xmax'] = int(round((p['xmax']-padLeft)/resizeRatio))
-        p['ymin'] = int(round((p['ymin']-padTop)/resizeRatio))
-        p['ymax'] = int(round((p['ymax']-padTop)/resizeRatio))
+        if args.padding:
+            p['xmin'] = int(round((p['xmin']-padLeft)/resizeRatio))
+            p['xmax'] = int(round((p['xmax']-padLeft)/resizeRatio))
+            p['ymin'] = int(round((p['ymin']-padTop)/resizeRatio))
+            p['ymax'] = int(round((p['ymax']-padTop)/resizeRatio))
+        else:
+            p['xmin'] = int(round((p['xmin'])/(inputDims[1]/imgDims[1])))
+            p['xmax'] = int(round((p['xmax'])/(inputDims[1]/imgDims[1])))
+            p['ymin'] = int(round((p['ymin'])/(inputDims[0]/imgDims[0])))
+            p['ymax'] = int(round((p['ymax'])/(inputDims[0]/imgDims[0])))
     
     # output image
     imgOut = np.copy(img)

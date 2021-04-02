@@ -258,6 +258,7 @@ def fuse_layers(network, fuse_pairs):
         fuse_layer['sublayers'] = []
         previous_layer['sublayers'].append(fuse_layer)
         previous_layer['sublayers'] += sublayers
+        previous_layer['output_shape'] = fuse_layer['output_shape']
 
     for _, f in fuse_pairs[::-1]:
         network['layers'] = network['layers'][:f] + network['layers'][f+1:]
@@ -272,7 +273,7 @@ def mxp_inline_depthwise(network):
                 if len(next_layers) == 1:
                     next_layer = network['layers'][next_layers[0]]
                     if next_layer['op_type'] == 'Conv' and next_layer['use_cvi'] and next_layer['use_depthwise']:
-                        if layer['strides'] == [1,1]:
+                        if next_layer['strides'] == [1,1]:
                             fuse_pairs.append((l, next_layers[0]))
 
         fuse_layers(network, fuse_pairs)
@@ -937,9 +938,13 @@ def run_generate_graph(model_src, model_stats, io_info,  input_image,
             stats = json.load(f)
 
     test_input = None
-    input_channels=get_model_input_shape(model_src)[-3]
+    input_shape = get_model_input_shape(model_src)
+    channels = input_shape[-3]
+    height = input_shape[-2]
+    width = input_shape[-1]
+
     if input_image:
-        test_input = load_image(input_image, input_scale, input_channels)
+        test_input = load_image(input_image, input_scale, channels, height, width)
     activations = onnx_activations(model_src, test_input)
 
     graph = onnx.load(model_src).graph
@@ -995,7 +1000,11 @@ def generate_graph(argv):
             if args.verbose:
                 print('last node {} not found, defaulting to {}'.format(args.last, last_node.name))
 
-    test_input = load_image(args.image, args.scale)
+    input_shape = get_model_input_shape(args.model_src)
+    channels = input_shape[-3]
+    height = input_shape[-2]
+    width = input_shape[-1]
+    test_input = load_image(args.image, args.scale, channels, height, width)
     activations = onnx_activations(args.model_src, test_input)
     if first_node.op_type in multipath_nodes:
         i0 = []

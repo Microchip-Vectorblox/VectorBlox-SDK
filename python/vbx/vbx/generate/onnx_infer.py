@@ -13,12 +13,11 @@ from onnx import numpy_helper, helper, checker, shape_inference
 from onnx import optimizer, version_converter
 
 
-
 np.set_printoptions(suppress=True, precision=4, linewidth=120)
 np.random.seed(1337)
 
 
-def load_image(image_src, scale=255.0, channels=3, input_shape=None):
+def load_image(image_src, scale, channels, height, width):
     def check_img(img):
         if img is None:
             sys.stderr.write("Error Unable to read image file {}\n".format(image_src))
@@ -26,14 +25,14 @@ def load_image(image_src, scale=255.0, channels=3, input_shape=None):
     if channels == 3:
         img = cv2.imread(image_src)
         check_img(img)
-        if input_shape and img.shape[:2] != input_shape:
-            img = cv2.resize(img, input_shape, interpolation=cv2.INTER_LINEAR)
+        if height and width and img.shape[:2] != [width, height]:
+            img = cv2.resize(img, (width, height), interpolation=cv2.INTER_LINEAR)
         arr = img.swapaxes(1, 2).swapaxes(0, 1).astype(np.float32)
     else:
         img = cv2.imread(image_src, 0)
         check_img(img)
-        if input_shape and img.shape != input_shape:
-            img = cv2.resize(img, input_shape, interpolation=cv2.INTER_LINEAR)
+        if height and width and img.shape != [width, height]:
+            img = cv2.resize(img, (width, height), interpolation=cv2.INTER_LINEAR)
         arr = img.astype(np.float32)
         arr = np.expand_dims(arr, axis=0)
     if scale != 255.0:
@@ -96,7 +95,6 @@ def onnx_activations(model_name, input_array=None):
 
     sorted_activations = dict(sorted(activations.items()))
 
-    np.savez('onnx.npz', **sorted_activations)
     return sorted_activations
 
 
@@ -224,17 +222,22 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('onnx')
     parser.add_argument('-i', '--image', default='../oreo.224.jpg')
-    parser.add_argument('-c', '--channels', type=int, default=3)
     parser.add_argument('-s', '--scale', type=float, default=1.)
     parser.add_argument('-a', '--activations', action='store_true')
     parser.add_argument('-y', '--yolo', action='store_true')
 
     args = parser.parse_args()
 
-    input_array = load_image(args.image, args.scale, channels=args.channels)
+    from . import onnx_helper
+    input_shape =  onnx_helper.get_model_input_shape(args.onnx)
+    channels = input_shape[-3]
+    height = input_shape[-2]
+    width = input_shape[-1]
+    input_array = load_image(args.image, args.scale, channels, height, width)
 
     if args.activations:
         activations = onnx_activations(args.onnx, input_array)
+        np.savez('onnx.npz', **activations)
         for act in activations:
             if act[0] not in ['W', 'b']:
                 arr = activations[act]

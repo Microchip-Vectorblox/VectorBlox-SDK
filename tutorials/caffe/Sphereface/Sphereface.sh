@@ -36,6 +36,6 @@ echo "Generating VNNX for V1000 configuration..."
 generate_vnnx -x Sphereface.xml  -c V1000 -f ../../sample_images -o Sphereface.vnnx
 
 echo "Running Simulation..."
-python $VBX_SDK/example/python/face_compare.py Sphereface.vnnx matt-damon1.jpg matt-damon2.jpg
+python $VBX_SDK/example/python/face_compare.py Sphereface.vnnx ../../matt-damon1_aligned.png ../../matt-damon2_aligned.png
 
 deactivate
