@@ -14,6 +14,7 @@ The second is the jpeg file to use as the input to the network. The third is the
 
 ## SoC C
 
+Undocumented, in beta
 
 
 ## Python scripts
@@ -22,6 +23,4 @@ The python scripts located in examples/python/ can be run after the vbx python m
 argument to discover the correct usage of the scripts.
 
 
-```
-bash build.sh
 ```

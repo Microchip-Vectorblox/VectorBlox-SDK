@@ -222,9 +222,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('onnx')
     parser.add_argument('-i', '--image', default='../oreo.224.jpg')
-    parser.add_argument('-s', '--scale', type=float, default=1.)
+    parser.add_argument('-n', '--normalized', action='store_true')
     parser.add_argument('-a', '--activations', action='store_true')
     parser.add_argument('-y', '--yolo', action='store_true')
+    parser.add_argument('--io')
 
     args = parser.parse_args()
 
@@ -233,7 +234,10 @@ def main():
     channels = input_shape[-3]
     height = input_shape[-2]
     width = input_shape[-1]
-    input_array = load_image(args.image, args.scale, channels, height, width)
+    scale = 255.
+    if args.normalized:
+        scale = 1.
+    input_array = load_image(args.image, scale, channels, height, width)
 
     if args.activations:
         activations = onnx_activations(args.onnx, input_array)
@@ -262,6 +266,7 @@ def main():
                                                     int(p['ymin']), int(p['ymax'])))
     else:
         output = onnx_infer(args.onnx, input_array)
+
         if len(output.flatten())==1001:
             classes = dataset.imagenet_classes_with_nul
             classifier.print_topk(output[0].flatten(),classes=classes)
@@ -269,7 +274,14 @@ def main():
             classes = dataset.imagenet_classes
             classifier.print_topk(output[0].flatten(),classes=classes)
         else:
-            print(output)
+            outputs = onnx_infer_all(args.onnx, input_array)
+            scale_factors = [1. for _ in outputs]
+            if args.io:
+                with open(args.io) as f:
+                    scale_factors = json.load(f)['output_scale_factors']
+
+            for o,sf in zip(outputs, scale_factors):
+                print(sf*o.flatten()[:8])
 
 
 if __name__ == "__main__":

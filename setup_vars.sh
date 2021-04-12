@@ -1,28 +1,35 @@
 #!/bin/bash
 SCRIPTDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-function has_script() {
-	if [ ! -f $SCRIPTDIR/install_venv.sh ]; then
-		echo "Ensure 'install_venv.sh' exists in root folder of SDK"
-		return 1
-	fi
+function install_venv() {
+    $PYTHON_EXE -m venv  $SCRIPTDIR/vbx_env
+    source $SCRIPTDIR/vbx_env/bin/activate
+
+    python -m pip install --upgrade "pip==20.3.4" "setuptools==50.3.2"
+    python -m pip install wheel 
+    python -m pip install -r $SCRIPTDIR/requirements.txt
+    python -m pip install -e $SCRIPTDIR/python/third_party/openvino/model-optimizer
+    python -m pip install -e $SCRIPTDIR/python/third_party/open_model_zoo/tools
+    python -m pip install -e $SCRIPTDIR/python/vbx
+    deactivate
 }
 
 function has_python() {
-	pymajor=$(python3 -c 'import platform; major, _ , _ = platform.python_version_tuple(); print(major)')
-	pyminor=$(python3 -c 'import platform; _ , minor, _ = platform.python_version_tuple(); print(minor)')
-	if [ $pymajor -ne 3 ] || [ $pyminor -ge 7 ]; then
-		echo "Required: Python3.5 or Python3.6"
-		echo "Current: Python$pymajor.$pyminor"
-		echo "Please ensure Python3.5 or Python3.6 is the default version when calling 'python3'"
-		return 1
-	fi
+    for v in 3.8 3.6 3.5
+    do
+        if [ -n "$(which python$v)" ]
+        then
+            PYTHON_EXE=python$v
+            return 0
+        fi
+    done
+	echo "Error Unable to find compatible version of python. Allowed Versions: Python3.5, Python3.6 or Python3.8" >&2
+	return 1
 }
-
 
 function has_installed() {
 	if [ ! -d $SCRIPTDIR/vbx_env ]; then
 		echo "Initial install of VBX Python Environment required. May take several minutes..."
-		(cd $SCRIPTDIR/; bash ./install_venv.sh)
+		install_venv
 	fi
 	source $SCRIPTDIR/vbx_env/bin/activate
 	python -c 'import mxnet; import vbx' && command -v converter &> /dev/null && command -v downloader &> /dev/null
@@ -38,12 +45,10 @@ function has_installed() {
 	fi
 }
 
-if has_script && has_python && has_installed; then
+if has_python && has_installed; then
 	export VBX_SDK=$SCRIPTDIR
-	export LD_LIBRARY_PATH=$VBX_SDK/vbx_env/openvino
 	echo ""
 	echo "export VBX_SDK="$VBX_SDK
-	echo "export LD_LIBRARY_PATH="$LD_LIBRARY_PATH
 	echo ""
 
 	echo "VBX Python Environment ready. Activating..."

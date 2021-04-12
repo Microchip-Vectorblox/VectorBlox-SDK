@@ -1,6 +1,6 @@
 # Prerequisites
 
- Ubuntu 16.04 / 18.04 supported
+ Ubuntu 16.04 / 18.04 / 20.04 are supported
  If using WSL, ensure you are running from your home directory or have permissions set
 
 # Downloading the SDK
@@ -36,7 +36,7 @@ source setup_vars.sh
 Several tutorials are provide to generate CoreVectoBlox compatible Binary Large OBjects (BLOBs)
 
 The tutorials download the networks, convert and optimize the network into openvino xml, and
-then finally convert the the xml into a quantized Vectoblox BLOB with a .vnnx or .hex file extension.
+then finally convert the xml into a quantized Vectoblox BLOB with a .vnnx and .hex file extension.
 
 To run the tutorials, follow the below steps. 
 

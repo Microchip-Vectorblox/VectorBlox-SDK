@@ -137,8 +137,13 @@ int main(int argc, char** argv){
 	  post_process_classifier(output_buffer0,output_length,indices,topk);
 	  for(int i = 0;i < topk; ++i){
 		int idx = indices[i];
+        char* class_name = imagenet_classes[idx];
+        if(output_length==1001){
+          //some imagenet networks have a null catagory, account for that
+          class_name =  imagenet_classes[idx-1];
+        }
 		int score = output_buffer0[idx];
-		printf("%d, %d, %s, %d.%03d\n", i, idx, imagenet_classes[idx], score>>16, (score*1000)>>16);
+		printf("%d, %d, %s, %d.%03d\n", i, idx,class_name, score>>16, (score*1000)>>16);
 	  }
 	} else if (post_process_str == "TINYYOLOV2" || post_process_str == "YOLOV2" || post_process_str == "TINYYOLOV3"){
 		char **class_names = NULL;
