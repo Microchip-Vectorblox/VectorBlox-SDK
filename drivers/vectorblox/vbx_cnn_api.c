@@ -10,6 +10,11 @@
 //SHOULD probably use this, but it wasn't working properly when I tried it JDV
 #define read_register(a,offset)  __atomic_load_n((a)+(offset),__ATOMIC_SEQ_CST)
 #define write_register(a,offset,val)  __atomic_store_n((a)+(offset),val,__ATOMIC_SEQ_CST)
+#elif SPLASHKIT_PCIE
+#include "pcie.h"
+#include <stdio.h>
+#define read_register(a,offset)  read_fpga_word((uintptr_t)(a+offset))
+#define write_register(a,offset,val)  write_fpga_word((uintptr_t)(a+offset),val)
 #else
 #define read_register(a,offset)  (a)[(offset)]
 #define write_register(a,offset,val)  ((a)[(offset)]=(val))
@@ -169,6 +174,17 @@ vbx_cnn_t *vbx_cnn_init(void *ctrl_reg_addr,void *instruction_blob) {
   vbx_allocate_dma_buffer(&the_cnn,0x1FFFFFFF,0);
   void* dma_instr_blob = vbx_allocate_dma_buffer(&the_cnn,VBX_INSTRUCTION_SIZE,21);
   memcpy(dma_instr_blob,instruction_blob,VBX_INSTRUCTION_SIZE);
+  the_cnn.io_buffers = vbx_allocate_dma_buffer(&the_cnn,MAX_IO_BUFFERS*sizeof(vbx_cnn_io_ptr_t), 3);
+#elif SPLASHKIT_PCIE
+  fpga_init();
+  void* FPGA_DDR_ADDR=(void*)0x40000000;
+  const size_t FPGA_DDR_SIZE=1<<30;//1G
+  the_cnn.dma_buffer=FPGA_DDR_ADDR;
+  the_cnn.dma_phys_trans_offset = 0;
+  the_cnn.dma_buffer_end = the_cnn.dma_buffer + FPGA_DDR_SIZE-1;
+  void* dma_instr_blob = vbx_allocate_dma_buffer(&the_cnn,VBX_INSTRUCTION_SIZE,21);
+  write_fpga((uintptr_t)virt_to_phys(&the_cnn,dma_instr_blob),instruction_blob,VBX_INSTRUCTION_SIZE);
+  the_cnn.io_buffers = vbx_allocate_dma_buffer(&the_cnn, MAX_IO_BUFFERS * sizeof(vbx_cnn_io_ptr_t), 3);
 #else
   void* dma_instr_blob = instruction_blob;
 #endif //VBX_SOC_DRIVER
@@ -176,8 +192,8 @@ vbx_cnn_t *vbx_cnn_init(void *ctrl_reg_addr,void *instruction_blob) {
     // instruction_blob must be aligned to a 2M boundary
     return NULL;
   }
-  uint32_t checksum = fletcher32(dma_instr_blob, 2 * 1024 * 1024 - 4);
-  uint32_t* expected = ((uint32_t *)dma_instr_blob)+(2 * 1024 * 1024 / 4 - 1);
+  uint32_t checksum = fletcher32(instruction_blob, 2 * 1024 * 1024 - 4);
+  uint32_t* expected = ((uint32_t *)instruction_blob)+(2 * 1024 * 1024 / 4 - 1);
   if (checksum != *expected) {
     // firmware does not look correct. Perhaps it was loaded incorrectly.
     return NULL;
@@ -196,13 +212,20 @@ vbx_cnn_t *vbx_cnn_init(void *ctrl_reg_addr,void *instruction_blob) {
   return &the_cnn;
 }
 
-int vbx_cnn_get_debug_prints(vbx_cnn_t* vbx_cnn,char* buf,size_t max_chars){
-  const int DEBUG_PRINT_SPOOL_SIZE=16*1024;
 
+#define DEBUG_PRINT_SPOOL_SIZE (16*1024)
+int vbx_cnn_get_debug_prints(vbx_cnn_t* vbx_cnn,char* buf,size_t max_chars){
+#if SPLASHKIT_PCIE
+  static char orca_std_out[DEBUG_PRINT_SPOOL_SIZE];
+  read_fpga((uintptr_t)(vbx_cnn->instruction_blob) + VBX_INSTRUCTION_SIZE - DEBUG_PRINT_SPOOL_SIZE,
+      orca_std_out,
+      DEBUG_PRINT_SPOOL_SIZE);
+#else
   volatile char* orca_std_out = (volatile char*)(vbx_cnn->instruction_blob);
   orca_std_out+=VBX_INSTRUCTION_SIZE-DEBUG_PRINT_SPOOL_SIZE;
+#endif
   volatile int32_t* orca_pointer = (volatile int32_t*)(orca_std_out + 16*1024-4);
-  int char_count=0;
+  size_t char_count=0;
   while(vbx_cnn->debug_print_ptr != *orca_pointer && char_count+1 <= max_chars){
     buf[char_count]=orca_std_out[vbx_cnn->debug_print_ptr];
     vbx_cnn->debug_print_ptr++;
@@ -211,10 +234,10 @@ int vbx_cnn_get_debug_prints(vbx_cnn_t* vbx_cnn,char* buf,size_t max_chars){
       vbx_cnn->debug_print_ptr=0;
     }
   }
-  return char_count;
+  return (int)char_count;
 
 }
-#if VBX_SOC_DRIVER
+#if VBX_SOC_DRIVER || SPLASHKIT_PCIE
 void* vbx_allocate_dma_buffer(vbx_cnn_t* vbx_cnn,size_t request_size,size_t phys_alignment_bits){
   size_t request_size_aligned = (request_size+1023) & (~1023);
   int alignment = 1<<phys_alignment_bits;
@@ -232,35 +255,42 @@ void* vbx_allocate_dma_buffer(vbx_cnn_t* vbx_cnn,size_t request_size,size_t phys
 void* vbx_get_dma_pointer(vbx_cnn_t* vbx_cnn){
   return (void*)(vbx_cnn->dma_buffer);
 }
-#endif //VBX_SOC_DRIVER
+#endif
 
 
 
 vbx_cnn_err_e vbx_cnn_get_error_val(vbx_cnn_t *vbx_cnn) {
-  return vbx_cnn->ctrl_reg[ERR_OFFSET];
+  return read_register(vbx_cnn->ctrl_reg,ERR_OFFSET);
 }
 int vbx_cnn_model_start(vbx_cnn_t *vbx_cnn, model_t *model,
                         vbx_cnn_io_ptr_t io_buffers[]) {
 #if VBX_SOC_DRIVER
-  int num_io_buffers = (model_get_num_inputs(model)+
+  size_t num_io_buffers = (model_get_num_inputs(model)+
                         model_get_num_outputs(model));
-  vbx_cnn_io_ptr_t *dma_io_buffers=(vbx_cnn_io_ptr_t*)vbx_get_dma_pointer(vbx_cnn);
   for(int io=0;io<num_io_buffers;io++){
-    dma_io_buffers[io] = (vbx_cnn_io_ptr_t)virt_to_phys(vbx_cnn,(void*)io_buffers[io]);
+    vbx_cnn->io_buffers[io] = (vbx_cnn_io_ptr_t)virt_to_phys(vbx_cnn,(void*)io_buffers[io]);
   }
-  io_buffers = dma_io_buffers;
+  io_buffers = vbx_cnn->io_buffers;
+#elif SPLASHKIT_PCIE
+    static uint8_t temp_buffer[64 * 1024];
+    model_t* readable_model = (model_t*)temp_buffer;
+    read_fpga((uintptr_t)model, readable_model, sizeof(temp_buffer));
+    size_t num_io_buffers = (model_get_num_inputs(readable_model) +
+            model_get_num_outputs(readable_model));
+    write_fpga((uintptr_t)vbx_cnn->io_buffers, io_buffers, num_io_buffers * sizeof(vbx_cnn_io_ptr_t));
+    io_buffers = vbx_cnn->io_buffers;
 #endif
   vbx_cnn_state_e state = vbx_cnn_get_state(vbx_cnn);
   if (state != FULL && state != ERROR) {
     // wait until start bit is low before starting next model
-    while (vbx_cnn->ctrl_reg[CTRL_OFFSET] & CTRL_REG_START)
+    while (read_register(vbx_cnn->ctrl_reg,CTRL_OFFSET) & CTRL_REG_START)
       ;
-    vbx_cnn->ctrl_reg[IO_OFFSET] = (uintptr_t)virt_to_phys(vbx_cnn,io_buffers);
-    vbx_cnn->ctrl_reg[MODEL_OFFSET] = (uintptr_t)virt_to_phys(vbx_cnn,model);
+    write_register(vbx_cnn->ctrl_reg,IO_OFFSET , (uint32_t)(uintptr_t)virt_to_phys(vbx_cnn,io_buffers));
+    write_register(vbx_cnn->ctrl_reg,MODEL_OFFSET , (uint32_t)(uintptr_t)virt_to_phys(vbx_cnn,model));
 
     // Start should be written with 1, other bits should be written
     // with zeros.
-    vbx_cnn->ctrl_reg[CTRL_OFFSET] = CTRL_REG_START;
+    write_register(vbx_cnn->ctrl_reg,CTRL_OFFSET,CTRL_REG_START);
     return 0;
   } else {
     return -1;
@@ -268,7 +298,7 @@ int vbx_cnn_model_start(vbx_cnn_t *vbx_cnn, model_t *model,
 }
 
 vbx_cnn_state_e vbx_cnn_get_state(vbx_cnn_t *vbx_cnn) {
-  uint32_t ctrl_reg = vbx_cnn->ctrl_reg[CTRL_OFFSET];
+  uint32_t ctrl_reg = read_register(vbx_cnn->ctrl_reg,CTRL_OFFSET);
   if (ctrl_reg & CTRL_REG_ERROR) {
     return (vbx_cnn_state_e)ERROR;
   }
@@ -278,7 +308,7 @@ vbx_cnn_state_e vbx_cnn_get_state(vbx_cnn_t *vbx_cnn) {
   // to calculate the state
   ctrl_reg >>= 1;
   ctrl_reg &= 7;
-  vbx_cnn_state_e state;
+  vbx_cnn_state_e state=ERROR;
   switch (ctrl_reg) {
   case 0:
     state = READY;
@@ -309,10 +339,10 @@ vbx_cnn_state_e vbx_cnn_get_state(vbx_cnn_t *vbx_cnn) {
 }
 
 int vbx_cnn_model_poll(vbx_cnn_t *vbx_cnn) {
-  int status = vbx_cnn->ctrl_reg[CTRL_OFFSET];
+  int status = read_register(vbx_cnn->ctrl_reg,CTRL_OFFSET);
   if (status & CTRL_REG_OUTPUT_VALID) {
     // write 1 to clear output valid
-    vbx_cnn->ctrl_reg[CTRL_OFFSET] = CTRL_REG_OUTPUT_VALID;
+    write_register(vbx_cnn->ctrl_reg,CTRL_OFFSET,CTRL_REG_OUTPUT_VALID);
     return 0;
   }
   if ((status & CTRL_REG_START) || (status & CTRL_REG_RUNNING)) {

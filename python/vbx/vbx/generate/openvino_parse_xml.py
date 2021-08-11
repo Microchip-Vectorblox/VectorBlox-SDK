@@ -18,6 +18,7 @@ class Node:
         self.min = None
         self.max = None
         self.mean = None
+        self.threshold = None
 
 
     def set_edges(self, edges):
@@ -40,6 +41,8 @@ class Node:
             self.max = _stats[0]['max']
             if 'mean' in _stats[0]:
                 self.mean = _stats[0]['mean']
+            if 'threshold' in _stats[0]:
+                self.threshold = _stats[0]['threshold']
 
 
     def set_stats_by_id(self, stats):
@@ -50,6 +53,8 @@ class Node:
             self.max = _stats[0]['max']
             if 'mean' in _stats[0]:
                 self.mean = _stats[0]['mean']
+            if 'threshold' in _stats[0]:
+                self.threshold = _stats[0]['threshold']
 
 
     @staticmethod

@@ -48,7 +48,20 @@ int post_process_yolo(fix16_t **outputs, const int num_outputs, yolo_info_t *cfg
 extern char *imagenet_classes[1000];
 extern char *voc_classes[20];
 extern char *coco_classes[80];
+extern char* coco91_classes[92];
+typedef struct {
+    fix16_t box[4]; // (left, top, right, bottom)
+    fix16_t points[6][2]; // (left eye, right eye, nose, mouth)(x,y)
+    fix16_t detectScore;
+} face_t;
 
+int post_process_blazeface(face_t faces[],fix16_t* scores,fix16_t* points,int scoresLength,int max_faces, fix16_t anchorsScale);
+int post_process_retinaface(face_t faces[],int max_faces, fix16_t *network_outputs[9],int image_width,int image_height,
+                            fix16_t confidence_threshold, fix16_t nms_threshold);
+
+int post_process_ssdv2(fix16_box *boxes, int max_boxes,
+                       fix16_t *network_outputs[12], int num_classes,
+                       fix16_t confidence_threshold, fix16_t nms_threshold);
 #ifdef __cplusplus
 }
 #endif

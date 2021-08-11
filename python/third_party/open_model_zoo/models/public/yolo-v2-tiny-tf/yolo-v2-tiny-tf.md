@@ -4,25 +4,6 @@
 
 YOLO v2 Tiny is a real-time object detection model implemented with Keras\* from this [repository](https://github.com/david8862/keras-YOLOv3-model-set) and converted to TensorFlow\* framework. This model was pretrained on COCO\* dataset with 80 classes.
 
-## Conversion
-
-1. Download or clone the original [repository](https://github.com/david8862/keras-YOLOv3-model-set) (tested on `d38c3d8` commit).
-2. Use the following commands to get original model (named `yolov2_tiny` in repository) and convert it to Keras\* format (see details in the [README.md](https://github.com/david8862/keras-YOLOv3-model-set/blob/d38c3d865f7190ee9b19a30e91f2b750a31320c1/README.md)  file in the official repository):
-
-   1. Download YOLO v2 Tiny weights:
-        ```
-        wget -O weights/yolov2_tiny.weights https://pjreddie.com/media/files/yolov2_tiny.weights
-        ```
-
-   2. Convert model weights to Keras\*:
-        ```
-        python tools/model_converter/convert.py cfg/yolov2_tiny.cfg weights/yolov2_tiny.weights weights/yolov2_tiny.h5
-        ```
-3. Convert model to protobuf:
-    ```
-    python tools/model_converter/keras_to_tensorflow.py --input_model weights/yolov2_tiny.h5 --output_model=weights/yolo-v2-tiny.pb
-    ```
-
 ## Specification
 
 | Metric            | Value         |
@@ -39,7 +20,7 @@ Accuracy metrics obtained on COCO\* validation dataset for converted model.
 | Metric | Value |
 | ------ | ------|
 | mAP    | 27.34% |
-| [COCO\* mAP](http://cocodataset.org/#detection-eval) | 29.11%  |
+| [COCO\* mAP](https://cocodataset.org/#detection-eval) | 29.11%  |
 
 ## Input
 
@@ -81,6 +62,8 @@ Detection box has format [`x`,`y`,`h`,`w`,`box_score`,`class_no_1`, ..., `class_
 - `box_score` - confidence of detection box, apply [sigmoid function](https://en.wikipedia.org/wiki/Sigmoid_function) to get confidence in [0,1] range
 - `class_no_1`,...,`class_no_80` - probability distribution over the classes in logits format, apply [softmax function](https://en.wikipedia.org/wiki/Softmax_function) and multiply by obtained confidence value to get confidence of each class
 
+
+The model was trained on Microsoft\* COCO dataset version with 80 categories of object. Mapping to class names provided in `<omz_dir>/data/dataset_classes/coco_80cl.txt` file.
 The anchor values are `0.57273,0.677385, 1.87446,2.06253, 3.33843,5.47434, 7.88282,3.52778, 9.77052,9.16828`.
 
 ### Converted model
@@ -96,7 +79,23 @@ Detection box has format [`x`,`y`,`h`,`w`,`box_score`,`class_no_1`, ..., `class_
 - `box_score` - confidence of detection box in [0,1] range
 - `class_no_1`,...,`class_no_80` - probability distribution over the classes in the [0,1] range, multiply by confidence value to get confidence of each class
 
+
+The model was trained on Microsoft\* COCO dataset version with 80 categories of object. Mapping to class names provided in `<omz_dir>/data/dataset_classes/coco_80cl.txt` file.
 The anchor values are `0.57273,0.677385, 1.87446,2.06253, 3.33843,5.47434, 7.88282,3.52778, 9.77052,9.16828`.
+
+## Download a Model and Convert it into Inference Engine Format
+
+You can download models and if necessary convert them into Inference Engine format using the [Model Downloader and other automation tools](../../../tools/downloader/README.md) as shown in the examples below.
+
+An example of using the Model Downloader:
+```
+python3 <omz_dir>/tools/downloader/downloader.py --name <model_name>
+```
+
+An example of using the Model Converter:
+```
+python3 <omz_dir>/tools/downloader/converter.py --name <model_name>
+```
 
 ## Legal Information
 

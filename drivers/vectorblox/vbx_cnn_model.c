@@ -1,6 +1,6 @@
 #include "vbx_cnn_api.h"
 #include "graph_version.h"
-
+#include <stdio.h>
 static const vnnx_subgraph_node_t* get_input_node(const vnnx_graph_t* graph, int index){
 	int32_t* io_nodes = (int32_t*)(intptr_t)((intptr_t)graph +graph->io_nodes);
 	if ((unsigned)index > graph->num_inputs){
@@ -24,6 +24,7 @@ int model_check_sanity(const model_t* model){
 	if (graph->version != VNNX_GRAPH_VERSION){
 		return -1;
 	}
+
 	return 0;
 
 }

@@ -2,7 +2,7 @@
 
 OpenVINO&trade; toolkit provides a set of pre-trained models
 that you can use for learning and demo purposes or for developing deep learning
-software. Most recent version is available in the [repo on Github](https://github.com/opencv/open_model_zoo).
+software. Most recent version is available in the [repo on Github](https://github.com/openvinotoolkit/open_model_zoo).
 
 The models can be downloaded via Model Downloader
 (`<OPENVINO_INSTALL_DIR>/deployment_tools/open_model_zoo/tools/downloader`).
@@ -38,6 +38,7 @@ network to detect objects of the same type better.
 | [person-detection-0200](./person-detection-0200/description/person-detection-0200.md)                                                                                               | 0.786                | 1.817      |       | X       |          |       |                |         |
 | [person-detection-0201](./person-detection-0201/description/person-detection-0201.md)                                                                                               | 1.768                | 1.817      |       | X       |          |       |                |         |
 | [person-detection-0202](./person-detection-0202/description/person-detection-0202.md)                                                                                               | 3.143                | 1.817      |       | X       |          |       |                |         |
+| [person-detection-0203](./person-detection-0203/description/person-detection-0203.md)                                                                                               | 6.519                | 2.394      |       | X       |          |       |                |         |
 | [person-detection-0106](./person-detection-0106/description/person-detection-0106.md)                                                                                               | 404.264              | 71.565     |       | X       |          |       |                |         |
 | [pedestrian-detection-adas-0002](./pedestrian-detection-adas-0002/description/pedestrian-detection-adas-0002.md)                                                                    | 2.836                | 1.165      |       | X       |          |       |                |         |
 | [pedestrian-and-vehicle-detector-adas-0001](./pedestrian-and-vehicle-detector-adas-0001/description/pedestrian-and-vehicle-detector-adas-0001.md)                                   | 3.974                | 1.650      |       | X       | X        |       |                |         |
@@ -51,6 +52,8 @@ network to detect objects of the same type better.
 | [person-vehicle-bike-detection-2000](./person-vehicle-bike-detection-2000/description/person-vehicle-bike-detection-2000.md)                                                        | 0.787                | 1.821      |       | X       | X        | X     |                |         |
 | [person-vehicle-bike-detection-2001](./person-vehicle-bike-detection-2001/description/person-vehicle-bike-detection-2001.md)                                                        | 1.770                | 1.821      |       | X       | X        | X     |                |         |
 | [person-vehicle-bike-detection-2002](./person-vehicle-bike-detection-2002/description/person-vehicle-bike-detection-2002.md)                                                        | 3.163                | 1.821      |       | X       | X        | X     |                |         |
+| [person-vehicle-bike-detection-2003](./person-vehicle-bike-detection-2003/description/person-vehicle-bike-detection-2003.md)                                                        | 6.550                | 2.416      |       | X       | X        | X     |                |         |
+| [person-vehicle-bike-detection-2004](./person-vehicle-bike-detection-2004/description/person-vehicle-bike-detection-2004.md)                                                        | 1.811                | 2.327      |       | X       | X        | X     |                |         |
 | [vehicle-license-plate-detection-barrier-0106](./vehicle-license-plate-detection-barrier-0106/description/vehicle-license-plate-detection-barrier-0106.md)                          | 0.349                | 0.634      |       |         | X        |       | X              |         |
 | [product-detection-0001](./product-detection-0001/description/product-detection-0001.md)                                                                                            | 3.598                | 3.212      |       |         |          |       |                | X       |
 | [person-detection-asl-0001](./person-detection-asl-0001/description/person-detection-asl-0001.md)                                                                                   | 0.986                | 1.338      |       |      X  |          |       |                |         |
@@ -135,10 +138,11 @@ instance instance segmentation model outputs pixel-wise masks for all instances.
 
 | Model Name                                                                                                                                     | Complexity (GFLOPs)  | Size (Mp)  |
 |------------------------------------------------------------------------------------------------------------------------------------------------|--------------------- |----------- |
-| [instance-segmentation-security-1025](./instance-segmentation-security-1025/description/instance-segmentation-security-1025.md)                | 30.146               | 26.69      |
-| [instance-segmentation-security-0050](./instance-segmentation-security-0050/description/instance-segmentation-security-0050.md)                | 46.602               | 30.448     |
-| [instance-segmentation-security-0083](./instance-segmentation-security-0083/description/instance-segmentation-security-0083.md)                | 365.626              | 143.444    |
-| [instance-segmentation-security-0010](./instance-segmentation-security-0010/description/instance-segmentation-security-0010.md)                | 899.568              | 174.568    |
+| [instance-segmentation-security-0002](./instance-segmentation-security-0002/description/instance-segmentation-security-0002.md)                | 423.0842             | 48.3732    |
+| [instance-segmentation-security-0091](./instance-segmentation-security-0091/description/instance-segmentation-security-0091.md)                | 828.6324             | 101.236    |
+| [instance-segmentation-security-0228](./instance-segmentation-security-0228/description/instance-segmentation-security-0228.md)                | 147.2352             | 49.8328    |
+| [instance-segmentation-security-1039](./instance-segmentation-security-1039/description/instance-segmentation-security-1039.md)                | 13.9672              | 10.5674    |
+| [instance-segmentation-security-1040](./instance-segmentation-security-1040/description/instance-segmentation-security-1040.md)                | 29.334               | 13.5673    |
 
 
 ## Human Pose Estimation Models
@@ -146,7 +150,7 @@ instance instance segmentation model outputs pixel-wise masks for all instances.
 Human pose estimation task is to predict a pose: body skeleton, which consists
 of keypoints and connections between them, for every person in an input image or
 video.  Keypoints are body joints, i.e. ears, eyes, nose, shoulders, knees, etc.
-There are two major groups of such metods: top-down and bottom-up.  The first
+There are two major groups of such methods: top-down and bottom-up.  The first
 detects persons in a given frame, crops or rescales detections, then runs pose
 estimation network for every detection. These methods are very accurate. The
 second finds all keypoints in a given frame, then groups them by person
@@ -154,7 +158,10 @@ instances, thus faster than previous, because network runs once.
 
 | Model Name                                                                                                                 | Complexity (GFLOPs)  | Size (Mp)       |
 |----------------------------------------------------------------------------------------------------------------------------|--------------------- |---------------- |
-| [human-pose-estimation-0001](./human-pose-estimation-0001/description/human-pose-estimation-0001.md)                       | 15.435               | 4.099      |
+| [human-pose-estimation-0001](./human-pose-estimation-0001/description/human-pose-estimation-0001.md)                       | 15.435               | 4.099           |
+| [human-pose-estimation-0005](./human-pose-estimation-0005/description/human-pose-estimation-0005.md)                       | 5.9393               | 8.1504          |
+| [human-pose-estimation-0006](./human-pose-estimation-0006/description/human-pose-estimation-0006.md)                       | 8.8720               | 8.1504          |
+| [human-pose-estimation-0007](./human-pose-estimation-0007/description/human-pose-estimation-0007.md)                       | 14.3707              | 8.1504          |
 
 ## Image Processing
 
@@ -184,9 +191,12 @@ Deep Learning models for text recognition in various applications.
 | Model Name                                                                                                                                     | Complexity (GFLOPs)  | Size (Mp)  |
 |------------------------------------------------------------------------------------------------------------------------------------------------|--------------------- |----------- |
 | [text-recognition-0012](./text-recognition-0012/description/text-recognition-0012.md)                                                          | 1.485                | 5.568      |
+| [text-recognition-0013](./text-recognition-0013/description/text-recognition-0013.md)                                                          | 1.488                | 5.567      |
 | [handwritten-score-recognition-0003](./handwritten-score-recognition-0003/description/handwritten-score-recognition-0003.md)                   | 0.792                | 5.555      |
 | [handwritten-japanese-recognition-0001](./handwritten-japanese-recognition-0001/description/handwritten-japanese-recognition-0001.md)          | 117.136              | 15.31      |
+| [handwritten-simplified-chinese-recognition-0001](./handwritten-simplified-chinese-recognition-0001/description/handwritten-simplified-chinese-recognition-0001.md)          |       134.513        |    17.270   |
 | [formula-recognition-medium-scan-0001](./formula-recognition-medium-scan-0001/description/formula-recognition-medium-scan-0001.md): <br> encoder <br> decoder | <br>16.56<br>1.86 | <br>1.69<br>2.56 |
+| [formula-recognition-polynomials-handwritten-0001](./formula-recognition-polynomials-handwritten-0001/description/formula-recognition-polynomials-handwritten-0001.md): <br> encoder <br> decoder | <br>12.8447<br>0.2017 | <br>8.6838<br>2.5449 |
 
 ## Text Spotting
 
@@ -194,10 +204,10 @@ Deep Learning models for text spotting (simultaneous detection and recognition).
 
 | Model Name                                                                                                                                     | Complexity (GFLOPs)  | Size (Mp)  |
 |------------------------------------------------------------------------------------------------------------------------------------------------|--------------------- |----------- |
-| [text-spotting-0002](./text-spotting-0002/description/text-spotting-0002.md)                                                                   |                      |            |
-| text-spotting-0002-detector                                                                                                                    | 185.169              | 26.497     |
-| text-spotting-0002-recognizer-encoder                                                                                                          | 2.082                | 1.328      |
-| text-spotting-0002-recognizer-decoder                                                                                                          | 0.002                | 0.273      |
+| [text-spotting-0004](./text-spotting-0004/description/text-spotting-0004.md)                                                                   |                      |            |
+| text-spotting-0004-detector                                                                                                                    | 184.495              | 27.010     |
+| text-spotting-0004-recognizer-encoder                                                                                                          | 2.082                | 1.328      |
+| text-spotting-0004-recognizer-decoder                                                                                                          | 0.002                | 0.273      |
 
 ## Action Recognition Models
 
@@ -239,11 +249,13 @@ Deep Learning compressed models
 
 | Model Name| Complexity (GFLOPs)|Size (Mp)|
 |-----------|--------------------|---------|
-| [bert-large-uncased-whole-word-masking-squad-fp32-0001](./bert-large-uncased-whole-word-masking-squad-fp32-0001/description/bert-large-uncased-whole-word-masking-squad-fp32-0001.md) | 246.93 | 333.96 |
+| [bert-large-uncased-whole-word-masking-squad-0001](./bert-large-uncased-whole-word-masking-squad-0001/description/bert-large-uncased-whole-word-masking-squad-0001.md) | 246.93 | 333.96 |
 | [bert-large-uncased-whole-word-masking-squad-int8-0001](./bert-large-uncased-whole-word-masking-squad-int8-0001/description/bert-large-uncased-whole-word-masking-squad-int8-0001.md) | 246.93 | 333.96 |
+| [bert-large-uncased-whole-word-masking-squad-emb-0001](./bert-large-uncased-whole-word-masking-squad-emb-0001/description/bert-large-uncased-whole-word-masking-squad-emb-0001.md) | 246.93 (for [1,384] input size) | 333.96 |
 | [bert-small-uncased-whole-word-masking-squad-0001](./bert-small-uncased-whole-word-masking-squad-0001/description/bert-small-uncased-whole-word-masking-squad-0001.md) | 23.9 | 57.94 |
 | [bert-small-uncased-whole-word-masking-squad-0002](./bert-small-uncased-whole-word-masking-squad-0002/description/bert-small-uncased-whole-word-masking-squad-0002.md) | 23.9 | 41.1 |
-| [bert-large-uncased-whole-word-masking-squad-emb-0001](./bert-large-uncased-whole-word-masking-squad-emb-0001/description/bert-large-uncased-whole-word-masking-squad-emb-0001.md) | 246.93 (for [1,384] input size) | 333.96 |
+| [bert-small-uncased-whole-word-masking-squad-int8-0002](./bert-small-uncased-whole-word-masking-squad-int8-0002/description/bert-small-uncased-whole-word-masking-squad-int8-0002.md) | 23.9 | 41.1 |
+| [bert-small-uncased-whole-word-masking-squad-emb-int8-0001](./bert-small-uncased-whole-word-masking-squad-emb-int8-0001/bert-small-uncased-whole-word-masking-squad-emb-int8-0001.md) | 23.9 (for [1,384] input size) | 41.1 |
 
 ## Machine Translation
 
@@ -251,7 +263,19 @@ Deep Learning compressed models
 |-----------|--------------------|---------|
 | [machine-translation-nar-en-ru-0001](./machine-translation-nar-en-ru-0001/description/machine-translation-nar-en-ru-0001.md) | 23.17 | 69.29 |
 | [machine-translation-nar-ru-en-0001](./machine-translation-nar-ru-en-0001/description/machine-translation-nar-ru-en-0001.md) | 23.17 | 69.29 |
+| [machine-translation-nar-en-de-0001](./machine-translation-nar-en-de-0001/description/machine-translation-nar-en-de-0001.md) | 23.19 | 77.47 |
+| [machine-translation-nar-de-en-0001](./machine-translation-nar-de-en-0001/description/machine-translation-nar-de-en-0001.md) | 23.19 | 77.47 |
 
+## Text To Speech
+
+Deep Learning models for speech synthesis (mel spectrogram generation and wave form generation).
+
+| Model Name                                                                                | Complexity (GFLOPs)  | Size (Mp)  |
+|-------------------------------------------------------------------------------------------|--------------------- |----------- |
+| [text-to-speech-en-0001](./text-to-speech-en-0001/description/text-to-speech-en-0001.md)  |                      |            |
+| text-to-speech-en-0001-duration-prediction                                                | 15.84                | 13.569     |
+| text-to-speech-en-0001-regression                                                         | 7.65                 | 4.96       |
+| text-to-speech-en-0001-generation                                                         | 48.38                | 12.77      |
 
 ## Legal Information
 [*] Other names and brands may be claimed as the property of others.

@@ -8,6 +8,11 @@ import os
 import json
 from multiprocessing import Pool
 import argparse
+from . import onnx_infer
+
+
+np.set_printoptions(suppress=True, precision=4, linewidth=120)
+
 
 Q32 = 16
 Q16 = 13
@@ -52,41 +57,55 @@ def get_current_subgraph_nodes(js, bias_layers_nums, bias_layer):
     return layers
 
 
-def vnnx_load_image(image, channels, height, width):
-    img = cv2.imread(image)
-    ishape = tuple([height, width, channels])
-    if img.shape != ishape:
-        img = cv2.resize(img, (width,height)).clip(0, 255)
-    flattened = img.swapaxes(1, 2).swapaxes(0, 1).flatten()
+def vnnx_load_input(input, input_shape, input_scale=1./255., input_dtype=np.uint8):
+    arr = onnx_infer.load_input(input, input_scale, input_shape)
+    arr = (arr*255.).clip(0, 255.).astype(np.uint8)
+    flattened = arr.flatten()
     return [flattened]
 
 
-def collect_images(samples_folder, samples_count):
-    images = []
-    extensions = ['*.jpg', '*.png', '*.jpeg']
+def collect_inputs(samples_folder, samples_count):
+    inputs = []
+    extensions = ['*.jpg', '*.png', '*.jpeg', '*.npy']
     extensions += [e.upper() for e in extensions]
     for ext in extensions:
-        images += sorted(glob.glob(os.path.join(samples_folder, ext)))
+        inputs += sorted(glob.glob(os.path.join(samples_folder, ext)))
     if samples_count:
-        images = images[:samples_count]
-    return images
+        inputs = inputs[:samples_count]
+    return inputs
+
+
+def get_previous_weighted_layer_output_ids(js, output_id):
+    previous_weighted_output_ids = []
+    layers = [l for l in js['layers'] if l['output_id'] == output_id]
+    for layer in layers:
+        if is_weighted_layer(layer):
+            previous_weighted_output_ids += [layer['output_id']]
+        else:
+            previous_weighted_output_ids += get_previous_weighted_layer_output_ids(js, layer['input_id'])
+    return previous_weighted_output_ids
+
+
+def is_weighted_layer(layer):
+    return (layer['op_type'] in ['Conv', 'Gemm']) or (layer['op_type'] == "Identity" and len(layer['sublayers']) and layer['sublayers'][-1]['op_type'] == 'Add')
 
 
 def jslayers_to_adjust(js):
     _, output_ids = get_io_ids(js)
 
-    layers = []
+    ignored_output_ids = []
+    for output_id in output_ids:
+        ignored_output_ids += get_previous_weighted_layer_output_ids(js, output_id)
 
+    layers = []
     for l, layer in enumerate(js['layers']):
         if layer['op_type'] == "Conv":
             if layer['use_cvi']:
-                if layer['m'] > 1 and layer['n'] > 1:
-                    if layer['output_id'] not in output_ids:
-                        layers.append(l)
+                if layer['output_id'] not in ignored_output_ids:
+                    layers.append(l)
         elif layer['op_type'] == "Identity":
             if len(layer['sublayers']) and layer['sublayers'][-1]['op_type'] == 'Add':
                 layers.append(l)
-
     return layers
 
 
@@ -108,17 +127,18 @@ def get_io_ids(js, subgraph_nodes=None):
     return input_ids, output_ids
 
 
-def update_subgraph_biases(js_node, output_id, images, tmp_dir):
+def update_subgraph_biases(js_node, output_id, inputs, tmp_dir):
     biases = {}
+    mse = {} 
 
     obuf = js_node['output_description']
     ibuf = js_node['input_description']
     name = js_node['name']
     is_unsigned = js_node['output_unsigned']
 
-    for image in images:
-        oname = '{}.{}.npy'.format(os.path.join(tmp_dir, os.path.basename(image)), output_id)
-        onnx_name = '{}.onnx.npz'.format(os.path.join(tmp_dir, os.path.basename(image)))
+    for input in inputs:
+        oname = '{}.{}.npy'.format(os.path.join(tmp_dir, os.path.basename(input)), output_id)
+        onnx_name = '{}.onnx.npz'.format(os.path.join(tmp_dir, os.path.basename(input)))
 
         with open(oname, 'rb') as f:
             vnnx_arr = np.load(f)
@@ -138,66 +158,70 @@ def update_subgraph_biases(js_node, output_id, images, tmp_dir):
 
         if name not in biases:
             biases[name] = (onnx_mean - vnnx_mean)
+            mse[name] = np.mean((onnx_arr-vnnx_arr)**2, axis=reduce_axis)
         else:
             biases[name] += (onnx_mean - vnnx_mean)
+            mse[name] += np.mean((onnx_arr-vnnx_arr)**2, axis=reduce_axis)
 
     for key in biases:
-        biases[key] = biases[key] / len(images)
-    return biases
+        biases[key] = biases[key] / len(inputs)
+        mse[key] = mse[key] / len(inputs)
+    return biases, mse
 
 
-def vnnx_run_image(args):
+def vnnx_run_input(args):
     import vbx.sim
 
-    vnnx_fname, input_ids, output_id, channels, height, width, image, tmp_dir = args
-    inames = ['{}.{}.npy'.format(os.path.join(tmp_dir, os.path.basename(image)), i) for i in input_ids]
-    oname = '{}.{}.npy'.format(os.path.join(tmp_dir, os.path.basename(image)), output_id)
+    vnnx_fname, input_ids, output_id, input_shape, input_scale, input, tmp_dir = args
+    inames = ['{}.{}.npy'.format(os.path.join(tmp_dir, os.path.basename(input)), i) for i in input_ids]
+    oname = '{}.{}.npy'.format(os.path.join(tmp_dir, os.path.basename(input)), output_id)
+
+    with open(vnnx_fname, 'rb') as mf:
+        vnnx_model = vbx.sim.Model(mf.read())
+    input_dtype = vnnx_model.input_dtypes[0]
+
 
     vnnx_input = []
     for input_id, iname in zip(input_ids, inames):
         if input_id == 0:
-            vnnx_input += vnnx_load_image(image, channels, height, width)
+            vnnx_input += vnnx_load_input(input, input_shape, input_scale, input_dtype)
         else:
             with open(iname, 'rb') as f:
                 vnnx_input.append(np.load(f))
 
-    with open(vnnx_fname, 'rb') as mf:
-        vnnx_model = vbx.sim.Model(mf.read())
     vnnx_arr = vnnx_model.run(vnnx_input)[0]
     with open(oname, 'wb') as f:
         np.save(f, vnnx_arr)
 
 
-def vnnx_remove_image(output_id, images, tmp_dir):
-    for image in images:
-        oname = '{}.{}.npy'.format(os.path.join(tmp_dir, os.path.basename(image)), output_id)
+def vnnx_remove_inputs(output_id, inputs, tmp_dir):
+    for input in inputs:
+        oname = '{}.{}.npy'.format(os.path.join(tmp_dir, os.path.basename(input)), output_id)
         if os.path.exists(oname):
             os.remove(oname)
 
 
-def run_subgraph_biases(input_ids, output_id, vnnx_fname, channels, height, width, images, tmp_dir):
-    args = [(vnnx_fname, input_ids, output_id, channels, height, width, image, tmp_dir) for image in images]
+def run_subgraph_biases(input_ids, output_id, vnnx_fname, tmp_dir, inputs, input_shape, input_scale):
+    args = [(vnnx_fname, input_ids, output_id, input_shape, input_scale, input, tmp_dir) for input in inputs]
     with Pool() as p:
-        p.map(vnnx_run_image, args)
+        p.map(vnnx_run_input, args)
 
 
-def onnx_save_activations(onnx_fname, channels, height, width, images, tmp_dir):
-    from . import onnx_infer
-
+def onnx_save_activations(onnx_fname, tmp_dir, inputs, input_shape, input_scale=1./255.):
     onnx_model = onnx.load(onnx_fname)
     onnx_graph = onnx_model.graph
 
-    for image in images:
-        oname = '{}.onnx.npz'.format(os.path.join(tmp_dir, os.path.basename(image)))
+    for input in inputs:
+        oname = '{}.onnx.npz'.format(os.path.join(tmp_dir, os.path.basename(input)))
 
-        onnx_input = onnx_infer.load_image(image, 1.0, channels, height, width)
+        onnx_input = onnx_infer.load_input(input, input_scale, input_shape)
         activations = onnx_infer.onnx_activations(onnx_fname, onnx_input)
         np.savez(oname, **activations)
 
 
-def onnx_remove_activations(images, tmp_dir):
-    for image in images:
-        oname = '{}.onnx.npz'.format(os.path.join(tmp_dir, os.path.basename(image)))
+def onnx_remove_activations(inputs, tmp_dir):
+    for input in inputs:
+        oname = '{}.onnx.npz'.format(os.path.join(tmp_dir, os.path.basename(input)))
         if os.path.exists(oname):
             os.remove(oname)
 
@@ -209,22 +233,17 @@ def vnnx_bias_corrections(json_string, onnx_model, size_conf, io_info, output_by
     js = json.loads(json_string)
     bias_correction_nodes = jslayers_to_adjust(js)
 
+    input_scale = 1. / io_info['input_scale_factors'][0]
     input_shape =  onnx_helper.get_model_input_shape(onnx_model)
-    channels = input_shape[-3]
-    height = input_shape[-2]
-    width = input_shape[-1]
-
-    images = collect_images(samples_folder, samples_count)
-    onnx_save_activations(onnx_model, channels, height, width, images, tmp_dir)
-
+    inputs = collect_inputs(samples_folder, samples_count)
+    onnx_save_activations(onnx_model, tmp_dir, inputs, input_shape, input_scale)
     vnnx_fname = os.path.join(tmp_dir, 'tmp.vnnx')
-
 
     for bl in bias_correction_nodes:
         if bl == bias_correction_nodes[0]:
             bias_corrections = None
         else:
-            bias_corrections = 'biases_correction.json'
+            bias_corrections = os.path.join(tmp_dir, 'bias_corrections.json')
 
         current_nodes = get_current_subgraph_nodes(js, bias_correction_nodes, bl)
         input_ids, output_ids = get_io_ids(js, current_nodes)
@@ -236,27 +255,47 @@ def vnnx_bias_corrections(json_string, onnx_model, size_conf, io_info, output_by
         with open(vnnx_fname, "wb") as output_file:
             output_file.write(graph_binary)
 
-        run_subgraph_biases(input_ids, output_id, vnnx_fname, channels, height, width, images, tmp_dir)
+        run_subgraph_biases(input_ids, output_id, vnnx_fname, tmp_dir, inputs, input_shape, input_scale)
 
-        biases = update_subgraph_biases(js_node, output_id, images, tmp_dir)
+        biases, mse = update_subgraph_biases(js_node, output_id, inputs, tmp_dir)
         if bl == bias_correction_nodes[0]:
+            bias_corrections = os.path.join(tmp_dir, 'bias_corrections.json')
             current_biases = {}
             for key in biases:
                 current_biases[key] = (biases[key]).tolist()
         else:
-            with open('biases_correction.json') as f:
+            with open(bias_corrections) as f:
                 current_biases = json.load(f)
             for key in biases:
                 current_biases[key] = (biases[key]).tolist()
-        with open('biases_correction.json', 'w') as f:
+        with open(bias_corrections, 'w') as f:
             json.dump(current_biases, f, indent=2)
 
-        bias_corrections = 'biases_correction.json'
         graph_binary = json_to_graph.json_to_graph(json_string, size_conf, io_info=io_info, output_bytes=output_bytes, bias_corrections=bias_corrections, bias_correction_nodes=(current_nodes, bias_correction_nodes))
         with open(vnnx_fname, "wb") as output_file:
             output_file.write(graph_binary)
 
-        run_subgraph_biases(input_ids, output_id, vnnx_fname, channels, height, width, images, tmp_dir)
+        run_subgraph_biases(input_ids, output_id, vnnx_fname, tmp_dir, inputs, input_shape, input_scale)
+
+        # correction phase (based of channel-wise mean squared error)
+        if False:
+            biases, current_mse = update_subgraph_biases(js_node, output_id, inputs, tmp_dir)
+            with open(bias_corrections) as f:
+                current_biases = json.load(f)
+            for key in biases:
+                current = np.asarray(current_biases[key])
+                for i,_ in enumerate(biases[key]):
+                    if mse[key][i] < current_mse[key][i]:
+                        biases[key][i] = 0.
+                current_biases[key] = (biases[key]).tolist()
+            with open(bias_corrections, 'w') as f:
+                json.dump(current_biases, f, indent=2)
+
+            graph_binary = json_to_graph.json_to_graph(json_string, size_conf, io_info=io_info, output_bytes=output_bytes, bias_corrections=bias_corrections, bias_correction_nodes=(current_nodes, bias_correction_nodes))
+            with open(vnnx_fname, "wb") as output_file:
+                output_file.write(graph_binary)
+            run_subgraph_biases(input_ids, output_id, vnnx_fname, tmp_dir, inputs, input_shape, input_scale)
+
 
     #clean up
     for bl in bias_correction_nodes:
@@ -264,8 +303,8 @@ def vnnx_bias_corrections(json_string, onnx_model, size_conf, io_info, output_by
         input_ids, output_ids = get_io_ids(js, current_nodes)
         assert(len(output_ids) == 1)
         output_id = output_ids[0]
-        vnnx_remove_image(output_id, images, tmp_dir)
+        vnnx_remove_inputs(output_id, inputs, tmp_dir)
 
-    onnx_remove_activations(images, tmp_dir)
+    onnx_remove_activations(inputs, tmp_dir)
     if os.path.exists(vnnx_fname):
         os.remove(vnnx_fname)

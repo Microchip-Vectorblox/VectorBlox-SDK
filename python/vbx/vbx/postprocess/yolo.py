@@ -96,15 +96,21 @@ class Parser:
                 if apply_activation:
                     predictions[box_index + 0 * side_square] = self.logistic(predictions[box_index + 0 * side_square])
                     predictions[box_index + 1 * side_square] = self.logistic(predictions[box_index + 1 * side_square])
-
-                x = (col + predictions[box_index + 0 * side_square]) / params['side'] * net_w
-                y = (row + predictions[box_index + 1 * side_square]) / params['side'] * net_h
-                # Value for exp is very big number in some cases so following construction is using here
-                try:
-                    h_exp = exp(predictions[box_index + 3 * side_square])
-                    w_exp = exp(predictions[box_index + 2 * side_square])
-                except OverflowError:
-                    continue
+                if version > 3:
+                    # ultralytics yolov5 (and master yolov3)
+                    x = (col + predictions[box_index + 0 * side_square] * 2 - 0.5) / params['side'] * net_w
+                    y = (row + predictions[box_index + 1 * side_square] * 2 - 0.5) / params['side'] * net_h
+                    h_exp = (self.logistic(predictions[box_index + 3 * side_square]) * 2) ** 2
+                    w_exp = (self.logistic(predictions[box_index + 2 * side_square]) * 2) ** 2
+                else:
+                    x = (col + predictions[box_index + 0 * side_square]) / params['side'] * net_w
+                    y = (row + predictions[box_index + 1 * side_square]) / params['side'] * net_h
+                    # Value for exp is very big number in some cases so following construction is using here
+                    try:
+                        h_exp = exp(predictions[box_index + 3 * side_square])
+                        w_exp = exp(predictions[box_index + 2 * side_square])
+                    except OverflowError:
+                        continue
 
                 w = w_exp * params['anchors'][2 * n]
                 h = h_exp * params['anchors'][2 * n + 1]
@@ -286,11 +292,11 @@ yolov2_tiny_params = {
 
 yolov2_params = {
         'output/YoloRegion':  {
-            'side': 13,
+            'side': 19,
             'classes': 80,
             'num': 5,
             'coords': 4,
-            'shape': [1, 425, 13, 13],
+            'shape': [1, 425, 19, 19],
             'anchors': [_*32 for _ in [0.57273,0.677385,1.87446,2.06253,3.33843,5.47434,7.88282,3.52778,9.77052,9.16828]],
             },
         }
@@ -302,6 +308,11 @@ def get_param_by_output_size(output,parameters):
     for p in parameters:
         if size == reduce(operator.mul,parameters[p]['shape']):
             return p
+
+
+def yolov2_coco(outputs, scale_factors, threshold=0.3, iou=0.4, do_activations=True):
+    blobs = {'output/YoloRegion': np.reshape(outputs[0].astype(np.float32)*scale_factors[0], (425, 19, 19))}
+    return yolo_post_process(blobs, yolov2_params, 608, 608, threshold, iou, 2, True, do_activations)
 
 
 def yolov2_voc(outputs, scale_factors, threshold=0.3, iou=0.4, do_activations=True):
@@ -350,7 +361,7 @@ def yolov3_coco(outputs, scale_factors, threshold=0.3, iou=0.4):
 
 def demo_post_process(outputs, scale=1, network='tiny_voc', threshold=0.3, iou=0.4, do_nms=True, do_softmax=True):
 
-    if network is 'tiny_voc':
+    if network == 'tiny_voc':
         params =  yolov2_tiny_voc_params
         height, width = 416, 416
         blobs = {'output/YoloRegion': outputs*scale}

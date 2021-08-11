@@ -3,6 +3,7 @@ import os.path
 import tempfile
 
 from . import onnx_convert
+from . import onnx_helper
 from . import onnx_modify
 from . import onnx_normalize
 from . import onnx_to_json
@@ -21,6 +22,7 @@ def generate_vnnx(xml_filename,
                   output_filename=None,
                   cut_node=None,
                   bias_correction=False,
+                  kld=False,
                   output_bytes=4):
     if keep_temp:
         tmp_dir ='keep_temp'
@@ -50,24 +52,24 @@ def generate_vnnx(xml_filename,
         if cut_node:
             nodes = onnx_convert.cut_after_node(nodes, cut_node)
         graph = onnx_convert.convert_openvino_xml_to_onnx(nodes, model_name, ir_version)
-        onnx_convert.onnx_save_model(graph, onnx_model)
+        onnx_helper.onnx_save_model(graph, onnx_model)
 
         if samples_folder:
-            nodes = onnx_convert.gather_stats(onnx_model, nodes, samples_folder, samples_count, scale=255.)
+            nodes = onnx_convert.gather_stats(onnx_model, nodes, samples_folder, samples_count, scale=None, kld_threshold=kld)
         onnx_convert.save_stats(nodes, onnx_stats)
 
         # activation/weight normalization
         onnx_modify.onnx_pre_graph(onnx_model, onnx_model_pre)
         if not skip_normalization:
-            output_scale_factors = onnx_normalize.run_normalize_graph(onnx_model_pre, onnx_stats, onnx_model_norm)
+            input_scale_factors, output_scale_factors = onnx_normalize.run_normalize_graph(onnx_model_pre, onnx_stats, onnx_model_norm)
         else:
-            output_scale_factors = [1.0]
+            input_scale_factors, output_scale_factors = [1.0], [1.0]
             onnx_model_norm = onnx_model_pre
         onnx_modify.onnx_post_graph(onnx_model_norm, onnx_model_post)
 
         input_ids, output_ids = onnx_modify.onnx_get_io_ids(onnx_model_post)
         with open(io_json, 'w') as jf:
-            io_info = {'input_ids': input_ids, 'output_ids': output_ids, 'output_scale_factors': output_scale_factors}
+            io_info = {'input_ids': input_ids, 'output_ids': output_ids, 'input_scale_factors': input_scale_factors, 'output_scale_factors': output_scale_factors}
             json.dump(io_info, jf)
 
     with open(io_json) as jf:
@@ -85,7 +87,8 @@ def generate_vnnx(xml_filename,
     with open(graph_json, 'w') as jf:
         jf.write(json_string)
     if bias_correction:
-        graph_binary = json_to_graph.json_to_graph(json_string, size_conf, io_info=io_info, output_bytes=output_bytes, bias_corrections='biases_correction.json')
+        bias_corrections = os.path.join(tmp_dir, 'bias_corrections.json')
+        graph_binary = json_to_graph.json_to_graph(json_string, size_conf, io_info=io_info, output_bytes=output_bytes, bias_corrections=bias_corrections)
     else:
         graph_binary = json_to_graph.json_to_graph(json_string, size_conf, io_info=io_info, output_bytes=output_bytes)
 

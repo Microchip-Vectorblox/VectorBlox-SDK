@@ -8,10 +8,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include "vnnx-types.h"
-#if defined(__riscv) && defined(__linux) || defined(VBX_SOC_DRIVER)
+#if defined(__riscv) && defined(__linux)
 #define VBX_SOC_DRIVER 1
-#else
-#define VBX_SOC_DRIVER 0
 #endif
 #ifdef __cplusplus
 extern "C" {
@@ -47,19 +45,19 @@ typedef enum {
 }vbx_cnn_size_conf_e;
 
 typedef enum {
-              INVALID_FIRMWARE_ADDRESS               = 1,
-              FIRMWARE_ADDRESS_NOT_READY             = 2,
-              START_NOT_CLEAR                        = 3,
-              OUTPUT_VALID_NOT_SET                   = 4,
-              FIRMWARE_BLOB_VERSION_MISMATCH         = 5,
-              INVALID_NETWORK_ADDRESS                = 6,
-              MODEL_BLOB_INVALID                     = 7,
-              MODEL_BLOB_VERSION_MISMATCH            = 8,
-              MODEL_BLOB_SIZE_CONFIGURATION_MISMATCH = 9,
-              FIRMWARE_BLOB_STALE                    = 10
+              INVALID_FIRMWARE_ADDRESS        = 1,
+              FIRMWARE_ADDRESS_NOT_READY      = 2,
+              START_NOT_CLEAR                 = 3,
+              OUTPUT_VALID_NOT_SET            = 4,
+              FIRMWARE_BLOB_VERSION_MISMATCH  = 5,
+              INVALID_NETWORK_ADDRESS         = 6,
+              MODEL_BLOB_INVALID              = 7,
+              MODEL_BLOB_VERSION_MISMATCH     = 8,
+              MODEL_BLOB_SIZE_CONFIGURATION_MISMATCH      = 9,
+              FIRMWARE_BLOB_STALE            = 10
 }vbx_cnn_err_e;
 
-
+#define MAX_IO_BUFFERS 10
 typedef struct {
 	int32_t initialized;
 	uint32_t version;
@@ -67,15 +65,16 @@ typedef struct {
 	void* instruction_blob;
 	volatile uint32_t* ctrl_reg;
   int debug_print_ptr;
-#if VBX_SOC_DRIVER
+#if defined(VBX_SOC_DRIVER) || defined(SPLASHKIT_PCIE)
     uint8_t* dma_buffer;
     uint8_t* dma_buffer_end;
   size_t  dma_phys_trans_offset;
+  vbx_cnn_io_ptr_t *io_buffers;
 #endif
 
 }vbx_cnn_t;
 
-#if VBX_SOC_DRIVER
+#if VBX_SOC_DRIVER || SPLASHKIT_PCIE
   void* vbx_allocate_dma_buffer(vbx_cnn_t* vbx_cnn,size_t request_size,size_t align);
 #endif
 /**
@@ -267,9 +266,6 @@ void* model_get_test_input(const model_t* model,int input_index);
 
 float model_get_output_scale_value(const model_t* model,int index);
 
-int vbx_cnn_get_debug_prints(vbx_cnn_t* vbx_cnn,char* buf,size_t max_chars)
-    __attribute__((warning("vbx_cnn_get_debug_prints() is not part of the official Vectorblox API"
-                           " and could be removed at any time")));
 
 #ifdef __cplusplus
 }

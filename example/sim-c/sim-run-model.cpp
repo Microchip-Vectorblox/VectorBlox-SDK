@@ -68,7 +68,11 @@ int main(int argc, char** argv){
 	vbx_cnn_t* vbx_cnn = vbx_cnn_init(ctrl_reg_addr,firmware_blob);
 
 	if(argc < 4){
-		printf("Usage %s MODEL_FILE IMAGE.jpg (CLASSIFY|YOLOV2|TINYYOLOV2|TINYYOLOV3)\n",argv[0]);
+		fprintf(stderr,
+                "Usage: %s MODEL_FILE IMAGE.jpg NETWORK_TYPE\n"
+                "   NETWORK_TYPE controls what post processing routines to use\n"
+                "      must be one of CLASSIFY, YOLOV2, TINYYOLOV2, TINYYOLOV3, BLAZEFACE,RETINAFACE, or SSDV2\n",
+                argv[0]);
 		return 1;
 	}
 
@@ -107,18 +111,13 @@ int main(int argc, char** argv){
 	}else{
 	  input_buffer = (uint8_t*)model_get_test_input(model,0);
 	}
-	int output_length = model_get_output_length(model,0);
-	int output_length1=0;
-	fix16_t* output_buffer0 = (fix16_t*)malloc(output_length*sizeof(fix16_t));
-	fix16_t* output_buffer1 = NULL;
-	if(model_get_num_outputs(model)==2){
-		output_length1 = model_get_output_length(model,1);
-		output_buffer1 = (fix16_t*)malloc(output_length1*sizeof(fix16_t));
-	}
+    vbx_cnn_io_ptr_t* io_buffers= (vbx_cnn_io_ptr_t*)malloc(sizeof(vbx_cnn_io_ptr_t)*(1+model_get_num_outputs(model)));
+    io_buffers[0] = (uintptr_t)input_buffer;
+    for (unsigned o = 0; o < model_get_num_outputs(model); ++o) {
+      int output_length = model_get_output_length(model, o);
+	  io_buffers[o+1] = (uintptr_t)malloc(output_length*sizeof(fix16_t));
+    }
 
-	vbx_cnn_io_ptr_t io_buffers[3] = {(uintptr_t)input_buffer,
-	                                  (uintptr_t)output_buffer0,
-					  (uintptr_t)output_buffer1};
 	//buffers are now setup,
 	//we can run the model.
 
@@ -131,9 +130,72 @@ int main(int argc, char** argv){
 		printf("Model Run failed with error code: %d\n",err);
 	}
 	//data should be available int the output buffers now.
-	if (post_process_str=="CLASSIFY") {
+    if (post_process_str == "BLAZEFACE"){
+        const int MAX_FACES=24;
+        face_t faces[MAX_FACES];
+        fix16_t* output_buffer0=(fix16_t*)(uintptr_t)io_buffers[1];
+        fix16_t* output_buffer1=(fix16_t*)(uintptr_t)io_buffers[2];
+        int output_length0 = model_get_output_length(model, 0);
+        int output_length1 = model_get_output_length(model, 1);
+
+	int facesLength = 0;
+	if (output_length0 < output_length1) {
+		facesLength = post_process_blazeface(faces,output_buffer0,output_buffer1,output_length0,
+				MAX_FACES,fix16_from_int(1));
+	} else {
+		facesLength = post_process_blazeface(faces,output_buffer1,output_buffer0,output_length1,
+				MAX_FACES,fix16_from_int(1));
+	}
+        for(int f=0;f<facesLength;f++){
+            face_t* face = faces+f;
+            fix16_t x = face->box[0];
+            fix16_t y = face->box[1];
+            fix16_t w = face->box[2] - face->box[0];
+            fix16_t h = face->box[3] - face->box[1];
+            printf("face %d found at (x,y,w,h) %f %f %f %f\n",f,
+                   fix16_to_float(x), fix16_to_float(y),
+                   fix16_to_float(w), fix16_to_float(h));
+        }
+    }else if (post_process_str=="RETINAFACE"){
+        const int MAX_FACES=24;
+        face_t faces[MAX_FACES];
+        fix16_t confidence_threshold=fix16_from_float(0.95);
+        fix16_t nms_threshold=fix16_from_float(0.4);
+
+        fix16_t* output_buffers[9];
+        for(int o=0;o<9;++o){
+            output_buffers[o]=(fix16_t*)(uintptr_t)io_buffers[1+o];
+        }
+        int input_length = model_get_input_length(model,0);
+	int size = 640;
+	if (input_length == (3*320*320)) size = 320;
+        int facesLength = post_process_retinaface(faces,MAX_FACES,output_buffers, size, size,
+                                                  confidence_threshold,nms_threshold);
+
+        for(int f=0;f<facesLength;f++){
+            face_t* face = faces+f;
+            fix16_t x = face->box[0];
+            fix16_t y = face->box[1];
+            fix16_t w = face->box[2] - face->box[0];
+            fix16_t h = face->box[3] - face->box[1];
+            printf("face %d found at (x,y,w,h) %d %d %d %d\n",f,
+                   fix16_to_int(x), fix16_to_int(y),
+                   fix16_to_int(w), fix16_to_int(h));
+            printf("landmarks: ");
+            for(int l =0;l<5;++l){
+                printf("%d,%d ",
+                       fix16_to_int(face->points[l][0]),
+                       fix16_to_int(face->points[l][1]));
+                fflush(stdout);
+            }printf("\n");
+
+
+        }
+    }else if (post_process_str=="CLASSIFY") {
 	  const int topk=10;
 	  int16_t indices[topk];
+      int output_length = model_get_output_length(model, 0);
+      fix16_t* output_buffer0=(fix16_t*)(uintptr_t)io_buffers[1];
 	  post_process_classifier(output_buffer0,output_length,indices,topk);
 	  for(int i = 0;i < topk; ++i){
 		int idx = indices[i];
@@ -145,7 +207,7 @@ int main(int argc, char** argv){
 		int score = output_buffer0[idx];
 		printf("%d, %d, %s, %d.%03d\n", i, idx,class_name, score>>16, (score*1000)>>16);
 	  }
-	} else if (post_process_str == "TINYYOLOV2" || post_process_str == "YOLOV2" || post_process_str == "TINYYOLOV3"){
+	} else if (post_process_str == "TINYYOLOV2" || post_process_str == "YOLOV2" || post_process_str == "TINYYOLOV3" || post_process_str == "SSDV2"){
 		char **class_names = NULL;
 		int valid_boxes = 0;
 		fix16_box boxes[1024];
@@ -156,7 +218,7 @@ int main(int argc, char** argv){
 		if(post_process_str == "TINYYOLOV2"){ //tiny yolo v2 VOC
 			class_names = voc_classes;
 			int num_outputs = 1;
-			fix16_t *outputs[] = {output_buffer0};
+			fix16_t *outputs[] = {(fix16_t*)io_buffers[1]};
 			float anchors[] ={1.08, 1.19, 3.42, 4.41, 6.63, 11.38, 9.42, 5.11, 16.620001, 10.52};
 
 			yolo_info_t cfg_0 = {
@@ -176,7 +238,7 @@ int main(int argc, char** argv){
 		} else if (post_process_str == "YOLOV2"){ //yolo v2 VOC
 			class_names = voc_classes;
 			int num_outputs = 1;
-			fix16_t *outputs[] = {output_buffer0};
+            fix16_t *outputs[] = {(fix16_t*)io_buffers[1]};
 			float anchors[] = {1.3221, 1.73145, 3.19275, 4.00944, 5.05587, 8.09892, 9.47112, 4.84053, 11.2364, 10.0071};
 
 			yolo_info_t cfg_0 = {
@@ -196,7 +258,8 @@ int main(int argc, char** argv){
 		} else if (post_process_str == "TINYYOLOV3"){ //tiny yolo v3 COCO
 			class_names = coco_classes;
 			int num_outputs = 2;
-			fix16_t *outputs[] = {output_buffer0, output_buffer1};
+			fix16_t *outputs[] = {(fix16_t*)io_buffers[1],
+                                  (fix16_t*)io_buffers[2]};
 			float anchors[] = {10,14,23,27,37,58,81,82,135,169,344,319}; // 2*num
 			int mask_0[] = {3,4,5};
 			int mask_1[] = {1,2,3};
@@ -231,6 +294,25 @@ int main(int argc, char** argv){
 
 			valid_boxes = post_process_yolo(outputs, num_outputs, cfg, thresh, iou, boxes, max_boxes);
 		}
+        else if (post_process_str == "SSDV2"){
+        fix16_t* output_buffers[12] = {(fix16_t*)io_buffers[1],
+                                       (fix16_t*)io_buffers[2],
+                                       (fix16_t*)io_buffers[3],
+                                       (fix16_t*)io_buffers[4],
+                                       (fix16_t*)io_buffers[5],
+                                       (fix16_t*)io_buffers[6],
+                                       (fix16_t*)io_buffers[7],
+                                       (fix16_t*)io_buffers[8],
+                                       (fix16_t*)io_buffers[9],
+                                       (fix16_t*)io_buffers[10],
+                                       (fix16_t*)io_buffers[11],
+                                       (fix16_t*)io_buffers[12]
+        };
+        fix16_t confidence_threshold=fix16_from_float(0.6);
+        fix16_t nms_threshold=fix16_from_float(0.5);
+        valid_boxes = post_process_ssdv2(boxes,max_boxes,output_buffers,91,confidence_threshold,nms_threshold);
+        class_names = coco91_classes;
+    }
 
 		char class_str[50];
 		for(int i=0;i<valid_boxes;++i){
@@ -256,10 +338,10 @@ int main(int argc, char** argv){
 				post_process_str.c_str());
 	}
 
-	int32_t checksum = fletcher32((uint16_t*)io_buffers[1], output_length*2);
-	if (io_buffers[2]) {
-	  checksum ^= fletcher32((uint16_t*)io_buffers[2], output_length1*2);
-	}
+	int32_t checksum = fletcher32((uint16_t*)io_buffers[1],  model_get_output_length(model, 0));
+    for(unsigned o =1;o<model_get_num_outputs(model);++o){
+	  checksum ^= fletcher32((uint16_t*)io_buffers[1+o], model_get_output_length(model, o)*2);
+    }
 	printf("CHECKSUM = 0x%08x\n",checksum);
 	if (read_buffer) {
 		free(read_buffer);

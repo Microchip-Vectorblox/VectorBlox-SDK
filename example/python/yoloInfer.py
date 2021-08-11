@@ -17,6 +17,8 @@ if __name__ == "__main__":
     parser.add_argument('-t', '--threshold', type=float, default=0.5)
     parser.add_argument('-i', '--iou', type=float, default=0.4)
     parser.add_argument('-p', '--padding', action='store_true')
+    parser.add_argument('-v', '--version', type=int)
+    parser.add_argument('--io')
     args = parser.parse_args()
     
     if not args.json:
@@ -65,6 +67,12 @@ if __name__ == "__main__":
         modelOutput = {}
         for n,out in enumerate(session.get_outputs()):
             modelOutput[out.name] = outputList[n]
+            if args.io:
+                with open(args.io) as f:
+                    d = json.load(f)
+                    for n, name in enumerate(d['output_ids']):
+                        if name == out.name:
+                            modelOutput[out.name] *= d['output_scale_factors'][n]
     elif args.model.endswith('.vnnx'):
         import vbx.sim
         with open(args.model, "rb") as mf:
@@ -79,9 +87,10 @@ if __name__ == "__main__":
                 shape = (1,layer['c'],layer['h'],layer['w'])
                 if out.size == np.prod(shape):  # match output by size
                     modelOutput[layer['outputName']] = out.reshape(shape)
-        print("bandwidth per run = {}".format(model.get_bandwidth_per_run()))
-        print("estimated {} seconds at 100MHz".format(model.get_estimated_runtime(100E6)))
-    
+        bw = model.get_bandwidth_per_run()
+        print("Bandwidth per run = {} Bytes ({:.3} MB/s at 100MHz)".format(bw,bw/100E6))
+        print("Estimated {} seconds at 100MHz".format(model.get_estimated_runtime(100E6)))
+        print("If running at another frequency, scale these numbers appropriately")    
     # post-processing
     params = {}
     blobs = {}
@@ -112,7 +121,9 @@ if __name__ == "__main__":
                 'shape': [1, layer['c'], layer['h'], layer['w']],
                 }
             blobs[label] = modelOutput[label].squeeze()
-    if ioCfg[-1]['type'] == 'region':
+    if args.version:
+        version = args.version
+    elif ioCfg[-1]['type'] == 'region':
         version = 2
     else:
         version = 3

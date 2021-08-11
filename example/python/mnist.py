@@ -46,5 +46,7 @@ if __name__ == "__main__":
         i += 1
 
     cv2.imwrite(args.output, output_img)
-    print("bandwidth per run = {}".format(model.get_bandwidth_per_run()))
-    print("estimated {} seconds at 100MHz".format(model.get_estimated_runtime(100E6)))
+    bw = model.get_bandwidth_per_run()
+    print("Bandwidth per run = {} Bytes ({:.3} MB/s at 100MHz)".format(bw,bw/100E6))    
+    print("Estimated {} seconds at 100MHz".format(model.get_estimated_runtime(100E6)))
+    print("If running at another frequency, scale these numbers appropriately")

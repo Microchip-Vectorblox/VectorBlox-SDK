@@ -22,6 +22,7 @@ import queue
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -33,7 +34,8 @@ import requests
 import yaml
 
 DOWNLOAD_TIMEOUT = 5 * 60
-MODEL_ROOT = Path(__file__).resolve().parents[2] / 'models'
+OMZ_ROOT = Path(__file__).resolve().parents[2]
+MODEL_ROOT = OMZ_ROOT / 'models'
 
 # make sure to update the documentation if you modify these
 KNOWN_FRAMEWORKS = {
@@ -60,17 +62,20 @@ KNOWN_TASK_TYPES = {
     'human_pose_estimation',
     'image_inpainting',
     'image_processing',
+    'image_translation',
     'instance_segmentation',
     'machine_translation',
     'monocular_depth_estimation',
     'object_attributes',
     'optical_character_recognition',
+    'place_recognition',
     'question_answering',
     'semantic_segmentation',
     'sound_classification',
     'speech_recognition',
     'style_transfer',
     'token_recognition',
+    'text_to_speech',
 }
 
 KNOWN_QUANTIZED_PRECISIONS = {p + '-INT8': p for p in ['FP16', 'FP32']}
@@ -100,13 +105,31 @@ class JobContext:
     def interrupt(self):
         self._interrupted = True
 
+    @staticmethod
+    def _signal_message(signal_num):
+        # once Python 3.8 is the minimum supported version,
+        # signal.strsignal can be used here
+
+        signals = type(signal.SIGINT)
+
+        try:
+            signal_str = f'{signals(signal_num).name} ({signal_num})'
+        except ValueError:
+            signal_str = f'{signal_num}'
+
+        return f'Terminated by signal {signal_str}'
 
 class DirectOutputContext(JobContext):
     def print(self, value, *, end='\n', file=sys.stdout, flush=False):
         print(value, end=end, file=file, flush=flush)
 
     def subprocess(self, args, **kwargs):
-        return subprocess.run(args, **kwargs).returncode == 0
+        return_code = subprocess.run(args, **kwargs).returncode
+
+        if return_code < 0:
+            print(self._signal_message(-return_code), file=sys.stderr)
+
+        return return_code == 0
 
 
 class QueuedOutputContext(JobContext):
@@ -122,8 +145,12 @@ class QueuedOutputContext(JobContext):
                 universal_newlines=True, **kwargs) as p:
             for line in p.stdout:
                 self._output_queue.put((sys.stdout, line))
-            return p.wait() == 0
+            return_code = p.wait()
 
+        if return_code < 0:
+            self._output_queue.put((sys.stderr, self._signal_message(-return_code)))
+
+        return return_code == 0
 
 class JobWithQueuedOutput():
     def __init__(self, context, output_queue, future):
@@ -155,7 +182,7 @@ def run_in_parallel(num_jobs, f, work_items):
 
         try:
             return [job.complete() for job in jobs]
-        except:
+        except BaseException:
             for job in jobs: job.cancel()
             raise
 
@@ -344,7 +371,7 @@ class FileSourceGoogleDrive(FileSource):
     def start_download(self, session, chunk_size, offset):
         range_headers = self.http_range_headers(offset)
         URL = 'https://docs.google.com/uc?export=download'
-        response = session.get(URL, params={'id' : self.id}, headers=range_headers,
+        response = session.get(URL, params={'id': self.id}, headers=range_headers,
             stream=True, timeout=DOWNLOAD_TIMEOUT)
         response.raise_for_status()
 
@@ -408,7 +435,7 @@ class PostprocRegexReplace(Postproc):
 
         reporter.print_section_heading('Replacing text in {}', postproc_file)
 
-        postproc_file_text = postproc_file.read_text()
+        postproc_file_text = postproc_file.read_text(encoding='utf-8')
 
         orig_file = postproc_file.with_name(postproc_file.name + '.orig')
         if not orig_file.exists():
@@ -424,7 +451,7 @@ class PostprocRegexReplace(Postproc):
             raise RuntimeError('Invalid pattern: expected at least {} occurrences, but only {} found'.format(
                 self.count, num_replacements))
 
-        postproc_file.write_text(postproc_file_text)
+        postproc_file.write_text(postproc_file_text, encoding='utf-8')
 
 Postproc.types['regex_replace'] = PostprocRegexReplace
 
@@ -445,7 +472,7 @@ class PostprocUnpackArchive(Postproc):
 
         reporter.print_section_heading('Unpacking {}', postproc_file)
 
-        shutil.unpack_archive(str(postproc_file), str(output_dir), self.format)
+        shutil.unpack_archive(str(postproc_file), str(postproc_file.parent), self.format)
         postproc_file.unlink()  # Remove the archive
 
 Postproc.types['unpack_archive'] = PostprocUnpackArchive
@@ -504,11 +531,14 @@ class Model:
                 if conversion_to_onnx_args:
                     raise DeserializationError('Conversion to ONNX not supported for "{}" framework'.format(framework))
 
+            quantized = model.get('quantized', None)
+            if quantized is not None and quantized != 'INT8':
+                raise DeserializationError('"quantized": expected "INT8", got {!r}'.format(quantized))
+
             if 'model_optimizer_args' in model:
                 mo_args = [validate_string('"model_optimizer_args" #{}'.format(i), arg)
                     for i, arg in enumerate(model['model_optimizer_args'])]
-
-                precisions = {'FP16', 'FP32'}
+                precisions = {f'FP16-{quantized}', f'FP32-{quantized}'} if quantized is not None else {'FP16', 'FP32'}
             else:
                 if framework != 'dldt':
                     raise DeserializationError('Model not in IR format, but no conversions defined')

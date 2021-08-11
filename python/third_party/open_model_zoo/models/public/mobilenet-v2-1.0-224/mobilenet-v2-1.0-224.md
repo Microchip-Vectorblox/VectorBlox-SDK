@@ -4,8 +4,6 @@
 
 `mobilenet-v2-1.0-224` is one of MobileNet\* models, which are small, low-latency, low-power, and parameterized to meet the resource constraints of a variety of use cases. They can be used for classification, detection, embeddings, and segmentation like other popular large-scale models. For details, see the [paper](https://arxiv.org/abs/1704.04861).
 
-## Example
-
 ## Specification
 
 | Metric                          | Value                                     |
@@ -21,8 +19,6 @@
 | ------ | ----- |
 | Top 1  | 71.85%|
 | Top 5  | 90.69%|
-
-## Performance
 
 ## Input
 
@@ -66,8 +62,22 @@ Shape: [1,1001], format: [BxC],
     - B - batch size
     - C - vector of probabilities.
 
+## Download a Model and Convert it into Inference Engine Format
+
+You can download models and if necessary convert them into Inference Engine format using the [Model Downloader and other automation tools](../../../tools/downloader/README.md) as shown in the examples below.
+
+An example of using the Model Downloader:
+```
+python3 <omz_dir>/tools/downloader/downloader.py --name <model_name>
+```
+
+An example of using the Model Converter:
+```
+python3 <omz_dir>/tools/downloader/converter.py --name <model_name>
+```
+
 ## Legal Information
 
 The original model is distributed under the
 [Apache License, Version 2.0](https://raw.githubusercontent.com/tensorflow/models/master/LICENSE).
-A copy of the license is provided in [APACHE-2.0-TensorFlow.txt](../licenses/APACHE-2.0-TensorFlow.txt).
+A copy of the license is provided in [APACHE-2.0-TF-Models.txt](../licenses/APACHE-2.0-TF-Models.txt).

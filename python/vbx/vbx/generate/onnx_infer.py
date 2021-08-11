@@ -10,33 +10,47 @@ import sys
 import onnx
 import re
 from onnx import numpy_helper, helper, checker, shape_inference
-from onnx import optimizer, version_converter
+
+from .onnx_kld import collect_histogram_data
 
 
 np.set_printoptions(suppress=True, precision=4, linewidth=120)
 np.random.seed(1337)
 
 
-def load_image(image_src, scale, channels, height, width):
-    def check_img(img):
-        if img is None:
-            sys.stderr.write("Error Unable to read image file {}\n".format(image_src))
-            sys.exit(1)
-    if channels == 3:
-        img = cv2.imread(image_src)
-        check_img(img)
-        if height and width and img.shape[:2] != [width, height]:
-            img = cv2.resize(img, (width, height), interpolation=cv2.INTER_LINEAR)
-        arr = img.swapaxes(1, 2).swapaxes(0, 1).astype(np.float32)
-    else:
-        img = cv2.imread(image_src, 0)
-        check_img(img)
-        if height and width and img.shape != [width, height]:
-            img = cv2.resize(img, (width, height), interpolation=cv2.INTER_LINEAR)
-        arr = img.astype(np.float32)
-        arr = np.expand_dims(arr, axis=0)
-    if scale != 255.0:
-        arr = arr / 255. * scale
+session_options = onnxruntime.SessionOptions()
+
+
+def load_input(src, scale, input_shape):
+    try:
+        channels = input_shape[-3]
+    except:
+        channels = 1
+    height = input_shape[-2]
+    width = input_shape[-1]
+    ext = src.split('.')[-1].lower()
+    if ext in ['npy']:
+        arr = np.load(src)
+    elif ext in ['jpg', 'jpeg', 'png']:
+        if channels == 3:
+            img = cv2.imread(src)
+            if img is None:
+                sys.stderr.write("Error Unable to read image file {}\n".format(src))
+                sys.exit(1)
+            if height and width and img.shape[:2] != [width, height]:
+                img = cv2.resize(img, (width, height), interpolation=cv2.INTER_LINEAR)
+            arr = img.swapaxes(1, 2).swapaxes(0, 1).astype(np.float32)
+        else:
+            img = cv2.imread(src, 0)
+            if img is None:
+                sys.stderr.write("Error Unable to read image file {}\n".format(src))
+                sys.exit(1)
+            if height and width and img.shape != [width, height]:
+                img = cv2.resize(img, (width, height), interpolation=cv2.INTER_LINEAR)
+            arr = img.astype(np.float32)
+            arr = np.expand_dims(arr, axis=0)
+    if scale:
+        arr = arr * scale
     arr = np.expand_dims(arr, axis=0)
 
     return arr
@@ -57,12 +71,6 @@ def extend_model_outputs(model):
             graph.output.extend([i])
 
     output_names = [_.name for _ in graph.output]
-    #for node in graph.node:
-    #    for i in node.input:            
-    #        if i not in output_names:
-    #            graph.output.extend([helper.make_tensor_value_info(i, 1, None)])
-    #
-    #output_names = [_.name for _ in graph.output]
     for node in graph.node:
         for o in node.output:
             if o not in output_names:
@@ -76,7 +84,7 @@ def onnx_activations(model_name, input_array=None):
     onnx.checker.check_model(model)
     model_ = extend_model_outputs(model)
 
-    session = onnxruntime.InferenceSession(model_.SerializeToString())
+    session = onnxruntime.InferenceSession(model_.SerializeToString(), session_options)
 
     if input_array is None:
         inputs = dict()
@@ -93,18 +101,34 @@ def onnx_activations(model_name, input_array=None):
     for node, arr in zip(session.get_outputs(), outputs):
         activations[node.name] = arr
 
-    sorted_activations = dict(sorted(activations.items()))
+    try:
+        graph = model.graph
+        output_names = [_.name for _ in graph.input]
+        for node in graph.node:
+            for i in node.input:
+                if i not in output_names:
+                    output_names.append(i)
+        output_names += [_.name for _ in graph.node]
+        output_names += [_.name for _ in graph.output]
+        for node in graph.node:
+            for o in node.output:
+                if o not in output_names:
+                    output_names.append(o)
 
-    return sorted_activations
+        activations = dict(sorted(activations.items(), key=lambda x: output_names.index(x[0])))
+    except:
+        pass
+
+    return activations
 
 
-def onnx_activations_batched(model_name, input_array, batch=2, stats_only=False):
+def onnx_activations_batched(model_name, input_array, batch=2, stats_only=False, histogram_dict={}):
     num_passes = int((input_array.shape[0] + batch-1) / batch)
     if num_passes == 1:
         return onnx_activations(model_name, input_array)
 
     model_ = extend_model_outputs(onnx.load(model_name))
-    session = onnxruntime.InferenceSession(model_.SerializeToString())
+    session = onnxruntime.InferenceSession(model_.SerializeToString(), session_options)
     i0 = session.get_inputs()[0].name
 
     activations = {}
@@ -118,22 +142,23 @@ def onnx_activations_batched(model_name, input_array, batch=2, stats_only=False)
                 stat = {"mean":np.mean(arr,axis=reduce_axis) / (input_array.shape[0]/arr.shape[0]),
                         "min":np.min(arr,axis=reduce_axis),
                         "max":np.max(arr,axis=reduce_axis)}
+                if out.name in histogram_dict.keys():
+                    stat["hist"] = collect_histogram_data(arr, None)
                 old_stat = stat
                 if out.name in stats:
                     old_stat = stats[out.name]
                 stats[out.name] = {"mean":stat['mean'] + old_stat['mean'],
                                    "min":np.minimum(stat['min'],old_stat['min']),
                                    "max":np.maximum(stat['max'],old_stat['max'])}
+                if out.name in histogram_dict.keys():
+                    stats[out.name]["hist"] = collect_histogram_data(arr, stat['hist'])
             else:
                 if out.name in activations:
                     activations[out.name] = np.vstack((activations[out.name], arr))
                 else:                    
                     activations[out.name] = arr
     
-
     return stats if stats_only else activations 
-
-
 
 
 def onnx_infer_batched(onnx_name, input_array, batch=8):
@@ -141,7 +166,7 @@ def onnx_infer_batched(onnx_name, input_array, batch=8):
     if num_passes == 1:
         return onnx_infer(onnx_name, input_array)
 
-    session = onnxruntime.InferenceSession(onnx_name, None)
+    session = onnxruntime.InferenceSession(onnx_name, session_options)
     input_name = session.get_inputs()[0].name
     outputs = None
 
@@ -158,13 +183,13 @@ def onnx_infer_batched(onnx_name, input_array, batch=8):
 
 
 def onnx_infer(onnx_name, input_array):
-    session = onnxruntime.InferenceSession(onnx_name, None)
+    session = onnxruntime.InferenceSession(onnx_name, session_options)
     input_name = session.get_inputs()[0].name
 
     return session.run([], {input_name: input_array})[0]
 
 def onnx_infer_all(onnx_name, input_array):
-    session = onnxruntime.InferenceSession(onnx_name, None)
+    session = onnxruntime.InferenceSession(onnx_name, session_options)
     input_name = session.get_inputs()[0].name
 
     return session.run([], {input_name: input_array})
@@ -172,20 +197,20 @@ def onnx_infer_all(onnx_name, input_array):
 
 def onnx_random_infer(onnx_name, scale=255., batch=1):
     input_array = onnx_random_input(onnx_name, batch)
-    session = onnxruntime.InferenceSession(onnx_name, None)
+    session = onnxruntime.InferenceSession(onnx_name, session_options)
 
     return onnx_infer(onnx_name, input_array)
 
 
 def onnx_random_activations(onnx_name, scale=255., batch=1):
     input_array = onnx_random_input(onnx_name, batch)
-    session = onnxruntime.InferenceSession(onnx_name, None)
+    session = onnxruntime.InferenceSession(onnx_name, session_options)
 
     return onnx_activations(onnx_name, input_array)
 
 
 def onnx_random_input(onnx_name, scale=255., batch=1):
-    session = onnxruntime.InferenceSession(onnx_name, None)
+    session = onnxruntime.InferenceSession(onnx_name, session_options)
     input_shape = session.get_inputs()[0].shape
     input_shape[0] = batch
     input_array = np.random.random(input_shape).astype(np.float32) * scale
@@ -221,7 +246,7 @@ def onnx_activation_stats(model_name, activations):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('onnx')
-    parser.add_argument('-i', '--image', default='../oreo.224.jpg')
+    parser.add_argument('-i', '--input', default='../oreo.224.jpg')
     parser.add_argument('-n', '--normalized', action='store_true')
     parser.add_argument('-a', '--activations', action='store_true')
     parser.add_argument('-y', '--yolo', action='store_true')
@@ -231,13 +256,10 @@ def main():
 
     from . import onnx_helper
     input_shape =  onnx_helper.get_model_input_shape(args.onnx)
-    channels = input_shape[-3]
-    height = input_shape[-2]
-    width = input_shape[-1]
-    scale = 255.
+    scale = None
     if args.normalized:
-        scale = 1.
-    input_array = load_image(args.image, scale, channels, height, width)
+        scale = 1./255.
+    input_array = load_input(args.input, scale, input_shape)
 
     if args.activations:
         activations = onnx_activations(args.onnx, input_array)

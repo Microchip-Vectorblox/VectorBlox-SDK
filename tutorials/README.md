@@ -28,3 +28,4 @@ Below is a list of included tutorials. Frames per Second (FPS) assumes core is r
 |[yolov2-tiny](darknet/yolov2-tiny/yolov2-tiny.sh)|darknet|Object Detection|mAP(COCO)|24.08/24.03|26.84|15.66|8.10|[More Info](https://pjreddie.com/darknet/yolo/)|
 |[yolov3-tiny](darknet/yolov3-tiny/yolov3-tiny.sh)|darknet|Object Detection|mAP(COCO)|37.43/36.81|26.55|15.54|7.74|[More Info](https://pjreddie.com/darknet/yolo/)|
 |[BlazeFace](pytorch/BlazeFace/BlazeFace.sh)|pytorch|Classification|||276.12|243.96|132.93|[More Info](https://github.com/hollance/BlazeFace-PyTorch)|
+|[retinaface.mobilenet](pytorch/retinaface.mobilenet/retinaface.mobilenet.sh)|pytorch|Object Detection||||||[More Info]()|

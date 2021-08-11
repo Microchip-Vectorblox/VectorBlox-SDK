@@ -8,7 +8,14 @@
 #include <stdlib.h>
 #include <stdint.h>
 typedef uint64_t obj_off_t;
+#if defined(__GNUC__)
 #define STRUCT_PACKED struct __attribute__((packed,aligned(4)))
+#else
+#define STRUCT_PACKED struct
+#pragma pack(push,1)
+#pragma warning(disable : 4200)
+#endif
+
 typedef enum {
 	CALC_TYPE_UINT8,
 	CALC_TYPE_INT8,
@@ -23,10 +30,12 @@ typedef enum{
 	IDENTITY_SUBGRAPH,
 	LRN_SUBGRAPH,
 	TRANSPOSE_SUBGRAPH,
-	SOFTMAX_SUBGRAPH,
+	ACTIVATION_SUBGRAPH,
 	RESIZE_SUBGRAPH,
 	REORG_SUBGRAPH,
 	ARGMAX_SUBGRAPH,
+	REDUCEMEAN_SUBGRAPH,
+	TILE_SUBGRAPH,
 	UNKNOWN_SUBGRAPH
 } subgraph_type_e;
 
@@ -34,6 +43,18 @@ typedef enum{
     RESIZE_NEAREST,
     RESIZE_LINEAR
 } resize_mode_e;
+
+typedef enum{
+    SOFTMAX,
+    SIGMOID,
+    TANH,
+    MISH,
+    ELU,
+    SELU,
+    SWISH,
+    HTANH,
+    HSWISH
+} activation_mode_e;
 
 typedef enum {
 	GLOBAL_AVGPOOL_I8 =0,  ///< GLOBAL_AVERAGE with bytes
@@ -66,17 +87,21 @@ typedef enum {
 	PADCONST_U8=27,  ///< Pad Const with bytes
 	PADCONST_I8=28,  ///< Pad Const with bytes
 	PADCONST_I16=29, ///< Pad Const with halfwords
-	MUL_BC3_I8=30,  ///< Multiply const with bytes
-	MUL_BC3_I16=31, ///< Multiply const with halfwords
-	MUL_BC3_U8=32,  ///< Multiply const with unsigned bytes
-	MUL_BC3_U16=33, ///< Multiply const with unsigned halfwords
-	MUL_BC2_I8=34,  ///< Multiply consts per channel with bytes
-	MUL_BC2_I16=35, ///< Multiply consts per channel with halfwords
-	ADD_U8 =36,  ///< Add consts per channel with unsigned bytes
-	ADD_I8 =37,  ///< Add consts per channel with bytes
-	ADD_I16=38, ///< Add consts per channel with halfwords
-	PREFETCH=39, ///< Prefetch DMA for later sublayer
-	LAYER_UNKNOWN=40
+	MUL_SCALAR_I8=30,  ///< Multiply const with bytes
+	MUL_SCALAR_I16=31, ///< Multiply const with halfwords
+	MUL_SCALAR_U8=32,  ///< Multiply const with unsigned bytes
+	MUL_SCALAR_U16=33, ///< Multiply const with unsigned halfwords
+	MUL_BROADCAST_MAP_I8=34,  ///< Multiply consts per channel with bytes
+	MUL_BROADCAST_MAP_I16=35, ///< Multiply consts per channel with halfwords
+        MUL_BROADCAST_ROW_I8=36, ///< Multiply array row with halfwords
+        MUL_BROADCAST_ROW_I16=37, ///< Multiply array per row with halfwords
+	ADD_BROADCAST_MAP_U8 =38,  ///< Add consts per channel with unsigned bytes
+	ADD_BROADCAST_MAP_I8 =39,  ///< Add consts per channel with bytes
+	ADD_BROADCAST_MAP_I16=40, ///< Add consts per channel with halfwords
+	ADD_BROADCAST_ROW_I8=41,  ///< Add array per row with bytes
+	ADD_BROADCAST_ROW_I16=42, ///< Add array per row with halfwords
+	PREFETCH=43, ///< Prefetch DMA for later sublayer
+	LAYER_UNKNOWN=44
 } layer_type_e;
 
 /**
@@ -84,7 +109,7 @@ typedef enum {
  */
 typedef struct {
 	//TODO: make this more generic for dense etc
-	int maps,r,n,m,c,y;
+	int maps,r,col,n,m,c,y,x;
     int total_input_channels;
 	void* sp_in;
 	void* sp_out;
@@ -136,17 +161,27 @@ typedef STRUCT_PACKED vnnx_layer{
 			int16_t scalar16;
 			int8_t scalar8;
 			uint8_t scalaru8;
-		}mul_bc3;
+		}mul_scalar;
 		STRUCT_PACKED{
 			int32_t use_xl;
 			obj_off_t array;
 			obj_off_t array_xl;
-		}add_bc2;
+		}add_broadcast_map;
 		STRUCT_PACKED{
 			int32_t use_xl;
 			obj_off_t array;
 			obj_off_t array_xl;
-		}mul_bc2;
+		}add_broadcast_row;
+		STRUCT_PACKED{
+			int32_t use_xl;
+			obj_off_t array;
+			obj_off_t array_xl;
+		}mul_broadcast_map;
+		STRUCT_PACKED{
+			int32_t use_xl;
+			obj_off_t array;
+			obj_off_t array_xl;
+		}mul_broadcast_row;
 		STRUCT_PACKED{
 		  int32_t scale;
 		}cast;
@@ -189,11 +224,11 @@ typedef STRUCT_PACKED vnnx_subgraph_node {
 	obj_off_t sublayers;
 	float output_scale_factor;
 	int32_t num_sublayers;
-	int32_t sublayer_stride;
-	int32_t sublayer_shape;
-	int32_t sublayer_shape_0;
-	int32_t sublayer_shape_full;
-	int32_t sublayer_shape_last;
+	int32_t sublayer_stride[2];
+	int32_t sublayer_shape[2];
+	int32_t sublayer_shape_0[2];
+	int32_t sublayer_shape_full[2];
+	int32_t sublayer_shape_last[2];
 	int32_t sublayer_rows;
 	int32_t sublayer_columns;
 	int32_t sublayer_scratchpad_per_map;
@@ -220,6 +255,7 @@ typedef STRUCT_PACKED vnnx_subgraph_node {
 			int32_t maps;
 			int32_t acc_maps;
 			int32_t rows;
+			int32_t cols;
 			int32_t inc_rows;
 			int32_t conv_rows;
 			int32_t core_split;
@@ -281,18 +317,36 @@ typedef STRUCT_PACKED vnnx_subgraph_node {
 			int32_t rows;
 		}lrn;
 		STRUCT_PACKED{
+			int32_t channels;
+			int32_t m;
+			int32_t n;
 			int32_t permutation[3];
-            int32_t out_maps_at_once;
+                        int32_t out_maps_at_once;
+                        int32_t out_rows_at_once;
 		}transpose;
 		STRUCT_PACKED{
 			float scale[2];
-            int32_t mode;
+                        int32_t mode;
 			int32_t channels;
 			int32_t m;
 			int32_t n;
 			int32_t maps;
 			int32_t rows;
 		}resize;
+		STRUCT_PACKED{
+			int32_t tile[3];
+			int32_t channels;
+			int32_t m;
+			int32_t n;
+			int32_t maps;
+			int32_t rows;
+		}tile;
+		STRUCT_PACKED{
+			int32_t channels;
+			int32_t m;
+			int32_t m0;
+			int32_t n;
+		}reduce;
 		STRUCT_PACKED{
 			int32_t stride;
 			int32_t channels;
@@ -304,7 +358,8 @@ typedef STRUCT_PACKED vnnx_subgraph_node {
 		STRUCT_PACKED{
 			obj_off_t scale;
 			int32_t size;
-		}softmax;
+			int32_t mode;
+		}activation;
 	};
 } vnnx_subgraph_node_t;
 
@@ -367,6 +422,11 @@ typedef STRUCT_PACKED vnnx_graph{
 	uint32_t magic;
 	vnnx_subgraph_node_t subgraphs[0];
 }vnnx_graph_t;
+
+#if defined(__GNUC__)
+#else
+#pragma pack(pop)
+#endif
 
 typedef enum {UNINITIALIZED, INVALID, VALID} recording_status_e;
 

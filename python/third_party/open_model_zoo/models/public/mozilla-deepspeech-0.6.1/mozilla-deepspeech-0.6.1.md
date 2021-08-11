@@ -10,8 +10,6 @@ For details on the original DeepSpeech, see paper <https://arxiv.org/abs/1412.55
 
 For details on this model, see <https://github.com/mozilla/DeepSpeech/releases/tag/v0.6.1>.
 
-## Example
-
 ## Specification
 
 | Metric                          | Value                                     |
@@ -32,8 +30,6 @@ For details on this model, see <https://github.com/mozilla/DeepSpeech/releases/t
 *NB*: beam_width=32 is a low value for a CTC decoder, and was used to achieve reasonable evaluation time with Python CTC decoder in Accuracy Checker.
 Increasing beam_width improves WER metric and slows down decoding.  Speech recognition demo has a faster C++ CTC decoder module.
 
-## Performance
-
 ## Input
 
 ### Original Model
@@ -42,7 +38,7 @@ Increasing beam_width improves WER metric and slows down decoding.  Speech recog
 
     - B - batch size, fixed to 1
     - N - `input_lengths`, number of audio frames in this section of audio
-    - T - context frames: along with the current frame, the network expects 9 preceeding frames and 9 succeeding frames. The absent context frames are filled with zeros.
+    - T - context frames: along with the current frame, the network expects 9 preceding frames and 9 succeeding frames. The absent context frames are filled with zeros.
     - C - 26 MFCC coefficients per each frame
 
    See [`accuracy-check.yml`](accuracy-check.yml) for all audio preprocessing and feature extraction parameters.
@@ -61,7 +57,7 @@ Increasing beam_width improves WER metric and slows down decoding.  Speech recog
 
     - B - batch size, fixed to 1
     - N - number of audio frames in this section of audio, fixed to 16
-    - T - context frames: along with the current frame, the network expects 9 preceeding frames and 9 succeeding frames. The absent context frames are filled with zeros.
+    - T - context frames: along with the current frame, the network expects 9 preceding frames and 9 succeeding frames. The absent context frames are filled with zeros.
     - C - 26 MFCC coefficients in each frame
 
     See [`accuracy-check.yml`](accuracy-check.yml) for all audio preprocessing and feature extraction parameters.
@@ -106,6 +102,20 @@ Chunk processing order must be from early to late audio positions.
     - `cudnn_lstm/rnn/multi_rnn_cell/cell_0/cudnn_compatible_lstm_cell/BlockLSTM/TensorIterator.1` for `new_state_h`
 
    Shapes: [1x2048], format: [BxC].  See the corresponding Inputs.
+
+## Download a Model and Convert it into Inference Engine Format
+
+You can download models and if necessary convert them into Inference Engine format using the [Model Downloader and other automation tools](../../../tools/downloader/README.md) as shown in the examples below.
+
+An example of using the Model Downloader:
+```
+python3 <omz_dir>/tools/downloader/downloader.py --name <model_name>
+```
+
+An example of using the Model Converter:
+```
+python3 <omz_dir>/tools/downloader/converter.py --name <model_name>
+```
 
 ## Legal Information
 

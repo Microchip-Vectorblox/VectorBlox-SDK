@@ -35,22 +35,29 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('model')
     parser.add_argument('image')
-    parser.add_argument('-c', '--channels', type=int, default=3)
-    parser.add_argument('-s', '--image-scale', type=float, default=255.)
     parser.add_argument('-a', '--anchors', default='BlazeFace-PyTorch/anchors.npy')
+    parser.add_argument('-s', '--size', type=int, default=128)
+    parser.add_argument('-t', '--threshold', type=float, default=0.75)
 
     args = parser.parse_args()
 
     model = vbx.sim.model.Model(open(args.model,"rb").read())
     image = cv2.imread(args.image)
-    if image.shape != (128,128,3):
-        image = cv2.resize(image,(128,128))
+    if image.shape != (args.size,args.size,3):
+        image = cv2.resize(image,(args.size,args.size))
     input_array = image.transpose(2,0,1)
     outputs = model.run([input_array.flatten()])
     outputs = [o/(1<<16) for o in outputs]
 
+    if len(outputs) == 4:
+        a = np.concatenate((outputs[0], outputs[1]))
+        b = np.concatenate((outputs[2], outputs[3]))
+    else:
+        a = outputs[0]
+        b = outputs[1]
+
     anchors = np.load(args.anchors)
-    detections = blazeface(outputs[0], outputs[1], anchors)
+    detections = blazeface(a, b, anchors, args.size, args.threshold)
     plot_detections(cv2.imread(args.image), detections[0])
 
 

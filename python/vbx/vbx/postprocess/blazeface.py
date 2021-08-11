@@ -1,6 +1,8 @@
 import numpy as np
 import torch.nn as nn
 import torch
+
+
 class BlazeFace(nn.Module):
     """The BlazeFace face detection model from MediaPipe.
 
@@ -17,7 +19,7 @@ class BlazeFace(nn.Module):
     Based on code from https://github.com/tkat0/PyTorch_BlazeFace/ and
     https://github.com/google/mediapipe/
     """
-    def __init__(self):
+    def __init__(self, scale, min_score_thresh):
         super(BlazeFace, self).__init__()
 
         # These are the settings from the MediaPipe example graph
@@ -26,15 +28,13 @@ class BlazeFace(nn.Module):
         self.num_anchors = 896
         self.num_coords = 16
         self.score_clipping_thresh = 100.0
-        self.x_scale = 128.0
-        self.y_scale = 128.0
-        self.h_scale = 128.0
-        self.w_scale = 128.0
-        self.min_score_thresh = 0.75
+        self.x_scale = scale
+        self.y_scale = scale
+        self.h_scale = scale
+        self.w_scale = scale
+        self.min_score_thresh = min_score_thresh
         self.min_suppression_threshold = 0.3
-
-        #self._define_layers()
-
+        self.blending = True
 
     def tensors_to_detections(self, raw_box_tensor, raw_score_tensor, anchors):
         """The output of the neural network is a tensor of shape (b, 896, 16)
@@ -61,7 +61,11 @@ class BlazeFace(nn.Module):
 
         thresh = self.score_clipping_thresh
         raw_score_tensor = raw_score_tensor.clip(-thresh, thresh)
-        detection_scores = 1/(1 + np.exp(- raw_score_tensor)).squeeze(axis=-1)
+
+        from scipy.special import expit
+        detection_scores = expit(raw_score_tensor).squeeze(axis=-1)
+        # detection_scores = 1/(1 + np.exp(-raw_score_tensor)).squeeze(axis=-1)
+        print(np.max(detection_scores))
 
         # Note: we stripped off the last dimension from the scores tensor
         # because there is only has one class. Now we can simply use a mask
@@ -140,25 +144,25 @@ class BlazeFace(nn.Module):
             mask = ious > self.min_suppression_threshold
             overlapping = remaining[mask]
             remaining = remaining[~mask]
-
-            # Take an average of the coordinates from the overlapping
-            # detections, weighted by their confidence scores.
-            weighted_detection = detection.copy()
-            if len(overlapping) > 1:
-                coordinates = detections[overlapping, :16]
-                scores = detections[overlapping, 16:17]
-                total_score = scores.sum()
-                weighted = (coordinates * scores).sum(axis=0) / total_score
-                weighted_detection[:16] = weighted
-                weighted_detection[16] = total_score / len(overlapping)
-
-            output_detections.append(weighted_detection)
+            if self.blending:
+                # Take an average of the coordinates from the overlapping
+                # detections, weighted by their confidence scores.
+                weighted_detection = detection.copy()
+                if len(overlapping) > 1:
+                    coordinates = detections[overlapping, :16]
+                    scores = detections[overlapping, 16:17]
+                    total_score = scores.sum()
+                    weighted = (coordinates * scores).sum(axis=0) / total_score
+                    weighted_detection[:16] = weighted
+                    weighted_detection[16] = total_score / len(overlapping)
+                output_detections.append(weighted_detection)
+            else:
+                output_detections.append(detection)
 
         return output_detections
 
 
-def blazeface(raw_output_a, raw_output_b, anchors):
-
+def blazeface(raw_output_a, raw_output_b, anchors, scale=128.0, thresh=0.75):
     if raw_output_a.size == 896:
         raw_score_tensor = raw_output_a
         raw_box_tensor = raw_output_b
@@ -171,10 +175,12 @@ def blazeface(raw_output_a, raw_output_b, anchors):
     raw_score_tensor = raw_score_tensor.reshape(1,896,1)
     raw_box_tensor = raw_box_tensor.reshape(1,896,16)
 
-    net = BlazeFace()
-    # 3. Postprocess the raw predictions:
+    net = BlazeFace(scale, thresh)
+
+    # Postprocess the raw predictions
     detections = net.tensors_to_detections(raw_box_tensor, raw_score_tensor, anchors)
-    # 4. Non-maximum suppression to remove overlapping detections:
+
+    # Non-Maximum Suppression (NMS) to remove overlapping detections
     filtered_detections = []
     for i in range(len(detections)):
         faces = net.weighted_non_max_suppression(detections[i])
@@ -182,7 +188,19 @@ def blazeface(raw_output_a, raw_output_b, anchors):
         filtered_detections.append(faces)
     return filtered_detections
 
-
+def box_iou(box_1, box_2):
+        iLeft = max(box_1['x']-box_1['w']/2, box_2['x']-box_2['w']/2)
+        iRight = min(box_1['x']+box_1['w']/2, box_2['x']+box_2['w']/2)
+        iTop = max(box_1['y']-box_1['h']/2, box_2['y']-box_2['h']/2)
+        iBottom = min(box_1['y']+box_1['h']/2, box_2['y']+box_2['h']/2)
+        w = iRight-iLeft
+        h = iBottom-iTop
+        if w<0 or h<0:
+            intersect = 0
+        else:
+            intersect = w*h
+        union = box_1['w']*box_1['h'] + box_2['w']*box_2['h'] - intersect
+        return intersect/union
 
 def overlap_similarity(box, other_boxes):
     """Computes the IOU between a bounding box and set of other boxes."""
@@ -199,7 +217,15 @@ def overlap_similarity(box, other_boxes):
         y1= max(A[1],B[1])
         x2= min(A[2],B[2])
         y2= min(A[3],B[3])
-        return  (x2-x1)*(y2-y1)
+        return  max(0,x2-x1)*max(0,y2-y1)
+    
+    def iou(A,B):
+        i = intersect(A,B)
+        u = union(A,B)
+        if u>0:
+            return i/u
+        else:
+            return 0
 
-    ret = np.array([max(0,intersect(box,b)/union(box,b)) for b in other_boxes])
+    ret = np.array([iou(box,b) for b in other_boxes])
     return ret

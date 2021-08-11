@@ -184,6 +184,9 @@ def load_statistics(fname, mode=None):
             positive_channel_maximums = np.max(channel_maximums, axis=-1)
 
             stats[str(arr['id'])] = np.max(symetric_channel_maximums)
+            if 'threshold' in arr:
+                if stats[str(arr['id'])] > arr['threshold']:
+                    stats[str(arr['id'])] = np.asarray(arr['threshold'])
             if 'ScaleShift' in arr['name'] and arr['id'] > 1:
                 stats[str(arr['id']) + '_ss'] = stats[str(arr['id'])]
     return stats

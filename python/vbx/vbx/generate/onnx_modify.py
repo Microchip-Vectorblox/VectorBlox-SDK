@@ -99,7 +99,7 @@ def onnx_inject_scale_before_special(nodes, inits):
 
     nodes_to_inject = []
     for n, node in enumerate(nodes):
-        if node.op_type in multipath_nodes or node.op_type in ['LRN', 'Softmax']:
+        if node.op_type in multipath_nodes or node.op_type in ['LRN', 'Softmax', 'Sigmoid']:
             inputs = list(node.input)
             for i, iname in enumerate(inputs):
                 buf = '{}_s{}'.format(iname, injected_nodes)
@@ -230,7 +230,8 @@ def onnx_inject_identity_before_scaled_special(nodes):
     prev = None
 
     for n, node in enumerate(nodes):
-        if node.op_type in ["LRN", "Softmax", "Transpose"]:
+        # if node.op_type in ["LRN", "Softmax", "Sigmoid", "Transpose"]:
+        if node.op_type in ["LRN", "Softmax", "Sigmoid"]:
             if prev.op_type == 'Mul':
                 nodes_to_inject += [prev]
             else:
@@ -248,6 +249,7 @@ def onnx_inject_identity_after_special(nodes):
     prev = None
 
     for n, node in enumerate(nodes):
+        # if node.op_type in ["Concat", "LRN",'Resize','Transpose']:
         if node.op_type in ["Concat", "LRN",'Resize']:
             nodes_to_inject += [node]
     for node in nodes_to_inject:
@@ -518,7 +520,7 @@ def onnx_remove_mul(nodes, inits, outputs):
                         output.name = node.input[0]
             else:
                 next_nodes = get_node_inputs(nodes, dst)
-                if len(next_nodes) == 1 and next_nodes[0].op_type not in ['Softmax']:
+                if len(next_nodes) == 1 and next_nodes[0].op_type not in ['Softmax', 'Sigmoid']:
                     prev = get_node_source(nodes, node.input[0])
                     if prev is not None and len(get_node_inputs(nodes, prev.output[0])) == 1 and prev.op_type in ['Conv']:
                         # print('can absorb!')

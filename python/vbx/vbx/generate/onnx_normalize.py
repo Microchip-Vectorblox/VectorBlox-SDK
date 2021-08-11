@@ -56,7 +56,7 @@ def get_previous_max(nodes, inits, maximums, node):
             if previous_weighted[0].op_type == 'Mul':
                 next_nodes = get_node_inputs(nodes, previous_weighted[0].output[0])
                 if len(next_nodes) == 1:
-                    if next_nodes[0].op_type in ['Softmax']:
+                    if next_nodes[0].op_type in ['Softmax', 'Sigmoid']:
                         return np.asarray(1.)
                     if next_nodes[0].op_type in ['Argmax']:
                         return np.asarray(1.)
@@ -91,10 +91,10 @@ def get_node_max(nodes,inits,maximums,node):
 
     if relu_after:
         return maximums[relu_after.output[0]]
+        # return min(maximums[node.output[0]], maximums[relu_after.output[0]])
     elif clip_after:
-        clip_max = get_tensor(inits, clip_after.input[2])
-        ret = maximums[clip_after.output[0]]
-        return ret
+        return maximums[clip_after.output[0]]
+        # return min(maximums[node.output[0]], maximums[clip_after.output[0]])
     else:
         return maximums[node.output[0]]
 
@@ -156,7 +156,7 @@ def onnx_normalize_graph(nodes, inits, maximums, verbose=False):
                 if verbose:
                     print('last node')
                 current = prev
-            elif next and next.op_type in ["Softmax"]:
+            elif next and next.op_type in ["Softmax", "Sigmoid"]:
                 current = np.ones(prev.shape) # denormalize
 
             elif next and next.op_type in ["LRN"]:
@@ -248,13 +248,15 @@ def run_normalize_graph(model_src, model_stats, model_dst):
     for output in outputs:
         node = get_node_source(nodes, output.name)
         if node.op_type not in weighted_nodes:
-            m =get_previous_max(nodes,inits,stats,node) 
+            m = get_previous_max(nodes,inits,stats,node) 
         else:
             m = get_node_max(nodes,inits, stats, node)
 
         output_maximums.append(float(m))
 
-    return output_maximums
+    input_maximums = [float(stats[nodes[0].input[0]])]
+
+    return input_maximums, output_maximums
 
 
 def normalize_graph(argv):

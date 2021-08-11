@@ -1,6 +1,6 @@
-numpy==1.18.2
-onnx==1.6.0
-onnxruntime==1.2.0
+numpy==1.18.5
+onnx==1.9.0
+onnxruntime==1.8.0
 tqdm==4.42.0
 opencv-python==4.2.0.32
 pillow==7.1.1
@@ -10,8 +10,8 @@ tensorflow==2.2
 gast==0.3.3
 defusedxml==0.7.1
 h5py==2.10.0
-torch==1.4.0
-torchvision==0.5.0
+torch==1.6.0
+torchvision==0.7.0
 networkx==2.4
 protobuf==3.11.3
 coverage==4.4.2
@@ -35,3 +35,4 @@ cython
 nibabel
 progress
 pycocotools
+openvino==2021.3

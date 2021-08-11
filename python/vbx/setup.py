@@ -7,8 +7,8 @@ setuptools.setup(
     author="Joel Vandergriendt",
     author_email="joel.vandergriendt@microchip.com",
     description="Python wrapper for vbx cnn simulator",
-    install_requires=["onnx==1.6.0",
-                      "onnxruntime==1.2.0",
+    install_requires=["onnx==1.9.0",
+                      "onnxruntime==1.8.0",
                       "tqdm==4.42.0",
                       "opencv-python==4.2.0.32"],
     entry_points={'console_scripts':

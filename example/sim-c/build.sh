@@ -7,7 +7,7 @@ unzip libfixmath-master.zip
 	gcc -c *.c
 )
 ar qc libfixmath.a libfixmath-master/libfixmath/*.o
-gcc sim-run-model.cpp image.c postprocess.c libfixmath.a  \
+gcc sim-run-model.cpp image.c postprocess.c postprocess_ssd.c postprocess_retinaface.c libfixmath.a  \
     -lstdc++ \
 	-I../../drivers/vectorblox -Ilibfixmath-master/ \
 	-ljpeg -lm -lvbx_cnn_sim -L../../lib -Wl,-rpath='$ORIGIN/../../lib' -o sim-run

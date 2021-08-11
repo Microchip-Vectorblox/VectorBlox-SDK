@@ -25,7 +25,7 @@ echo "Downloading yolov2-tiny..."
 [ -f yolov2-tiny.cfg ] || wget https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov2-tiny.cfg
 [ -f yolov2-tiny.weights ] || wget https://pjreddie.com/media/files/yolov2-tiny.weights
 [ -f coco.names ] || wget https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
-python $VBX_SDK/example/python/darknet_to_onnx.py yolov2-tiny.cfg
+python ../darknet_to_onnx.py yolov2-tiny.cfg
 
 echo "Running Model Optimizer..."
 # model details @ https://pjreddie.com/darknet/yolo/

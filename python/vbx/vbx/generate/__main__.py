@@ -19,6 +19,7 @@ def main():
     #Only generates the binary (for different HW)
     parser.add_argument('-b', '--binary', help=argparse.SUPPRESS, action='store_true')
     parser.add_argument('-bc', '--bias-correction', help="apply bias correction to layers to improve accuracy",action='store_true')
+    parser.add_argument('-kld', '--kl-divergence', help="use KL divergence to determine layer thresholds",action='store_true')
     args = parser.parse_args()
 
     generate_vnnx(args.xml,
@@ -31,7 +32,8 @@ def main():
                   skip_normalization=args.skip_normalization,
                   output_filename=args.output,
                   cut_node=args.cut,
-                  bias_correction=args.bias_correction)
+                  bias_correction=args.bias_correction,
+                  kld=args.kl_divergence)
 
 if __name__ == "__main__":
     main()

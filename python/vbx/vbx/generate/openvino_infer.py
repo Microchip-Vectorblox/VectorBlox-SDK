@@ -5,13 +5,25 @@ import numpy as np
 import cv2
 import os
 from vbx.postprocess import classifier, yolo,dataset
-from .onnx_infer import load_image
+from .onnx_infer import load_input
 
 np.set_printoptions(suppress=True, precision=4, linewidth=120)
 np.random.seed(1337)
 
 
-def openvino_activations(xml, weights, input_array, extension=None):
+def get_model_input_shape(xml, weights):
+    core = ie.IECore()
+    net = core.read_network(model=xml, weights=weights)
+    assert(len(net.input_info) == 1)
+
+    i0 = [k for k in net.input_info.keys()][0]
+
+    exec_net = core.load_network(network=net, device_name="CPU")
+
+    return exec_net.requests[0].input_blobs[i0].buffer.shape
+
+
+def openvino_activations(xml, weights, input_array):
     core = ie.IECore()
     net = core.read_network(model=xml, weights=weights)
     assert(len(net.input_info) == 1)
@@ -34,7 +46,7 @@ def openvino_activations(xml, weights, input_array, extension=None):
     return activations
 
 
-def openvino_infer(xml, weights, input_array, extension=None, return_all=False):
+def openvino_infer(xml, weights, input_array, return_all=False):
     core = ie.IECore()
     net = core.read_network(model=xml, weights=weights)
     assert(len(net.input_info) == 1)
@@ -52,14 +64,12 @@ def openvino_infer(xml, weights, input_array, extension=None, return_all=False):
         return exec_net.requests[0].output_blobs[o0].buffer
 
 
-def openvino_random_input(xml, weights, scale=255., extension=None):
+def openvino_random_input(xml, weights, scale=255.):
     net = ie.IENetwork(model=xml, weights=weights)
     assert(len(net.inputs) == 1)
 
     i0 = [k for k in net.inputs.keys()][0]
     plugin = ie.IEPlugin(device="CPU")
-    if extension:
-        plugin.add_cpu_extension(extension)
     exec_net = plugin.load(network=net)
     input_shape = exec_net.requests[0].inputs[i0].shape
     input_array = np.random.random(input_shape).astype(np.float32) * scale
@@ -70,34 +80,44 @@ def openvino_random_input(xml, weights, scale=255., extension=None):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('xml')
-    parser.add_argument('-i', '--image', default='../oreo.224.jpg')
-    parser.add_argument('-c', '--channels', type=int, default=3)
-    parser.add_argument('-s', '--scale', type=float, default=255.)
+    parser.add_argument('-i', '--input', default='../oreo.224.jpg')
     parser.add_argument('-y', '--yolo', action='store_true')
-    parser.add_argument('-x', '--extension')
 
     args = parser.parse_args()
-
     weights=args.xml.replace('.xml', '.bin')
-    input_array = load_image(args.image, args.scale, channels=args.channels)
+
+    input_shape = get_model_input_shape(args.xml, weights)
+    input_array = load_input(args.input, 1., input_shape)
+
     if args.yolo:
-        outputs = openvino_infer(args.xml, weights, input_array, args.extension, True)
-        if '2' in args.xml and 'tiny' not in args.xml:
-            predictions = yolo.yolov2_voc(outputs, [1.0], do_activations=False)
+        predictions = None
+        outputs = openvino_infer(args.xml, weights, input_array, True)
+
+        if 'voc' in args.onnx and '2' in args.onnx and 'tiny' not in args.onnx:
+            scale_factors = [1.0]
+            predictions = yolo.yolov2_voc(outputs, scale_factors, do_activations=True)
             classes = dataset.voc_classes
+
         for p in predictions:
             print("{}\t{}\t({}, {}, {}, {})".format(classes[p['class_id']],
                                                     int(100*p['confidence']),
                                                     int(p['xmin']), int(p['xmax']),
                                                     int(p['ymin']), int(p['ymax'])))
     else:
-        output = openvino_infer(args.xml, weights, input_array, args.extension)
+        output = openvino_infer(args.xml, weights, input_array)
+
         if len(output.flatten())==1001:
             classes = dataset.imagenet_classes_with_nul
-        else:
+            classifier.print_topk(output[0].flatten(),classes=classes)
+        elif len(output.flatten())==1000:
             classes = dataset.imagenet_classes
+            classifier.print_topk(output[0].flatten(),classes=classes)
+        else:
+            outputs = openvino_infer(args.xml, weights, input_array, True)
+            scale_factors = [1. for _ in outputs]
+            for o,sf in zip(outputs, scale_factors):
+                print(sf*o.flatten()[:8])
 
-        classifier.print_topk(output[0].flatten(),classes=classes)
 
 if __name__ == "__main__":
     main()

@@ -33,6 +33,6 @@ echo "Generating VNNX for V1000 configuration..."
 generate_vnnx -x squeezenet1.1.xml  -c V1000 -f ../../sample_images -o squeezenet1.1.vnnx
 
 echo "Running Simulation..."
-python $VBX_SDK/example/python/imagenet.py squeezenet1.1.vnnx ../../oreo.227.jpg
+python $VBX_SDK/example/python/imagenet.py squeezenet1.1.vnnx ../../oreo.jpg
 
 deactivate

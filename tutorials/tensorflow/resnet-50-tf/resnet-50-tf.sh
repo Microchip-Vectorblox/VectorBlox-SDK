@@ -37,6 +37,6 @@ echo "Generating VNNX for V1000 configuration..."
 generate_vnnx -x resnet_v1-50.xml  -c V1000 -f ../../sample_images -o resnet-50-tf.vnnx
 
 echo "Running Simulation..."
-python $VBX_SDK/example/python/imagenet.py resnet-50-tf.vnnx ../../oreo.224.jpg
+python $VBX_SDK/example/python/imagenet.py resnet-50-tf.vnnx ../../oreo.jpg
 
 deactivate
