@@ -828,7 +828,7 @@ def set_sublayer_attributes(node, sl_array):
             max_maps = maps
 
         if sl.type == layer_type.DEPTHWISE_CONV_I8:
-            scratchpad_per_map += (sl.kernel_shape[0]*sl.kernel_shape[1]+5)
+            scratchpad_per_map += ((sl.kernel_shape[0]+2)//3*3*sl.kernel_shape[1]+5)
 
     node.sublayer_shape = shape
     node.sublayer_shape_full = shape_full
@@ -930,7 +930,7 @@ def float_to_fixed(flt_in, out_type, MAX_BITS=None, FRAC_BITS=None, ROUNDING=Tru
     max_min = ((1 << max_bits) - 1, (1 << max_bits) * -1)
     max_min = ((1 << max_bits) - 1, -1* ((1 << max_bits)-1))
     if out_type == calc_type.UINT8:
-        max_min = (max_min[0], 0)
+        max_min = (max_min[1], 0)
     if flt_in >= 0:
         value = flt_in * (1 << frac_bits) + rounding
     else:
@@ -969,7 +969,7 @@ def float_to_fixed_np(flt_in, out_type, MAX_BITS=None, FRAC_BITS=None, ROUNDING=
     max_min = ((1 << max_bits) - 1, (1 << max_bits) * -1)
     max_min = ((1 << max_bits) - 1, -1* ((1 << max_bits)-1))
     if out_type == calc_type.UINT8:
-        max_min = (max_min[0], 0)
+        max_min = (max_min[1], 0)
     tmp = flt_in * (1 << frac_bits)
     tmp = np.where(flt_in >= 0, tmp+rounding, tmp-rounding)
     tmp = np.clip(tmp, max_min[1], max_min[0])
@@ -1136,7 +1136,7 @@ def conv_populate_attributes(node, json_node, conv_cvi, sp_size, vector_lanes, f
                 channels *= 2  # double-buffered
             coeff_stride = ceil(COEFFICIENT_BITS*maps/8)
             remaining = sp_size
-            remaining -= aligned_size((conv.kernel_shape[0]*conv.kernel_shape[1]+5)*coeff_stride, vector_lanes)  # v_w0
+            remaining -= aligned_size(((conv.kernel_shape[0]+2)//3*3*conv.kernel_shape[1]+5)*coeff_stride, vector_lanes)  # v_w0
             remaining -= vector_lanes*4  # Padding wavefront
         else:
             channels = imaps
@@ -1168,7 +1168,7 @@ def conv_populate_attributes(node, json_node, conv_cvi, sp_size, vector_lanes, f
         elif conv.use_depthwise and imaps < maps:
             # double-buffered
             remaining -= vector_lanes*4  # Padding wavefront
-            remaining -= aligned_size(imaps*(conv.kernel_shape[0]*conv.kernel_shape[1]+5)*coeff_stride, vector_lanes)  # v_w1
+            remaining -= aligned_size(imaps*((conv.kernel_shape[0]+2)//3*3*conv.kernel_shape[1]+5)*coeff_stride, vector_lanes)  # v_w1
             remaining -= vector_lanes*4  # Padding wavefront
 
         strides_n = 1

@@ -277,7 +277,7 @@ def mxp_inline_depthwise(network):
                 if len(next_layers) == 1:
                     next_layer = network['layers'][next_layers[0]]
                     if next_layer['op_type'] == 'Conv' and next_layer['use_cvi'] and next_layer['use_depthwise']:
-                        if next_layer['strides'] == [1,1]:
+                        if next_layer['strides'] == [1,1] and next_layer['kernel_shape'] == [3,3]:
                             fuse_pairs.append((l, next_layers[0]))
 
         fuse_layers(network, fuse_pairs)
@@ -798,7 +798,6 @@ def generate_mxp_graph(model_name, activations, stats, first_node_name, last_nod
         elif node.op_type == "Resize":
             scales = get_tensor(inits, node.input[2])
             assert(scales[0] == 1 and scales[1] == 1)
-            scale = float(scales[2])
             mode = get_attr(node, 'mode').decode()
             assert(mode == 'nearest' or mode == 'linear')
             shapes = input_shapes[:1]

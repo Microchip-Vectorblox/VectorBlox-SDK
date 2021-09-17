@@ -37,7 +37,7 @@ def load_input(src, scale, input_shape):
             if img is None:
                 sys.stderr.write("Error Unable to read image file {}\n".format(src))
                 sys.exit(1)
-            if height and width and img.shape[:2] != [width, height]:
+            if height and width and img.shape[:2] != [height, width]:
                 img = cv2.resize(img, (width, height), interpolation=cv2.INTER_LINEAR)
             arr = img.swapaxes(1, 2).swapaxes(0, 1).astype(np.float32)
         else:
@@ -45,7 +45,7 @@ def load_input(src, scale, input_shape):
             if img is None:
                 sys.stderr.write("Error Unable to read image file {}\n".format(src))
                 sys.exit(1)
-            if height and width and img.shape != [width, height]:
+            if height and width and img.shape != [height, width]:
                 img = cv2.resize(img, (width, height), interpolation=cv2.INTER_LINEAR)
             arr = img.astype(np.float32)
             arr = np.expand_dims(arr, axis=0)

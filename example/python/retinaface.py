@@ -67,7 +67,8 @@ def main():
     parser.add_argument('--height', type=int, default=320)
     parser.add_argument('-s', '--scale', type=float, default=255.)
     parser.add_argument('-sh', '--shift', type=float, default=0.)
-    parser.add_argument('-t', '--threshold', type=float, default=0.9)
+    parser.add_argument('-t', '--threshold', type=float, default=0.8)
+    parser.add_argument('-nms', '--nms-threshold', type=float, default=0.4)
     parser.add_argument('-tn', '--transpose', action='store_true')
     parser.add_argument('--io')
 
@@ -88,7 +89,7 @@ def main():
 
         outputs = model.run([input_array.flatten()])
         outputs = [o/(1<<16) for o in outputs]
-    faces = vbx.postprocess.retinaface.retinaface(outputs,args.width,args.height,args.threshold)
+    faces = vbx.postprocess.retinaface.retinaface(outputs, args.width, args.height,args.threshold, args.nms_threshold)
     img = cv2.imread(args.image)
     if img.shape != (args.height,args.width,3):
         img = cv2.resize(img,(args.width,args.height))

@@ -21,21 +21,26 @@ if [ -z $VBX_SDK ]; then
 fi
 source $VBX_SDK/vbx_env/bin/activate
 
-echo "Downloading Sphereface..."
-downloader --name Sphereface
+echo "Downloading mobilefacenet-arcface..."
+rm -rf model-y1-test2
+python3 -m venv gdown
+source gdown/bin/activate
+pip install gdown
+[ -f model-y1.zip ] || python gdown/bin/gdown 'https://drive.google.com/uc?id=1RHyJIeYuHduVDDBTn3ffpYEZoXWRamWI&authuser=0&export=download'
+unzip model-y1.zip
+source $VBX_SDK/vbx_env/bin/activate
 
 echo "Running Model Optimizer..."
-# model details @ https://github.com/openvinotoolkit/open_model_zoo/blob/2020.4/models/public/Sphereface/Sphereface.md
-converter --input_model public/Sphereface/Sphereface.caffemodel \
---input_shape=[1,3,112,96] \
---mean_values [127.5,127.5,127.5] \
---scale_values [128.0] \
+# model details @ https://github.com/openvinotoolkit/open_model_zoo/blob/master/models/public/face-recognition-mobilefacenet-arcface/model.yml
+converter --input_model=model-y1-test2/model-0000.params \
+--reverse_input_channels \
+--input_shape=[1,3,112,112] \
 --static_shape
 
 echo "Generating VNNX for V1000 configuration..."
-generate_vnnx -x Sphereface.xml  -c V1000 -f ../../sample_images -o Sphereface.vnnx
+generate_vnnx -x model-0000.xml  -c V1000 -f ../../sample_images -o mobilefacenet-arcface.vnnx --bias-correction
 
 echo "Running Simulation..."
-python $VBX_SDK/example/python/face_compare.py Sphereface.vnnx ../../matt-damon1_aligned.png ../../matt-damon2_aligned.png
+python $VBX_SDK/example/python/face_compare.py mobilefacenet-arcface.vnnx ../../MattDamon0001_arcface.png ../../MattDamon0002_arcface.png --height 112 --width 112
 
 deactivate

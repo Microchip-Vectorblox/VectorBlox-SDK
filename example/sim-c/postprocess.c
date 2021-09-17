@@ -1164,6 +1164,18 @@ int fix16_box_iou(fix16_box box_1, fix16_box box_2, fix16_t thresh)
 	return 0;
   } else {
 	area_of_overlap = width_of_overlap_area * height_of_overlap_area;
+    if( area_of_overlap <0){
+        //overflow,divide boxes by 4 and try again
+        box_1.xmin >>=2;
+        box_1.ymin >>=2;
+        box_1.xmax >>=2;
+        box_1.ymax >>=2;
+        box_2.xmin >>=2;
+        box_2.ymin >>=2;
+        box_2.xmax >>=2;
+        box_2.ymax >>=2;
+        return fix16_box_iou(box_1,box_2,thresh);
+    }
   }
 
   int box_1_area = (box_1.ymax - box_1.ymin) * (box_1.xmax - box_1.xmin);

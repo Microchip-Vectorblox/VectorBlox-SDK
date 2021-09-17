@@ -17,8 +17,6 @@ There are two options for downloading the sdk:
     apt update && apt install git-lfs
     git lfs install
     ```
-    If during `source setup_vars.sh` you get an error about "No module named 'mxnet'"
-    chances are git-lfs is not configured correctly.
      
 ## Install required dependencies (requires sudo permission)
 
@@ -30,6 +28,8 @@ bash install_dependencies.sh
 ```
 source setup_vars.sh
 ```
+If during `source setup_vars.sh` you get an error about "No module named 'mxnet'"
+chances are git-lfs is not configured correctly.
 
 # Run tutorials
 

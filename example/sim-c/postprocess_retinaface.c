@@ -1,272 +1,181 @@
 #include "postprocess.h"
 #include <stdio.h>
 
-typedef struct {
-    int shape[4];
-    fix16_t height[6];
-    fix16_t width[6];
-    fix16_t offset;
-    fix16_t variance[4];
-} prior_t;
+#define MAX(x, y) (((x) > (y)) ? (x) : (y))
+#define MIN(x, y) (((x) < (y)) ? (x) : (y))////////////
 
-// this macro is necessary instead of fix16_from_float() because this way is
-// done at compiletime
-#define fix16_conv(a) (fix16_t)((a) * (1 << 16))
-
-static prior_t priors[] = {
-    {
-        .shape = {1, 8, 40, 40},
-        .height = {fix16_conv(16), fix16_conv(32)},
-        .width = {fix16_conv(16), fix16_conv(32)},
-        .offset = fix16_conv(0.5),
-        .variance = {fix16_conv(0.1), fix16_conv(0.1), fix16_conv(0.2),
-                     fix16_conv(0.2)},
-    },
-    {
-        .shape = {1, 8, 20, 20},
-        .height = {fix16_conv(64), fix16_conv(128)},
-        .width = {fix16_conv(64), fix16_conv(128)},
-        .offset = fix16_conv(0.5),
-        .variance = {fix16_conv(0.1), fix16_conv(0.1), fix16_conv(0.2),
-                     fix16_conv(0.2)},
-    },
-    {
-        .shape = {1, 8, 10, 10},
-        .height = {fix16_conv(256), fix16_conv(512)},
-        .width = {fix16_conv(256), fix16_conv(512)},
-        .offset = fix16_conv(0.5),
-        .variance = {fix16_conv(0.1), fix16_conv(0.1), fix16_conv(0.2),
-                     fix16_conv(0.2)},
-    },
-};
-
-typedef struct{
-    fix16_t cx,cy,w,h;
-} prior_box;
-
-static prior_box gen_prior_box(prior_t *prior, int x, int y, int r, int image_width, int image_height) {
-    fix16_t fix_x = fix16_from_int(x);
-    fix16_t fix_y = fix16_from_int(y);
-    fix16_t fix_r = fix16_from_int(r);
-    fix16_t h = fix16_from_int(prior->shape[2] * image_height/320);
-    fix16_t w = fix16_from_int(prior->shape[3] * image_width/320);
-    int img_h = fix16_from_int(image_height);
-    int img_w = fix16_from_int(image_width);
-
-    fix16_t step_w = fix16_div(img_w, w);
-    fix16_t step_h = fix16_div(img_h, h);
-    fix16_t offset = prior->offset;
-    fix16_t center_x = fix16_mul(fix_x + offset, step_w);
-    fix16_t center_y = fix16_mul(fix_y + offset, step_h);
-    fix16_t box_h = prior->height[r];
-    fix16_t box_w = prior->width[r];
-
-    prior_box ret_box;
-
-    ret_box.cx = center_x;
-    ret_box.cy = center_y;
-    ret_box.w  = box_w;
-    ret_box.h  = box_h;
-
-    return ret_box;
+static inline fix16_t softmaxRetinaface(fix16_t a,fix16_t b){
+    if(b<=a)
+        return 0;   // score<=0.5, which will be below the threshold, so quit early
+    a = fix16_exp(a-b);
+    a = fix16_add(a, fix16_one);
+    a = fix16_div(fix16_one, a); //TODO: optimize by skipping this and adjusting threshold value instead
+    return a;
 }
 
-static inline fix16_t clamp(fix16_t val,fix16_t low,fix16_t high) {
-    if (val < low)
-        return low;
-    if (val > high)
-        return high;
-    return val;
-}
-
-static face_t get_face(fix16_t *box_output,fix16_t *landmark_output,int x,int y,int r,prior_t* prior, int image_width, int image_height){
-
-    int grid_h = prior->shape[2] * image_height/320;
-    int grid_w = prior->shape[3] * image_width/320;
-    prior_box pbox = gen_prior_box(prior, x, y, r, image_width, image_height);
-    fix16_t pw = pbox.w;
-    fix16_t ph = pbox.h;
-
-    fix16_t pcx = pbox.cx;
-    fix16_t pcy = pbox.cy;
-    //fix16_box base_box;
-    int num_landmarks =5;
-    face_t face;
-    for(int l=0;l<num_landmarks;++l){
-        fix16_t lm_x = landmark_output[r*grid_h*grid_w * num_landmarks*2 + grid_h * grid_w * (2*l) + grid_h * y + x];
-        fix16_t lm_y = landmark_output[r*grid_h*grid_w * num_landmarks*2 + grid_h * grid_w * (2*l+1) + grid_h * y + x];
-        lm_x = fix16_mul(fix16_mul(prior->variance[0], lm_x), pw) + pcx;
-        lm_y = fix16_mul(fix16_mul(prior->variance[1], lm_y), ph) + pcy;
-        face.points[l][0] = clamp(lm_x,0,fix16_from_int(image_width));
-        face.points[l][1] = clamp(lm_y,0,fix16_from_int(image_height));
-
+fix16_t calcIou_LTRB(fix16_t* A, fix16_t* B){
+    // pointers to elements (left, top, right, bottom)
+    fix16_t left = MAX(A[0], B[0])>>4;  // adjust precision to prevent overflow; this is sufficient for 1920x1080
+    fix16_t top = MAX(A[1], B[1])>>4;
+    fix16_t right = MIN(A[2], B[2])>>4;
+    fix16_t bottom = MIN(A[3], B[3])>>4;
+    fix16_t i = fix16_mul(MAX(0,right-left), MAX(0,bottom-top));    // intersection
+    fix16_t u = fix16_mul((A[2]-A[0])>>4, (A[3]-A[1])>>4) + fix16_mul((B[2]-B[0])>>4, (B[3]-B[1])>>4) - i;  // union
+    if(u>0){
+        fix16_t iou = fix16_div(i, u);
+        return iou;
     }
-
-    fix16_t xmin =
-        box_output[r * grid_h * grid_w * 4 + grid_h * grid_w * 0 + grid_h * y + x];
-    fix16_t ymin =
-        box_output[r * grid_h * grid_w * 4 + grid_h * grid_w * 1 + grid_h * y + x];
-    fix16_t xmax =
-        box_output[r * grid_h * grid_w * 4 + grid_h * grid_w * 2 + grid_h * y + x];
-    fix16_t ymax =
-        box_output[r * grid_h * grid_w * 4 + grid_h * grid_w * 3 + grid_h * y + x];
-
-    fix16_t cx =
-        fix16_mul(fix16_mul(prior->variance[0],xmin), pw) + pcx;
-    fix16_t cy =
-        fix16_mul(fix16_mul(prior->variance[1],ymin), ph) + pcy;
-    fix16_t w =
-        fix16_mul(fix16_exp(fix16_mul(prior->variance[2],xmax)), pw);
-    fix16_t h =
-        fix16_mul(fix16_exp(fix16_mul(prior->variance[3],ymax)), ph);
-
-    face.box[0] = clamp(cx - w / 2,0,fix16_from_int(image_width));
-    face.box[1] = clamp(cy - h / 2,0,fix16_from_int(image_height));
-    face.box[2] = clamp(cx + w / 2,0,fix16_from_int(image_width));
-    face.box[3] = clamp(cy + h / 2,0,fix16_from_int(image_height));
-
-    return face;
-}
-
-static int fix16_face_iou(face_t box_1, face_t box_2, fix16_t thresh)
-{
-    //return true if the IOU score of box_1 and box2 > threshold
-
-    int width_of_overlap_area = ((box_1.box[2] < box_2.box[2]) ? box_1.box[2] : box_2.box[2]) - ((box_1.box[0] > box_2.box[0]) ? box_1.box[0] : box_2.box[0]);
-    int height_of_overlap_area = ((box_1.box[3] < box_2.box[3]) ? box_1.box[3] : box_2.box[3]) - ((box_1.box[1] > box_2.box[1]) ? box_1.box[1] : box_2.box[1]);
-
-    int area_of_overlap;
-    if (width_of_overlap_area < 0 || height_of_overlap_area < 0) {
-        return 0;
-    } else {
-        area_of_overlap = fix16_mul(width_of_overlap_area , height_of_overlap_area);
-    }
-
-    int box_1_area = fix16_mul(box_1.box[3] - box_1.box[1],box_1.box[2] - box_1.box[0]);
-    int box_2_area = fix16_mul(box_2.box[3] - box_2.box[1],box_2.box[2] - box_2.box[0]);
-    int area_of_union = box_1_area + box_2_area - area_of_overlap;
-    if (area_of_union == 0) return 0;
-    float iou= fix16_to_float(area_of_overlap)/fix16_to_float(area_of_union);
-    return area_of_overlap > fix16_mul(thresh, area_of_union);
-}
-
-#define swap(a, b)                              \
-    do {                                        \
-        typeof(a) tmp = a;                      \
-        a = b;                                \
-        b = tmp;                                  \
-    } while (0)
-
-static void *insert_into_sorted_array(face_t *faces, int *face_count,
-                                          int max_faces, face_t insert) {
-
-    for (int b = 0; b < *face_count; b++) {
-        if (faces[b].detectScore < insert.detectScore) {
-            swap(faces[b], insert);
-        }
-    }
-    if (*face_count < max_faces) {
-        faces[*face_count] = insert;
-        *face_count += 1;
-    }
-}
-static inline fix16_t fix16_logistic(fix16_t x) {
-    return fix16_div(fix16_one, fix16_add(fix16_one, fix16_exp(-x)));
-} // 1 div, 1 exp
-static inline fix16_t fix16_logistic_inverse(fix16_t x) {
-    return fix16_log(fix16_div(x, fix16_one - x));
-}
-static inline fix16_t fix16_softmax_retinaface(fix16_t a,fix16_t b){
-    //only do the actual softmax if b>a
-    if(b<=a){
+    else{
         return 0;
     }
-    fix16_t exp_a = fix16_exp(a);
-    fix16_t exp_b = fix16_exp(b);
-    return fix16_div(exp_b,fix16_add(exp_a,exp_b));
 }
-static int get_faces_above_confidence(face_t *faces, int max_faces,
-                                      int current_box_count,
-                                      fix16_t confidence_threshold,
-                                      fix16_t *class_output,
-                                      fix16_t *box_output,
-                                      fix16_t *landmark_output,
-                                      //fix16_t *landmark_output,
-                                      int num_classes,
-                                      prior_t *prior,
-				      int image_width,
-				      int image_height) {
-    int grid_h = prior->shape[2] * image_height/320;
-    int grid_w = prior->shape[3] * image_width/320;
-    int repeats = prior->shape[1] / 4;
-    int face_count = current_box_count;
-    for (int y = 0; y < grid_h; ++y) {
-        for (int x = 0; x < grid_w; ++x) {
-            for (int r = 0; r < repeats; r++) {
-                int idx_none =
-                    r * num_classes * grid_h * grid_w + 0 * grid_h * grid_w + y * grid_h + x;
-                int idx_face =
-                    r * num_classes * grid_h * grid_w + 1 * grid_h * grid_w + y * grid_h + x;
-                fix16_t class_confidence = fix16_softmax_retinaface(class_output[idx_none],
-                                                                    class_output[idx_face]);
 
-                if (class_confidence >= confidence_threshold ) {
-
-                    face_t face = get_face(box_output,landmark_output,x,y,r,prior, image_width, image_height);
-                    face.detectScore = class_confidence;
-                    insert_into_sorted_array(faces, &face_count, max_faces,face);
-                }
-            }
-        }
-    }
-    return face_count;
-}
-static fix16_box face_to_box(face_t face){
-    fix16_box  box;
-    box.xmin = face.box[0];
-    box.ymin = face.box[1];
-    box.xmax = face.box[2];
-    box.ymax = face.box[3];
-    return box;
-}
 
 int post_process_retinaface(face_t faces[],int max_faces, fix16_t *network_outputs[9],
-		int image_width, int image_height,
-		fix16_t confidence_threshold, fix16_t nms_threshold){
+                            int image_width, int image_height,
+                            fix16_t confidence_threshold, fix16_t nms_threshold){
 
-    fix16_t logit_conf = (confidence_threshold);
-    int num_classes=2;
-    int face_count = 0;
-    for (int o = 0; o < 3; ++o) {
-        fix16_t *box_outputs = network_outputs[o];
-        fix16_t *class_outputs = network_outputs[o+3];
-        fix16_t *ldmk_outputs = network_outputs[o+6];
-        face_count = get_faces_above_confidence(
-            faces, max_faces, face_count, logit_conf, class_outputs, box_outputs,ldmk_outputs,
-            num_classes, priors + o, image_width, image_height);
+    const fix16_t variance0 = fix16_from_dbl(0.1);
+    const fix16_t variance1 = fix16_from_dbl(0.2);
+    const int mapStrides[3] = {8,16,32};
+    const int minSizes[3][2] = {{16,32},{64,128},{256,512}};
+    const int maxPreDetects = 64;
+    const int maxDetects = 8;
+    
+    int h32 = image_height/32;  // image height at stride=32
+    int w32 = image_width/32;  // image width at stride=32
+    int h16 = h32<<1;
+    int w16 = w32<<1;
+    int h8 = h16<<1;
+    int w8 = w16<<1;
+    int mapSizes[3][2] = {{h8,w8},{h16,w16},{h32,w32}};
+    int mapPixels[3] = {h8*w8, h16*w16, h32*w32};
+    
+    // each map shape is [anchor][channel][y][x]
+    //   there are 2 anchors per pixel
+    //   location map has 4 channels; confidence has 2 channels; landmarks has 10 channels
+    //   the range of x and y pixel are given by mapSizes[...]
+    fix16_t** locMaps = &network_outputs[0];
+    fix16_t** confMaps = &network_outputs[3];
+    fix16_t** landMaps = &network_outputs[6];
+
+    int scoresLength = 2*(mapPixels[0]+mapPixels[1]+mapPixels[2]);
+    fix16_t scores[scoresLength]; // this could be stored as int16, since the values should be <1
+    int s = 0;  // index to scores
+    for(int mapNum=0; mapNum<3; mapNum++){
+        fix16_t* confMap = confMaps[mapNum];
+        int pixels = mapPixels[mapNum];
+        for(int n=0; n<pixels; n++){
+            // Optimization: first read the face confidence. If the score is less than zero, don't bother reading the non-face confidence.
+            //  This helps speed up execution since memory reads are expensive.
+            fix16_t faceConf = confMap[n+pixels];
+            if(faceConf>0)
+                scores[s++] = softmaxRetinaface(confMap[n], faceConf);
+            else
+                scores[s++] = 0;
+            faceConf = confMap[n+3*pixels];
+            if(faceConf>0)
+                scores[s++] = softmaxRetinaface(confMap[n+2*pixels], faceConf);
+            else
+                scores[s++] = 0;
+        }
     }
-    // faces are at this point sorted by confidence, do nms
-    for (int b0 = 0; b0 < face_count; b0++) {
-        for (int b1 = 0; b1 < b0; b1++) {
-            if (faces[b0].detectScore == 0) {
-                continue;
-            }
 
-            if (fix16_face_iou(faces[b0], faces[b1],nms_threshold)) {
-                // discard b0 by setting confidence class_id to -1;
-                faces[b0].detectScore= 0;
+    // add scores above threshold to a sorted list of indices (indices of highest scores first)
+    int order[maxPreDetects];
+    int orderLength = 0;
+    for(int n=0; n<scoresLength; n++){
+        if(scores[n] > confidence_threshold){
+            int i=0;
+            while(i<orderLength){ // find the insertion index
+                if(scores[n] > scores[order[i]]){
+		    int i_start = orderLength < maxPreDetects-1 ? orderLength : maxPreDetects-1;
+                    for(int i2=i_start; i2>i; i2--) // move down all lower elements
+                        order[i2] = order[i2-1];
+                    order[i] = n;
+                    orderLength++;
+                    break;
+                }
+                i++;
+            }
+            if(i==orderLength && orderLength<maxPreDetects){   // if not inserted and there's room, then insert at the end
+                order[i] = n;
+                orderLength++;
+            }
+        }
+    }
+    
+    int facesLength = 0;
+    for(int n=0; n<orderLength; n++){
+        int ind = order[n];
+        faces[facesLength].detectScore = scores[ind];
+
+        // get map number from index
+        int mapNum = 0;
+        if(ind >= 2*mapPixels[0]){
+            ind -= 2*mapPixels[0];
+            mapNum++;
+            if(ind >= 2*mapPixels[1]){
+                ind -= 2*mapPixels[1];
+                mapNum++;
+            }
+        }
+
+        // get anchor from index
+        int anchNum = ind%2;
+        ind = ind>>1;
+
+        // get pixel indices
+        int y = ind / mapSizes[mapNum][1];
+        int x = ind - y*mapSizes[mapNum][1];
+
+        // get prior
+        fix16_t anchS = fix16_from_int(minSizes[mapNum][anchNum]);  // could replace this by log2 value and use bitshift instead of multiply
+        fix16_t anchX = fix16_from_int(x*mapStrides[mapNum] + (mapStrides[mapNum]>>1));
+        fix16_t anchY = fix16_from_int(y*mapStrides[mapNum] + (mapStrides[mapNum]>>1));
+        // python anchor is equal to [anchX, anchY, anchS, anchS]
+
+        // get box location data
+        int pixels = mapPixels[mapNum];
+        fix16_t location[4];
+        fix16_t* locPtr = &locMaps[mapNum][anchNum*4*pixels+ind];
+        for(int nLoc=0; nLoc<4; nLoc++){
+            location[nLoc] = *locPtr;
+            locPtr += pixels;
+        }
+        fix16_t boxX = anchX + fix16_mul(location[0], fix16_mul(variance0, anchS));
+        fix16_t boxY = anchY + fix16_mul(location[1], fix16_mul(variance0, anchS));
+        fix16_t boxW = fix16_mul(anchS, fix16_exp(fix16_mul(location[2], variance1)));
+        fix16_t boxH = fix16_mul(anchS, fix16_exp(fix16_mul(location[3], variance1)));
+        // convert from [center x, center y, width, height] to [left, top, right, bottom]
+        faces[facesLength].box[0] = boxX-(boxW>>1);
+        faces[facesLength].box[1] = boxY-(boxH>>1);
+        faces[facesLength].box[2] = boxX+(boxW>>1);
+        faces[facesLength].box[3] = boxY+(boxH>>1);
+        
+        int passNms = 1;
+        for(int f=0; f<facesLength; f++){
+            fix16_t iou = calcIou_LTRB(faces[f].box, faces[facesLength].box);
+            if(iou > nms_threshold){
+                passNms = 0;
                 break;
             }
         }
-    }
-    int discard_count = 0;
-    for (int b = 0; b < face_count; b++) {
-        if (faces[b].detectScore == 0) { // discarded
-            discard_count++;
+        if(!passNms)
             continue;
+        
+        fix16_t* landPtr = &landMaps[mapNum][anchNum*10*pixels+ind];    // elements are every "pixels" elements
+        fix16_t var0MulAnchS = fix16_mul(variance0, anchS);
+        for(int p=0; p<5; p++){
+            faces[facesLength].points[p][0] = anchX + fix16_mul(*landPtr, var0MulAnchS);
+            landPtr += pixels;
+            faces[facesLength].points[p][1] = anchY + fix16_mul(*landPtr, var0MulAnchS);
+            landPtr += pixels;
         }
-        faces[b - discard_count] = faces[b];
+
+        facesLength++;
+        if(facesLength>=max_faces)
+            break;
     }
-    face_count -= discard_count;
-    return face_count;
+    return facesLength;
 }

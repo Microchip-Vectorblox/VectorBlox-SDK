@@ -687,11 +687,15 @@ def gen_prelu_10(vinode, vinodes):
                 )
         nodes.append(node)
     else:
-
+        data = np.squeeze(data_node.data['arr'].reshape(np.asarray([int(i) for i in data_node.data['shape'].split(',')])))
+        if data.ndim > 1 and (data.shape[-2] > 1 or data.shape[-1] > 1):
+            for channel in data:
+                assert(np.min(channel) == np.max(channel))
+            data = data[:,0,0]
         slope = onnx.helper.make_tensor('slope_{}'.format(vinode.id),
                                         onnx.TensorProto.FLOAT,
-                                        (data_node.data['arr'].shape[0], 1, 1),
-                                        data_node.data['arr'].tolist())
+                                        (data.shape[0], 1, 1),
+                                        data.tolist())
         inits.append(slope)
 
         inputs.append('slope_{}'.format(vinode.id))

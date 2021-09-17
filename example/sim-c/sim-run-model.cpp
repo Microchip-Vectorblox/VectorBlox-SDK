@@ -6,7 +6,7 @@
 extern "C" int read_JPEG_file (const char * filename,int* width,int* height,unsigned char **image);
 extern "C" int resize_image(uint8_t* image_in,int in_w,int in_h,
 				 uint8_t* image_out,int out_w,int out_h);
-void* read_image(const char* filename,int size,int data_type){
+void* read_image(const char* filename,int width, int height,int data_type){
   unsigned char* image;
   int h,w;
   read_JPEG_file (filename,&w,&h,&image);
@@ -21,13 +21,13 @@ void* read_image(const char* filename,int size,int data_type){
 
   free(image);
   //return planer_img;
-  unsigned char* resized_img = (unsigned char*)malloc(size*size*3);
+  unsigned char* resized_img = (unsigned char*)malloc(width*height*3);
   resize_image((uint8_t*)planer_img  ,w,h,
-			   (uint8_t*)resized_img,size,size);
+			   (uint8_t*)resized_img,width,height);
   resize_image((uint8_t*)planer_img  +w*h,w,h,
-			   (uint8_t*)resized_img+size*size,size,size);
+			   (uint8_t*)resized_img+width*height,width,height);
   resize_image((uint8_t*)planer_img  +2*w*h,w,h,
-			   (uint8_t*)resized_img+2*size*size,size,size);
+			   (uint8_t*)resized_img+2*width*height,width,height);
 
   free(planer_img);
   return resized_img;
@@ -104,9 +104,18 @@ int main(int argc, char** argv){
 	if(std::string(argv[2]) != "TEST_DATA"){
 	  int input_datatype = model_get_input_datatype(model,0);
 	  int input_length = model_get_input_length(model,0);
-	  int side = 1;
-	  while(side*side*3 < input_length)side++;
-	  read_buffer = read_image(argv[2],side,input_datatype);
+	  int width = 0;
+	  int height = 0;
+	  if (input_length == 3*512*288) {
+		  width=512;
+		  height=288;
+	  } else {
+		  int side = 1;
+		  while(side*side*3 < input_length)side++;
+		  width = side;
+		  height = side;
+	  }
+	  read_buffer = read_image(argv[2],width,height,input_datatype);
 	  input_buffer = (uint8_t*)read_buffer;
 	}else{
 	  input_buffer = (uint8_t*)model_get_test_input(model,0);
@@ -159,7 +168,7 @@ int main(int argc, char** argv){
     }else if (post_process_str=="RETINAFACE"){
         const int MAX_FACES=24;
         face_t faces[MAX_FACES];
-        fix16_t confidence_threshold=fix16_from_float(0.95);
+        fix16_t confidence_threshold=fix16_from_float(0.8);
         fix16_t nms_threshold=fix16_from_float(0.4);
 
         fix16_t* output_buffers[9];
@@ -167,9 +176,17 @@ int main(int argc, char** argv){
             output_buffers[o]=(fix16_t*)(uintptr_t)io_buffers[1+o];
         }
         int input_length = model_get_input_length(model,0);
-	int size = 640;
-	if (input_length == (3*320*320)) size = 320;
-        int facesLength = post_process_retinaface(faces,MAX_FACES,output_buffers, size, size,
+	int image_h = 288;
+	int image_w = 512;
+	if (input_length == (3*320*320)) {
+		image_h = 320;
+		image_w = 320;
+	} else if (input_length == (3*640*640)) {
+		image_h = 640;
+		image_w = 640;
+	}
+
+        int facesLength = post_process_retinaface(faces,MAX_FACES,output_buffers, image_w, image_h,
                                                   confidence_threshold,nms_threshold);
 
         for(int f=0;f<facesLength;f++){
