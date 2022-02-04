@@ -32,7 +32,7 @@ import types
 
 from pathlib import Path
 
-from . import common
+import common
 
 CHUNK_SIZE = 1 << 15 if sys.stdout.isatty() else 1 << 20
 
