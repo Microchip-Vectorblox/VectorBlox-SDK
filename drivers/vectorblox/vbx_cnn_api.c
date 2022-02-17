@@ -118,18 +118,28 @@ static void* mmap_vbx_registers(int dev_num){
   return uio_mmap(dev_num,0);
 
 }
-static void* mmap_vbx_dma(int dev_num){
-  return uio_mmap(dev_num,1);
-}
-static size_t uio_dma_size(int dev_num){
-  char filename[64];
-  snprintf(filename,sizeof(filename),"/sys/class/uio/uio%d/maps/map1/size",dev_num);
-  int64_t size=u64_from_attribute(filename);
+#define DMA_DEV "udmabuf-ddr-nc0"
+static size_t uio_dma_size(){
+  const char* filename="/sys/class/u-dma-buf/" DMA_DEV "/size";
+  FILE* fd = fopen(filename,"r");
+  uint64_t size;
+  fscanf(fd,"%" PRId64,&size);
+  fclose(fd);
   return size;
 }
-static uintptr_t uio_dma_phys_addr(int dev_num){
+static void* mmap_vbx_dma(){
+  int fd = open("/dev/"DMA_DEV, O_RDWR);
+
+  size_t size = uio_dma_size();
+  void* _ptr = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  memset(_ptr,0,size);
+  close(fd);
+
+  return _ptr;
+}
+static uintptr_t uio_dma_phys_addr(){
   char filename[64];
-  snprintf(filename,sizeof(filename),"/sys/class/uio/uio%d/maps/map1/addr",dev_num);
+  snprintf(filename,sizeof(filename),"/sys/class/u-dma-buf/"DMA_DEV"/phys_addr");
   uintptr_t addr=u64_from_attribute(filename);
   return addr;
 }
@@ -139,56 +149,38 @@ static inline void* virt_to_phys(vbx_cnn_t* vbx_cnn,void* virt){
 //static inline void* phys_to_virt(vbx_cnn_t* vbx_cnn,void* phys){
 //  return (char*)(phys) - vbx_cnn->dma_phys_trans_offset;
 //}
-void icicle_kit_clk_enable_workaround(){
-  int fd = open("/dev/mem", O_RDWR);
-  //turn on FIC2 clk  0x20002084 (bit 26)
-  int clk_reg = 0x20002084;
-  int reset_reg = 0x20002088;
-  int pfn = 0x20002084 / sysconf(_SC_PAGESIZE);
-  uint32_t* ptr = mmap(NULL, sysconf(_SC_PAGESIZE), PROT_READ | PROT_WRITE, MAP_SHARED,
-                fd,  pfn* sysconf(_SC_PAGESIZE));
-  uint32_t* clk = ptr+ ((clk_reg - pfn*sysconf(_SC_PAGESIZE))/4);
-  uint32_t* reset = ptr+ ((reset_reg - pfn*sysconf(_SC_PAGESIZE))/4);
-
-  *clk|= (1<<26);
-  *reset &= (~(1<<26));
-  munmap(ptr,sysconf(_SC_PAGESIZE));
-  close(fd);
-
-}
 #else
 static inline void* virt_to_phys(vbx_cnn_t* vbx_cnn,void* virt){
 	return virt;
 }
-#endif //VBX_SOC_DRIVER
-vbx_cnn_t the_cnn;
-vbx_cnn_t *vbx_cnn_init(void *ctrl_reg_addr,void *instruction_blob) {
+#endif //!VBX_SOC_DRIVER
 
+vbx_cnn_t *vbx_cnn_init(void *ctrl_reg_addr,void *instruction_blob) {
+  vbx_cnn_t* the_cnn = (vbx_cnn_t*)malloc(sizeof(vbx_cnn_t));
 #if VBX_SOC_DRIVER
-  icicle_kit_clk_enable_workaround();
   int uio_dev_num = find_uio_dev_num(ctrl_reg_addr);
   ctrl_reg_addr = (void*)mmap_vbx_registers(uio_dev_num);
-  the_cnn.dma_buffer=mmap_vbx_dma(uio_dev_num);
-  the_cnn.dma_phys_trans_offset = uio_dma_phys_addr(uio_dev_num)-(uintptr_t)the_cnn.dma_buffer;
-  the_cnn.dma_buffer_end = the_cnn.dma_buffer + uio_dma_size(uio_dev_num)-1;
-  vbx_allocate_dma_buffer(&the_cnn,0x1FFFFFFF,0);
-  void* dma_instr_blob = vbx_allocate_dma_buffer(&the_cnn,VBX_INSTRUCTION_SIZE,21);
+  the_cnn->dma_buffer=mmap_vbx_dma(uio_dev_num);
+  the_cnn->dma_phys_trans_offset = uio_dma_phys_addr(uio_dev_num)-(uintptr_t)the_cnn->dma_buffer;
+  the_cnn->dma_buffer_end = the_cnn->dma_buffer + uio_dma_size(uio_dev_num)-1;
+  vbx_allocate_dma_buffer(the_cnn,0x1FFFFFFF,0);
+  void* dma_instr_blob = vbx_allocate_dma_buffer(the_cnn,VBX_INSTRUCTION_SIZE,21);
   memcpy(dma_instr_blob,instruction_blob,VBX_INSTRUCTION_SIZE);
-  the_cnn.io_buffers = vbx_allocate_dma_buffer(&the_cnn,MAX_IO_BUFFERS*sizeof(vbx_cnn_io_ptr_t), 3);
+  the_cnn->io_buffers = vbx_allocate_dma_buffer(the_cnn,MAX_IO_BUFFERS*sizeof(vbx_cnn_io_ptr_t), 3);
 #elif SPLASHKIT_PCIE
   fpga_init();
   void* FPGA_DDR_ADDR=(void*)0x40000000;
   const size_t FPGA_DDR_SIZE=1<<30;//1G
-  the_cnn.dma_buffer=FPGA_DDR_ADDR;
-  the_cnn.dma_phys_trans_offset = 0;
-  the_cnn.dma_buffer_end = the_cnn.dma_buffer + FPGA_DDR_SIZE-1;
-  void* dma_instr_blob = vbx_allocate_dma_buffer(&the_cnn,VBX_INSTRUCTION_SIZE,21);
-  write_fpga((uintptr_t)virt_to_phys(&the_cnn,dma_instr_blob),instruction_blob,VBX_INSTRUCTION_SIZE);
-  the_cnn.io_buffers = vbx_allocate_dma_buffer(&the_cnn, MAX_IO_BUFFERS * sizeof(vbx_cnn_io_ptr_t), 3);
+  the_cnn->dma_buffer=FPGA_DDR_ADDR;
+  the_cnn->dma_phys_trans_offset = 0;
+  the_cnn->dma_buffer_end = the_cnn->dma_buffer + FPGA_DDR_SIZE-1;
+  void* dma_instr_blob = vbx_allocate_dma_buffer(the_cnn,VBX_INSTRUCTION_SIZE,21);
+  write_fpga((uintptr_t)virt_to_phys(the_cnn,dma_instr_blob),instruction_blob,VBX_INSTRUCTION_SIZE);
+  the_cnn->io_buffers = vbx_allocate_dma_buffer(the_cnn, MAX_IO_BUFFERS * sizeof(vbx_cnn_io_ptr_t), 3);
 #else
   void* dma_instr_blob = instruction_blob;
 #endif //VBX_SOC_DRIVER
-  if (((uintptr_t)virt_to_phys(&the_cnn,dma_instr_blob)) & (1024 * 1024 * 2 - 1)) {
+  if (((uintptr_t)virt_to_phys(the_cnn,dma_instr_blob)) & (1024 * 1024 * 2 - 1)) {
     // instruction_blob must be aligned to a 2M boundary
     return NULL;
   }
@@ -200,16 +192,16 @@ vbx_cnn_t *vbx_cnn_init(void *ctrl_reg_addr,void *instruction_blob) {
   }
   //set checksum to zero to reset orca stdout pointer
   *expected=0;
-  the_cnn.ctrl_reg = ctrl_reg_addr;
-  the_cnn.instruction_blob = dma_instr_blob;
+  the_cnn->ctrl_reg = ctrl_reg_addr;
+  the_cnn->instruction_blob = dma_instr_blob;
   // processor in reset:
-  write_register(the_cnn.ctrl_reg,CTRL_OFFSET,CTRL_REG_SOFT_RESET);
+  write_register(the_cnn->ctrl_reg,CTRL_OFFSET,CTRL_REG_SOFT_RESET);
   // start processor:
-  write_register(the_cnn.ctrl_reg,ELF_OFFSET,(uintptr_t)virt_to_phys(&the_cnn,dma_instr_blob) & 0xFFFFFFFF);
-  write_register(the_cnn.ctrl_reg,CTRL_OFFSET, 0);
-  the_cnn.initialized = 1;
-  the_cnn.debug_print_ptr=0;
-  return &the_cnn;
+  write_register(the_cnn->ctrl_reg,ELF_OFFSET,(uintptr_t)virt_to_phys(the_cnn,dma_instr_blob) & 0xFFFFFFFF);
+  write_register(the_cnn->ctrl_reg,CTRL_OFFSET, 0);
+  the_cnn->initialized = 1;
+  the_cnn->debug_print_ptr=0;
+  return the_cnn;
 }
 
 

@@ -22,17 +22,15 @@ fi
 source $VBX_SDK/vbx_env/bin/activate
 
 echo "Downloading mobilefacenet-arcface..."
-rm -rf model-y1-test2
-python3 -m venv gdown
-source gdown/bin/activate
-pip install gdown
-[ -f model-y1.zip ] || python gdown/bin/gdown 'https://drive.google.com/uc?id=1RHyJIeYuHduVDDBTn3ffpYEZoXWRamWI&authuser=0&export=download'
+rm -rf arcface && mkdir arcface
+cd arcface
+[ -f model-y1.zip ] || gdown 'https://drive.google.com/uc?id=1RHyJIeYuHduVDDBTn3ffpYEZoXWRamWI&authuser=0&export=download'
 unzip model-y1.zip
-source $VBX_SDK/vbx_env/bin/activate
+cd ..
 
 echo "Running Model Optimizer..."
 # model details @ https://github.com/openvinotoolkit/open_model_zoo/blob/master/models/public/face-recognition-mobilefacenet-arcface/model.yml
-converter --input_model=model-y1-test2/model-0000.params \
+mo --input_model=arcface/model-y1-test2/model-0000.params \
 --reverse_input_channels \
 --input_shape=[1,3,112,112] \
 --static_shape

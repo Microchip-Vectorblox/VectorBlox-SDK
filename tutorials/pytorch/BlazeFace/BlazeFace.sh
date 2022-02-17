@@ -40,7 +40,7 @@ cp BlazeFace-PyTorch/blazeface.onnx .
 
 echo "Running Model Optimizer..."
 # model details @ https://github.com/hollance/BlazeFace-PyTorch
-converter --input_model blazeface.onnx \
+mo --input_model blazeface.onnx \
 --reverse_input_channels \
 --mean_values [127.5,127.5,127.5] \
 --scale_values [127.5] \

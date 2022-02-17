@@ -9,8 +9,8 @@ setuptools.setup(
     description="Python wrapper for vbx cnn simulator",
     install_requires=["onnx==1.9.0",
                       "onnxruntime==1.8.0",
-                      "tqdm==4.42.0",
-                      "opencv-python==4.2.0.32"],
+                      "tqdm",
+                      "opencv-python==4.5.*"],
     entry_points={'console_scripts':
                   ['generate_vnnx=vbx.generate.__main__:main',
                    'simulate_vnnx=vbx.sim.__main__:main',

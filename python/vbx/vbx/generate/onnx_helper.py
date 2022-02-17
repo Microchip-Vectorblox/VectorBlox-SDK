@@ -2,7 +2,7 @@ import json
 import numpy as np
 import onnx
 from onnx import AttributeProto
-from onnx import numpy_helper, helper, checker
+from onnx import numpy_helper, helper, checker, shape_inference
 
 
 def trace_linear_path_backwards(nodes, nname):
@@ -11,12 +11,26 @@ def trace_linear_path_backwards(nodes, nname):
     if node is None:
         return []
 
-    assert(len(node.output) == 1)
+    #assert(len(node.output) == 1)
     inputs = [get_node_source(nodes, n) for n in node.input if get_node_source(nodes, n) != None]
     if len(inputs) == 1:
         return [node.name] + trace_linear_path_backwards(nodes, get_node(nodes, inputs[0].name).output[0])
 
     return [node.name]
+
+
+def get_shape(inits, name):
+    shape = None
+    x = [_ for _ in inits if _.name == name]
+
+    if len(x) == 1:
+        tensor_type = x[0].type.tensor_type
+        # check if it has a shape:
+        if (tensor_type.HasField("shape")):
+            shape = [d.dim_value for d in tensor_type.shape.dim if d.HasField("dim_value") ]
+
+    return shape
+
 
 def get_tensor(inits, name):
     value = None
@@ -40,6 +54,7 @@ def get_model_input_shape(model_file):
         if (tensor_type.HasField("shape")):
             return [d.dim_value for d in tensor_type.shape.dim if d.HasField("dim_value") ]
             # iterate through dimensions of the shape:
+
 def set_tensor(inits, name, arr):
     x = [i for (i, _) in enumerate(inits) if _.name == name]
 
@@ -53,9 +68,12 @@ def set_tensor(inits, name, arr):
 
 def get_previous_nodes(nodes, node):
     paths = [trace_linear_path_backwards(nodes, n) for n in node.input]
-    return [get_node(nodes, path[0]) for path in paths if path != []]
-
-
+    nodes = [get_node(nodes, path[0]) for path in paths if path != []] 
+    unique = []
+    for n in nodes:
+        if n not in unique:
+            unique.append(n)
+    return unique
 
 
 def get_node_source(nodes, output_name):
@@ -97,7 +115,7 @@ def change_input_dim(model, batch_dim=None):
             dim1.dim_param = sym_batch_dim
 
 
-def onnx_save_model(graph, fname, producer=None):
+def onnx_save_model(graph, fname, infer_shapes=False, producer=None):
     checker.check_graph(graph)
     if producer:
         model_proto = helper.make_model(graph, producer=producer)
@@ -105,6 +123,8 @@ def onnx_save_model(graph, fname, producer=None):
         model_proto = helper.make_model(graph)
     change_input_dim(model_proto)
     checker.check_model(model_proto)
+    if infer_shapes:
+        model_proto = shape_inference.infer_shapes(model_proto)
     model_string = model_proto.SerializeToString()
 
     with open(fname, 'wb') as f:
@@ -112,9 +132,9 @@ def onnx_save_model(graph, fname, producer=None):
 
 
 
-def onnx_save_graph(nodes, inputs, outputs, inits, fname, graph_name, producer=None):
+def onnx_save_graph(nodes, inputs, outputs, inits, fname, graph_name, infer_shapes=False, producer=None):
     graph = onnx.helper.make_graph(nodes, graph_name, inputs, outputs, inits)
-    onnx_save_model(graph, fname, producer)
+    onnx_save_model(graph, fname, infer_shapes, producer)
 
 
 def has_attr(node, prop):
@@ -173,20 +193,3 @@ def get_node_index(nodes, nname):
     return node
 
 
-def load_statistics(fname, mode=None):
-    stats = {}
-    with open(fname) as f:
-        j = json.load(f)
-        for arr in j:
-            channel_maximums = np.stack((np.asarray(arr['max'],dtype=np.float32),
-                                         np.asarray(arr['min'],dtype=np.float32)), axis=-1)
-            symetric_channel_maximums = np.max(np.abs(channel_maximums), axis=-1)
-            positive_channel_maximums = np.max(channel_maximums, axis=-1)
-
-            stats[str(arr['id'])] = np.max(symetric_channel_maximums)
-            if 'threshold' in arr:
-                if stats[str(arr['id'])] > arr['threshold']:
-                    stats[str(arr['id'])] = np.asarray(arr['threshold'])
-            if 'ScaleShift' in arr['name'] and arr['id'] > 1:
-                stats[str(arr['id']) + '_ss'] = stats[str(arr['id'])]
-    return stats

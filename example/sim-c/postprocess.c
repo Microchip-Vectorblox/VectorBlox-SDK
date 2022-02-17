@@ -1063,6 +1063,15 @@ void quicksort(fix16_t *arr, int16_t *index, const int length)
   _quicksort(arr, index, 0, length-1);
 }
 
+void reverse(fix16_t* output_buffer[], int len){
+	int left = 0, right = len-1;
+	for(left, right; left < right; left++, right--){
+		fix16_t* temp = output_buffer[left];
+		output_buffer[left] = output_buffer[right];
+		output_buffer[right] = temp;
+	}
+}
+
 void post_classifier(fix16_t *outputs, const int out_sz, int16_t* output_index, int topk)
 {
   int i;

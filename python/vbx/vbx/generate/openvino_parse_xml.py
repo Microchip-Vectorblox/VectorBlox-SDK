@@ -10,6 +10,8 @@ class Node:
         self.data = None
         self.input = None
         self.output = None
+        self.idims = None
+        self.odims = None
         self.weights = None
         self.biases = None
         self.custom = None
@@ -19,6 +21,8 @@ class Node:
         self.max = None
         self.mean = None
         self.threshold = None
+        self.inport = None
+        self.outport = None
 
 
     def set_edges(self, edges):
@@ -26,11 +30,13 @@ class Node:
         # _edges = sorted(_edges, key=lambda x: x['from_port'])
         _edges = sorted(_edges, key=lambda x: x['to_port'])
         self._from = [e['from_layer'] for e in _edges]
+        self.inport = [e['from_port'] for e in _edges] # ports of the prev layers that we are taking from
 
         _edges = [e for e in edges if e['from_layer'] == self.id]
         # _edges = sorted(_edges, key=lambda x: x['to_port'])
         _edges = sorted(_edges, key=lambda x: x['from_port'])
         self._to = [e['to_layer'] for e in _edges]
+        self.outport = [e['from_port'] for e in _edges] # ports of the current layer we are outputing from
 
 
     def set_stats(self, stats):
@@ -188,10 +194,16 @@ def parse_edges(xml_edges):
 
 def parse_ports(group):
     ports = []
+    dims = []
     for subgroup in group:
         if subgroup.tag == 'port':
-            ports.append(tuple([int(dim.text) for dim in subgroup]))
-    return ports
+            id = int(subgroup.attrib['id'])
+            names = None
+            if 'names' in subgroup.attrib:
+                names = subgroup.attrib['names']
+            ports.append(tuple([id, names]))
+            dims.append(tuple([int(dim.text) for dim in subgroup]))
+    return ports, dims
 
 
 def parse_nodes(xml_nodes):
@@ -202,9 +214,9 @@ def parse_nodes(xml_nodes):
             if group.tag == 'data':
                 n.data = {k: group.attrib[k] for k in group.keys()}
             elif group.tag == 'input':
-                n.input = parse_ports(group)
+                n.input, n.idims = parse_ports(group)
             elif group.tag == 'output':
-                n.output = parse_ports(group)
+                n.output, n.odims = parse_ports(group)
             elif group.tag == 'blobs':
                 for subgroup in group:
                     if subgroup.tag == 'weights':

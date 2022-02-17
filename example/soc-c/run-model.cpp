@@ -165,26 +165,28 @@ int main(int argc, char **argv) {
   }
   fix16_t *output_buffers[2] = {(fix16_t *)io_buffers[1],
                                 (fix16_t *)io_buffers[2]};
-  struct timeval tv1, tv2;
-  gettimeofday(&tv1, NULL);
-  vbx_cnn_model_start(vbx_cnn, model, io_buffers);
-  int pol_val;
-  while ((pol_val = vbx_cnn_model_poll(vbx_cnn)) > 0) {
-    check_debug_prints(vbx_cnn);
-    gettimeofday(&tv2, NULL);
-    if (gettimediff_us(tv1, tv2) > 60E6) {
-      fprintf(stderr, "ERROR: Network taking more than 10s. ABORTING\n");
-      exit(-1);
+  for(int run=0;run<2;++run){
+    printf("run %d\n",run);
+    struct timeval tv1, tv2;
+    gettimeofday(&tv1, NULL);
+    vbx_cnn_model_start(vbx_cnn, model, io_buffers);
+    int pol_val;
+    while ((pol_val = vbx_cnn_model_poll(vbx_cnn)) > 0) {
+      check_debug_prints(vbx_cnn);
+      gettimeofday(&tv2, NULL);
+      if (gettimediff_us(tv1, tv2) > 60E6) {
+        fprintf(stderr, "ERROR: Network taking more than 10s. ABORTING\n");
+        exit(-1);
+      }
     }
-  }
-  printf("Done model\n");
-  if (pol_val < 0) {
-    printf("Model failed with error %d\n", vbx_cnn_get_error_val(vbx_cnn));
-  }
-  check_debug_prints(vbx_cnn);
+    printf("Done model\n");
+    if (pol_val < 0) {
+      printf("Model failed with error %d\n", vbx_cnn_get_error_val(vbx_cnn));
+    }
+    check_debug_prints(vbx_cnn);
 
-  printf("network took %d ms\n", gettimediff_us(tv1, tv2) / 1000);
-
+    printf("network took %d ms\n", gettimediff_us(tv1, tv2) / 1000);
+  }
   if (post_process_str == "CLASSIFY") {
     const int topk = 10;
     int16_t indices[topk];

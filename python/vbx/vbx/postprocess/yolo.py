@@ -182,27 +182,28 @@ def yolo_post_process(blobs, params, height, width, threshold, iou, version=2, d
 
 yolo_v3_params = {
         'detector/yolo-v3/Conv_6/BiasAdd/YoloRegion':  {
-            'side': 13,
+            'side': 19,
             'anchors': [116,90,156,198,373,326],
             'classes': 80,
             'num': 3,
             'coords': 4,
-            'shape': [1, 255, 13, 13],
+            'shape': [1, 255, 19, 19],
             },
         'detector/yolo-v3/Conv_14/BiasAdd/YoloRegion': {
-            'side': 26,
+            'side': 38,
             'anchors': [30,61,62,45,59,119],
             'classes': 80,
             'num': 3,
             'coords': 4,
-            'shape': [1, 255, 26, 26],
+            'shape': [1, 255, 38, 38],
             },
         'detector/yolo-v3/Conv_22/BiasAdd/YoloRegion': {
-            'side': 52, 'anchors': [10,13,16,30,33,23],
+            'side': 76, 
+            'anchors': [10,13,16,30,33,23],
             'classes': 80,
             'num': 3,
             'coords': 4,
-            'shape': [1, 255, 52, 52],
+            'shape': [1, 255, 76, 76],
             },
         }
 
@@ -356,7 +357,7 @@ def yolov3_coco(outputs, scale_factors, threshold=0.3, iou=0.4):
         p = get_param_by_output_size(out,params)
         blobs[p] = out.astype(np.float32).reshape(params[p]['shape']) * scale
 
-    return yolo_post_process(blobs, params, 416, 416, threshold, iou, 3, True, True)
+    return yolo_post_process(blobs, params, 608, 608, threshold, iou, 3, True, True)
 
 
 def demo_post_process(outputs, scale=1, network='tiny_voc', threshold=0.3, iou=0.4, do_nms=True, do_softmax=True):

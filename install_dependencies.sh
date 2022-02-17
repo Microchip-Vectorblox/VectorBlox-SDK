@@ -11,6 +11,7 @@ then
          git \
          libsm6 \
          libxrender1 \
+	 libgl1 \
          curl \
          wget \
          unzip \

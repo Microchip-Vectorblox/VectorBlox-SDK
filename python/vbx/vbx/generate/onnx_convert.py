@@ -11,7 +11,6 @@ from . import onnx_helper
 from .openvino_parse_xml import parse_openvino_xml
 from .onnx_infer import onnx_infer, onnx_activations_batched, onnx_random_infer, onnx_random_input, load_input
 from .utils import *
-from .onnx_kld import get_optimal_threshold, get_valid_kld
 
 
 np.set_printoptions(suppress=True, precision=4, linewidth=120)
@@ -20,52 +19,6 @@ np.set_printoptions(suppress=True, precision=4, linewidth=120)
 def trunc(arr, decimals=8):
     # return np.trunc(arr*10**decimals)/(10**decimals)
     return arr
-
-
-def gather_stats(onnx_model, nodes, input, count, scale, kld_threshold=False):
-
-    valid_kld = {}
-    if kld_threshold:
-        valid_kld = get_valid_kld(onnx_model)
-    # print(valid_kld.keys())
-
-    if os.path.isdir(input):
-        inputs = []
-        extensions = ['*.jpg', '*.png', '*.jpeg', '*.npy']
-        extensions += [e.upper() for e in extensions]
-        for ext in extensions:
-            inputs += sorted(glob.glob(os.path.join(input, ext)))
-        if count:
-            inputs = inputs[:count]
-        input_shape = onnx_helper.get_model_input_shape(onnx_model)
-        input_arrays = np.vstack([load_input(i, scale, input_shape) for i in inputs])
-    else:
-        input_arrays = np.load(input)
-    stats = onnx_activations_batched(onnx_model, input_arrays, stats_only=True, histogram_dict=valid_kld)
-
-    stats_list = []
-    for output in sorted(stats.keys()):
-        if 'hist' in stats[output]:
-            (hist, hist_edges, min_val, max_val, th) = stats[output]['hist']
-            _, _, _, opt = get_optimal_threshold(stats[output]['hist'], valid_kld[output])
-
-            stats_list.append({'id':output,
-                              'mean': stats[output]['mean'],
-                              'max': stats[output]['max'],
-                              'min': stats[output]['min'],
-                              'threshold': opt})
-        else:
-            stats_list.append({'id':output,
-                              'mean': stats[output]['mean'],
-                              'max': stats[output]['max'],
-                              'min': stats[output]['min']})
-
-    if not (nodes is None):
-        for node in nodes:
-            node.set_stats_by_id(stats_list)
-        return nodes
-    else:
-        return stats_list
 
 
 def as_int(x):
@@ -78,12 +31,14 @@ def as_int(x):
 
 
 def io(vinode):
-    inputs = ['{}'.format(_) for _ in vinode._from]
+    inputs = ['{}:{}'.format(layer,port) for layer,port in zip(vinode._from,vinode.inport)]
     if vinode.weights:
         inputs += ['W{}'.format(vinode.id)]
     if vinode.biases:
         inputs += ['b{}'.format(vinode.id)]
-    outputs = ['{}'.format(vinode.id)]
+
+    outputs = ['{}:{}'.format(vinode.id,port) for port in vinode.outport]
+    outputs=list(dict.fromkeys(outputs))
 
     return inputs, outputs
 
@@ -91,14 +46,19 @@ def io(vinode):
 def gen_pad_10(vinode, vinodes):
     nodes, inits = [], []
     inputs, outputs = io(vinode)
-    buf = outputs[0]
+    # buf = outputs[0]
+    buf = outputs[0].split(':')[0]
 
-    pads_begin = vinodes[int(inputs[1])]
-    pads_end = vinodes[int(inputs[2])]
+    pads_begin = vinodes[int(inputs[1].split(':')[0])]
+    pads_end = vinodes[int(inputs[2].split(':')[0])]
+
     if 'pad_value' in vinode.data:
         pad_value = float(vinode.data['pad_value'])
+    elif vinodes[int(inputs[-1].split(':')[0])].type == 'ConvertLike':
+        convertlike_inputs, _ = io(vinodes[int(inputs[-1].split(':')[0])])
+        pad_value = vinodes[int(convertlike_inputs[0].split(':')[0])].data['arr'][0]
     else:
-        pad_value = float(vinodes[int(inputs[-1])].data['arr'].tolist()[0])
+        pad_value = float(vinodes[int(inputs[-1].split(':')[0])].data['arr'].tolist()[0])
     inputs = inputs[:1]
 
     pads = pads_begin.data['arr'].tolist() + pads_end.data['arr'].tolist()
@@ -138,6 +98,53 @@ def gen_pad_10(vinode, vinodes):
     nodes.append(node)
     return nodes, inits
 
+def gen_swish(vinode, vinodes):
+    nodes, inits = [], []
+    inputs, outputs = io(vinode)
+
+    buf_sigmoid = str(vinode.id)+'_sigmoid'
+    node = onnx.helper.make_node('Sigmoid',
+                                 inputs=inputs,
+                                 outputs=[buf_sigmoid],
+                                 name=buf_sigmoid)
+    nodes.append(node)
+
+    node = onnx.helper.make_node('Mul',
+                                 inputs=[inputs[0],buf_sigmoid],
+                                 outputs=outputs,
+                                 name=str(vinode.id))
+    nodes.append(node) 
+    return nodes, inits
+
+def gen_hswish(vinode, vinodes):
+    nodes, inits = [], []
+    inputs, outputs = io(vinode)
+
+    node = onnx.helper.make_node('HardSwish',
+                                 inputs=inputs,
+                                 outputs=outputs,
+                                 name=str(vinode.id))
+    nodes.append(node)
+    return nodes, inits
+
+# TODO; finish implementing VariadicSplit
+def gen_varsplit(vinode, vinodes):
+    nodes, inits = [], []
+    inputs, outputs = io(vinode)
+        
+    axis = vinodes[int(inputs[1].split(':')[0])].data['arr'][0]
+    split_lengths = vinodes[int(inputs[2].split(':')[0])].data['arr']
+    outputs = outputs * len(split_lengths)
+    inputs = inputs[0]
+
+    node = onnx.helper.make_node('Split',
+                                 inputs=[inputs, 'split_lengths'],
+                                 outputs=outputs,
+                                 axis=axis,
+                                 name=str(vinode.id))
+
+    nodes.append(node)
+    return nodes, inits
 
 def gen_input(vinode):
     nodes, inits = [], []
@@ -212,6 +219,22 @@ def auto_pad_calc(auto_pad,input_shape,kernel_size,stride,dilations):
             pads = pads[2:] + pads[:2]
     return [int(p) for p in pads]
         
+
+def gen_negative(vinode, vinodes):
+    nodes, inits = [], []
+    inputs, outputs = io(vinode)
+    neg_tensor = onnx.helper.make_tensor('neg_{}'.format(vinode.id),
+            onnx.TensorProto.FLOAT,
+            (1,),
+            [-1.])
+    inits.append(neg_tensor)
+    inputs = inputs + ['neg_{}'.format(vinode.id)]
+    node = onnx.helper.make_node('Mul',
+            inputs=inputs,
+            outputs=outputs,
+            name=str(vinode.id))
+    nodes.append(node)
+    return nodes, inits
         
 
 def gen_conv_10(vinode, bias_vinode, vinodes):
@@ -229,10 +252,10 @@ def gen_conv_10(vinode, bias_vinode, vinodes):
         buf = bias_outputs[0]
         node_outputs = bias_outputs
 
-    weights = vinodes[int(inputs[1])]
+    weights = vinodes[int(inputs[1].split(':')[0])]
     inputs = inputs[:-1] + ['W{}'.format(node_id)]
     if bias_vinode:
-        biases = vinodes[int(bias_inputs[1])]
+        biases = vinodes[int(bias_inputs[1].split(':')[0])]
         inputs += ['b{}'.format(node_id)]
     
     if 'auto_pad' in vinode.data:
@@ -241,7 +264,7 @@ def gen_conv_10(vinode, bias_vinode, vinodes):
         else:
             auto_pad = vinode.data['auto_pad'].upper()
             pads = auto_pad_calc(auto_pad,
-                                 vinode.input[0],
+                                 vinode.idims[0],
                                  as_int(weights.data['shape'])[-2:],
                                  as_int(vinode.data['strides']),
                                  as_int(vinode.data['dilations']))
@@ -294,19 +317,19 @@ def gen_group_conv_scaleshift(vinode, bias_vinode, vinodes):
     node_outputs = bias_outputs
 
     assert(len(inputs) == 2)
-    constant_input = [is_constant(vinodes[int(i)], vinodes) for i in inputs]
+    constant_input = [is_constant(vinodes[int(i.split(':')[0])], vinodes) for i in inputs]
     if constant_input[0]:
-        weights = vinodes[int(inputs[0])]
+        weights = vinodes[int(inputs[0].split(':')[0])]
         inputs = inputs[1:]
-        idims = vinode.input[1]
+        idims = vinode.idims[1]
     elif constant_input[1]:
-        weights = vinodes[int(inputs[1])]
+        weights = vinodes[int(inputs[1].split(':')[0])]
         inputs = inputs[:-1]
-        idims = vinode.input[0]
+        idims = vinode.idims[0]
     inputs = inputs + ['W{}'.format(node_id)]
 
     if bias_vinode:
-        biases = vinodes[int(bias_inputs[1])]
+        biases = vinodes[int(bias_inputs[1].split(':')[0])]
         inputs += ['b{}'.format(node_id)]
 
     kernels = idims[1]
@@ -366,10 +389,10 @@ def gen_group_conv_10(vinode, bias_vinode, vinodes):
         buf = bias_outputs[0]
         node_outputs = bias_outputs
 
-    weights = vinodes[int(inputs[1])]
+    weights = vinodes[int(inputs[1].split(':')[0])]
     inputs = inputs[:-1] + ['W{}'.format(node_id)]
     if bias_vinode:
-        biases = vinodes[int(bias_inputs[1])]
+        biases = vinodes[int(bias_inputs[1].split(':')[0])]
         inputs += ['b{}'.format(node_id)]
 
     if 'auto_pad' in vinode.data:
@@ -378,7 +401,7 @@ def gen_group_conv_10(vinode, bias_vinode, vinodes):
         else:
             auto_pad = vinode.data['auto_pad'].upper()
             pads = auto_pad_calc(auto_pad,
-                                 vinode.input[0],
+                                 vinode.idims[0],
                                  as_int(weights.data['shape'])[-2:],
                                  as_int(vinode.data['strides']),
                                  as_int(vinode.data['dilations']))
@@ -477,17 +500,17 @@ def gen_reduce_10(vinode, vinodes):
     nodes, inits = [], []
     inputs, outputs = io(vinode)
 
-    idims = vinode.input[0]
-    odims = vinode.output[0]
+    idims = vinode.idims[0]
+    odims = vinode.odims[0]
 
-    node = vinodes[int(inputs[1])]
+    node = vinodes[int(inputs[1].split(':')[0])]
     if 'arr' in node.data:
         reduction = node.data['arr'].tolist()
     else:
         reduction = None
 
     keep_dims = True
-    if 'keep_dims' in vinode.data and vinode.data['keep_dims'] == 'False':
+    if 'keep_dims' in vinode.data and vinode.data['keep_dims'].lower() == 'false':
         keep_dims = False
     assert(not keep_dims or odims[-2:] == (1, 1))
 
@@ -512,8 +535,8 @@ def gen_reduce_10(vinode, vinodes):
                         )
                 nodes.append(node)
         else:
-            buf = outputs[0]
-            _buf = outputs[0] + '_f'
+            buf = outputs[0].split(':')[0]
+            _buf = outputs[0].split(':')[0] + '_f'
             flatten_output = '{}_flat'.format(vinode.id)
             node = onnx.helper.make_node(
                     'AveragePool',
@@ -537,36 +560,47 @@ def gen_reduce_10(vinode, vinodes):
 def gen_multiply_10(vinode, vinodes):
     nodes, inits = [], []
     inputs, outputs = io(vinode)
-    buf = outputs[0]
+    #buf = outputs[0]
+    buf = outputs[0].split(':')[0]
 
     assert(len(inputs) == 2)
-    constant_input = [is_constant(vinodes[int(i)], vinodes) for i in inputs]
+    constant_input = [is_constant(vinodes[int(i.split(':')[0])], vinodes) for i in inputs]
     if constant_input[0]:
-        weights = vinodes[int(inputs[0])]
+        weights = vinodes[int(inputs[0].split(':')[0])]
         inputs = inputs[1:]
     elif constant_input[1]:
-        weights = vinodes[int(inputs[1])]
+        weights = vinodes[int(inputs[1].split(':')[0])]
         inputs = inputs[:-1]
     else:
+        weights = None
         print('error, non-const multiply not implemented')
+    if weights is None:
+        node = onnx.helper.make_node(
+            'Mul',
+            inputs=inputs,
+            outputs=outputs,
+            name=buf,
+        )
+        nodes.append(node)
 
-    inputs = inputs + ['W{}'.format(vinode.id)]
+    else:
+        inputs = inputs + ['W{}'.format(vinode.id)]
 
-    node = onnx.helper.make_node(
-        'Mul',
-        inputs=inputs,
-        outputs=outputs,
-        name=buf,
-    )
-    nodes.append(node)
+        node = onnx.helper.make_node(
+            'Mul',
+            inputs=inputs,
+            outputs=outputs,
+            name=buf,
+        )
+        nodes.append(node)
 
-    if weights:
-        tensor = onnx.helper.make_tensor('W{}'.format(vinode.id),
-                onnx.TensorProto.FLOAT,
-                as_int(weights.data['shape'])[1:],
-                trunc(weights.data['arr']).tolist(),
-                )
-        inits.append(tensor)
+        if weights:
+            tensor = onnx.helper.make_tensor('W{}'.format(vinode.id),
+                    onnx.TensorProto.FLOAT,
+                    as_int(weights.data['shape'])[1:],
+                    trunc(weights.data['arr']).tolist(),
+                    )
+            inits.append(tensor)
 
     return nodes, inits
 
@@ -574,10 +608,12 @@ def gen_multiply_10(vinode, vinodes):
 def gen_add_10(vinode, vinodes):
     nodes, inits = [], []
     inputs, outputs = io(vinode)
-    buf = outputs[0]
+    #buf = outputs[0]
+    buf = outputs[0].split(':')[0]
 
     is_const = False
     for input in inputs:
+        input = input.split(':')[0]
         input_vinode = [_ for _ in vinodes if str(_.id) == input][0]
         if input_vinode.type == 'Const':
             is_const = True
@@ -591,7 +627,7 @@ def gen_add_10(vinode, vinodes):
                 )
         nodes.append(node)
     else:
-        biases = vinodes[int(inputs[1])]
+        biases = vinodes[int(inputs[1].split(':')[0])]
         if biases:
             inputs = inputs[:-1] + ['b{}'.format(vinode.id)]
 
@@ -621,13 +657,21 @@ def gen_relu(vinode):
 
     if vinode.data and 'negative_slope' in vinode.data:
         slope = float(vinode.data['negative_slope'])
-        node = onnx.helper.make_node(
-                'LeakyRelu',
-                inputs=inputs,
-                outputs=outputs,
-                name = str(vinode.id),
-                alpha=slope,
-                )
+        if slope != 0.0:
+            node = onnx.helper.make_node(
+                    'LeakyRelu',
+                    inputs=inputs,
+                    outputs=outputs,
+                    name = str(vinode.id),
+                    alpha=slope,
+                    )
+        else:
+            node = onnx.helper.make_node(
+                    'Relu',
+                    inputs=inputs,
+                    outputs=outputs,
+                    name = str(vinode.id),
+                    )
 
     else:
         node = onnx.helper.make_node(
@@ -669,7 +713,7 @@ def gen_prelu_10(vinode, vinodes):
     nodes, inits = [], []
     inputs, outputs = io(vinode)
 
-    data_node = vinodes[int(inputs[1])]
+    data_node = vinodes[int(inputs[1].split(':')[0])]
     if data_node.type != 'Const':
         sys.stderr.write("ERROR:Non-constant weights in Prelu node {} not supported\n".format(vinode.name))
         sys.exit(1)
@@ -750,7 +794,7 @@ def gen_extract(vinode):
 
     stride, stride = as_int(vinode.data['strides'])
     assert(stride == 2)
-    dims = vinode.input[0]
+    dims = vinode.idims[0]
     dims = tuple([-1] + list(dims)[1:])
 
     reshape_1 = np.array([dims[0], dims[1], dims[2]//stride, stride, dims[3]//stride, stride], dtype=np.int64)
@@ -938,8 +982,8 @@ def gen_interpolate(vinode):
     buf = outputs[0]
 
     inputs = inputs[:1]
-    idims = vinode.input[0]
-    odims = vinode.output[0]
+    idims = vinode.idims[0]
+    odims = vinode.odims[0]
     factor0 = float(odims[-2]) / float(idims[-2])
     factor1 = float(odims[-1]) / float(idims[-1])
     assert(factor0 == factor1)
@@ -948,8 +992,9 @@ def gen_interpolate(vinode):
     if factor == 1.0:
         return gen_identity(vinode)
     mode = vinode.data['mode']
-    assert(mode in ['linear', 'nearest'])
-
+    assert(mode in ['linear', 'nearest', 'linear_onnx'])
+    if mode == 'linear_onnx':
+        mode = 'linear'
     roi = onnx.helper.make_tensor('roi{}'.format(vinode.id),
             onnx.TensorProto.FLOAT,
             (0,), [])
@@ -1046,7 +1091,7 @@ def gen_pooling(vinode):
         nodes.append(node)
     elif vinode.data['pool-method'] == 'avg':
         count_include_pad = 0
-        if 'exclude-pad' in vinode.data and vinode.data['exclude-pad'] == 'false':
+        if 'exclude-pad' in vinode.data and vinode.data['exclude-pad'].lower() == 'false':
             count_include_pad = 1
 
         node = onnx.helper.make_node(
@@ -1091,7 +1136,8 @@ def gen_eltwise(vinode):
 def gen_concat(vinode):
     nodes, inits = [], []
     inputs, outputs = io(vinode)
-    buf = outputs[0]
+    #buf = outputs[0]
+    buf = outputs[0].split(':')[0]
     axis = int(vinode.data['axis'])
 
     if axis != 1:
@@ -1114,7 +1160,8 @@ def gen_concat(vinode):
 def gen_norm(vinode):
     nodes, inits = [], []
     inputs, outputs = io(vinode)
-    buf = outputs[0]
+    #buf = outputs[0]
+    buf = outputs[0].split(':')[0]
     inputs = inputs[:1]
 
     alpha = float(vinode.data['alpha'])
@@ -1138,8 +1185,10 @@ def gen_norm(vinode):
 def gen_scaleshift(vinode):
     nodes, inits = [], []
     inputs, outputs = io(vinode)
-    buf = outputs[0]
-    _buf = outputs[0] + '_ss'
+    #buf = outputs[0]
+    #_buf = outputs[0] + '_ss'
+    buf = outputs[0].split(':')[0]
+    _buf = outputs[0].split(':')[0] + '_ss'
 
     if vinode.weights and vinode.biases:
         mul_inputs = [inputs[0], inputs[1]]
@@ -1204,10 +1253,11 @@ def gen_scaleshift(vinode):
 def gen_reshape(vinode):
     nodes, inits = [], []
 
-    if len(one_elem(vinode.output)):
+    if len(one_elem(vinode.odims)):
 
         inputs, outputs = io(vinode)
-        buf = outputs[0]
+        #buf = outputs[0]
+        buf = outputs[0].split(':')[0]
 
         inputs = inputs[:1]
         inputs.append('reshape_{}'.format(vinode.id))
@@ -1221,11 +1271,11 @@ def gen_reshape(vinode):
         nodes.append(node)
 
 
-        val = list(one_elem(vinode.output))
+        val = list(one_elem(vinode.odims))
         val = [-1] + val[1:]
         tensor = onnx.helper.make_tensor('reshape_{}'.format(vinode.id),
                 onnx.TensorProto.INT64,
-                np.asarray(vinode.output[0]).shape,
+                np.asarray(vinode.odims[0]).shape,
                 val,
                 )
         inits.append(tensor)
@@ -1238,8 +1288,8 @@ def gen_tile(vinode):
     inputs, outputs = io(vinode)
     buf = outputs[0]
 
-    idims = vinode.input[0]
-    odims = vinode.output[0]
+    idims = vinode.idims[0]
+    odims = vinode.odims[0]
 
     tile = [int(o/i) for o,i in zip(odims,idims)]
     tile_tensor = onnx.helper.make_tensor('tile_{}'.format(vinode.id),
@@ -1265,7 +1315,8 @@ def gen_tile(vinode):
 def gen_mul1(vinode):
     nodes, inits = [], []
     inputs, outputs = io(vinode)
-    buf = outputs[0]
+    #buf = outputs[0]
+    buf = outputs[0].split(':')[0]
 
     mul_buf = 'W{}'.format(vinode.id)
     mul_inputs = [inputs[0], mul_buf]
@@ -1311,7 +1362,8 @@ def gen_power(vinode):
             )
     inits.append(tensor)
 
-    _buf = outputs[0] + '_ss'
+    #_buf = outputs[0] + '_ss'
+    _buf = outputs[0].split(':')[0] + '_ss'
     mul_inputs = [inputs[0], mul_buf]
     mul_outputs = [_buf]
     add_inputs = [_buf, bias_buf]
@@ -1337,11 +1389,13 @@ def gen_power(vinode):
 def gen_fullyconnected(vinode, prev_vinode):
     nodes, inits = [], []
     inputs, outputs = io(vinode)
-    buf = outputs[0]
-    _buf = outputs[0] + '_f'
+    # buf = outputs[0]
+    # _buf = outputs[0] + '_f'
+    buf = outputs[0].split(':')[0]
+    _buf = outputs[0].split(':')[0] + '_f'
 
-    dims = vinode.output[0]
-    prev_dims = prev_vinode.output[0]
+    dims = vinode.odims[0]
+    prev_dims = prev_vinode.odims[0]
     if len(dims) != len(prev_dims):
         flatten_inputs = [inputs[0]]
         flatten_outputs = [_buf]
@@ -1397,11 +1451,13 @@ def gen_fullyconnected(vinode, prev_vinode):
 def gen_matmul(vinode, prev_vinode):
     nodes, inits = [], []
     inputs, outputs = io(vinode)
-    buf = outputs[0]
-    _buf = outputs[0] + '_f'
+    # buf = outputs[0]
+    # _buf = outputs[0] + '_f'
+    buf = outputs[0].split(':')[0]
+    _buf = outputs[0].split(':')[0] + '_f'
 
-    dims = vinode.output[0]
-    prev_dims = prev_vinode.output[0]
+    dims = vinode.odims[0]
+    prev_dims = prev_vinode.odims[0]
 
     if len(dims) != len(prev_dims):
         flatten_inputs = [inputs[0]]
@@ -1460,20 +1516,21 @@ def gen_matmul_10(vinode, bias_vinode, prev_vinode, vinodes):
     nodes, inits = [], []
     inputs, outputs = io(vinode)
 
-    dims = vinode.output[0]
-    prev_dims = prev_vinode.output[0]
+    dims = vinode.odims[0]
+    prev_dims = vinode.idims[0]
 
-    inputs[0] = str(prev_vinode.id)
     if bias_vinode:
         bias_inputs, bias_outputs = io(bias_vinode)
         outputs = bias_outputs
-    buf = outputs[0]
-    _buf = outputs[0] + '_f'
+    # buf = outputs[0]
+    # _buf = outputs[0] + '_f'
+    buf = outputs[0].split(':')[0]
+    _buf = outputs[0].split(':')[0] + '_f'
 
-    weights = vinodes[int(inputs[1])]
+    weights = vinodes[int(inputs[1].split(':')[0])]
     inputs = inputs[:-1] + ['W{}'.format(vinode.id)]
     if bias_vinode:
-        biases = vinodes[int(bias_inputs[1])]
+        biases = vinodes[int(bias_inputs[1].split(':')[0])]
         inputs += ['b{}'.format(vinode.id)]
 
     if len(dims) != len(prev_dims):
@@ -1543,7 +1600,7 @@ def gen_topk(vinode):
     axis = int(vinode.data['axis'])
     mode = vinode.data['mode']
 
-    idim = vinode.input[0]
+    idim = vinode.idims[0]
     if axis!= 1:
         errmsg="ERROR: Node {}: TopK is only supported on axis 1\n"
         sys.stderr.write(errmsg.format(vinode.name))
@@ -1559,8 +1616,10 @@ def gen_topk(vinode):
         sys.stderr.write(errmsg.format(vinode.name))
         sys.exit(1)
 
-    buf = outputs[0]
-    _buf = outputs[0] + '_ss'
+    # buf = outputs[0]
+    # _buf = outputs[0] + '_ss'
+    buf = outputs[0].split(':')[0]
+    _buf = outputs[0].split(':')[0] + '_ss'
     argmax_inputs = [inputs[0]]
     cast_inputs = [_buf]
 
@@ -1584,25 +1643,45 @@ def gen_softmax(vinode):
     inputs, outputs = io(vinode)
     buf = outputs[0]
     axis = int(vinode.data['axis'])
-    input_shape = one_elem(vinode.input)
+    idims = one_elem(vinode.idims)
+    odims = vinode.odims[0]
+
     batch_size_axis = 0
-    for i,s in enumerate(input_shape):
+    for i,s in enumerate(idims):
         if i==axis or i==batch_size_axis:
             continue
         if s == 1:
             continue
         errmsg="ERROR: Node {}: input shape {} with axis {} not supported for softmax\n"
-        sys.stderr.write(errmsg.format(vinode.name,input_shape,axis))
+        sys.stderr.write(errmsg.format(vinode.name,idims,axis))
         sys.exit(1)
 
-    node = onnx.helper.make_node(
-            'Softmax',
-            inputs = inputs,
-            outputs = outputs,
-            axis=axis,
-            name = str(vinode.id),
-            )
-    nodes.append(node)
+    if len(odims) < 3:
+        flat = str(vinode.id) + '_flatten'
+        node = onnx.helper.make_node(
+                'Flatten',
+                inputs = inputs,
+                outputs = [flat],
+                name = flat,
+                )
+        nodes.append(node)
+        node = onnx.helper.make_node(
+                'Softmax',
+                inputs = [flat],
+                outputs = outputs,
+                axis=axis,
+                name = str(vinode.id),
+                )
+        nodes.append(node)
+    else:
+        node = onnx.helper.make_node(
+                'Softmax',
+                inputs = inputs,
+                outputs = outputs,
+                axis=axis,
+                name = str(vinode.id),
+                )
+        nodes.append(node)
 
     return nodes, inits
 
@@ -1627,10 +1706,10 @@ def gen_transpose(vinode, vinodes):
     nodes, inits = [], []
     inputs, outputs = io(vinode)
 
-    input_shape = vinode.input[0]
-    output_shape = vinode.output[0]
+    input_shape = vinode.idims[0]
+    output_shape = vinode.odims[0]
     
-    perm_node = vinodes[int(inputs[1])]
+    perm_node = vinodes[int(inputs[1].split(':')[0])]
     perm = perm_node.data['arr'].tolist()
     test_array = np.random.rand(*input_shape)
     if np.array_equal(test_array.reshape(output_shape), test_array.transpose(perm)):
@@ -1650,12 +1729,101 @@ def gen_transpose(vinode, vinodes):
     return nodes, inits
 
 
+def gen_split(vinode, vinodes):
+    nodes, inits = [], []
+    inputs, outputs = io(vinode)
+
+    axis = vinodes[int(inputs[1].split(':')[0])].data['arr'][0]
+    num_splits = int(vinode.data['num_splits'])
+    dim = vinode.idims[0][axis]
+    splits = [dim//num_splits] * num_splits
+    inputs = inputs[:1]
+
+
+    if len(outputs) < len(vinode.output):
+        full_outputs = []
+        idx = 0
+        for id,name in vinode.output:
+            if name == None:
+                full_outputs.append('nop_{}:{}'.format(vinode.id, id))
+            else:
+                full_outputs.append(outputs[idx])
+                idx += 1
+        outputs = full_outputs
+
+    splits_tensor = onnx.helper.make_tensor('split_{}'.format(vinode.id),
+                                          onnx.TensorProto.INT64,
+                                          np.asarray(splits).shape,
+                                          splits)
+    inits.append(splits_tensor)
+    inputs.append('split_{}'.format(vinode.id))
+
+    node = onnx.helper.make_node('Split',
+                                 inputs=inputs,
+                                 outputs=outputs,
+                                 axis=axis,
+                                 name=str(vinode.id)
+                                 )
+    nodes.append(node)
+
+    return nodes, inits
+
+def gen_negative(vinode, vinodes):
+    nodes, inits = [], []
+    inputs, outputs = io(vinode)
+    
+    neg_tensor = onnx.helper.make_tensor('neg_{}'.format(vinode.id),
+            onnx.TensorProto.FLOAT,
+            (1,),
+            [-1.]
+            )
+    inits.append(neg_tensor)
+
+    inputs = inputs + ['neg_{}'.format(vinode.id)]
+
+    node = onnx.helper.make_node(
+        'Mul',
+        inputs=inputs,
+        outputs=outputs,
+        name=str(vinode.id)
+    )
+    nodes.append(node)
+
+    return nodes, inits
+
+def gen_depth_to_space(vinode, vinodes):
+    nodes, inits = [], []
+    inputs, outputs = io(vinode)
+
+    block_size = int(vinode.data['block_size'])
+    # if vinode.data['mode'] == 'blocks_first':
+    #     mode = 'CRD'
+    # elif vinode.data['mode'] == 'depth_first':
+    #     mode = 'DCR'
+    if vinode.data['mode'] == 'blocks_first':
+        mode = 'DCR'
+    elif vinode.data['mode'] == 'depth_first':
+        mode = 'CRD'
+
+    node = onnx.helper.make_node(
+        'DepthToSpace',
+        inputs=inputs,
+        outputs=outputs,
+        blocksize=block_size,
+        mode=mode,
+        name=str(vinode.id)
+    )
+    nodes.append(node)
+
+    return nodes, inits
+
+
 def is_constant(vinode, vinodes):
     if vinode.type in ['ShapeOf', 'Const']:
         return True
     elif vinode.type in ['Gather', 'Concat']:
         inputs, outputs = io(vinode)
-        return all([is_constant(vinodes[int(i)], vinodes) for i in inputs])
+        return all([is_constant(vinodes[int(i.split(':')[0])], vinodes) for i in inputs])
 
     return False
 
@@ -1678,12 +1846,12 @@ def gen_graph_io(vinodes, nodes):
 
             #TODO Handle more than one input on an input node.
             try:
-                constant_inputs = [is_constant(vinodes[int(i)], vinodes) for i in io(vinode)[0]]
-                shape = vinode.input[0]
+                constant_inputs = [is_constant(vinodes[int(i.split(':')[0])], vinodes) for i in io(vinode)[0]]
+                shape = vinode.idims[0]
                 if constant_inputs[0]:
-                    shape = vinode.input[1]
+                    shape = vinode.idims[1]
             except:
-                shape = vinode.output[0]
+                shape = vinode.odims[0]
             inputs.append(onnx.helper.make_tensor_value_info('{}'.format(n.input[0]), onnx.TensorProto.FLOAT, shape))
         next_nodes = []
         for no in n.output:
@@ -1692,7 +1860,7 @@ def gen_graph_io(vinodes, nodes):
             #is output node
             vinode = one_elem([vi for vi in vinodes if str(vi.id) == n.name])
             #TODO Handle more than one output on an output node.
-            shape = vinode.output[0]
+            shape = vinode.odims[0]
             outputs.append(onnx.helper.make_tensor_value_info('{}'.format(n.output[0]), onnx.TensorProto.FLOAT, shape))
     return inputs, outputs
 
@@ -1754,6 +1922,8 @@ def gen_onnx(vinodes):
             nodes, inits = gen_matmul_10(vinode, bias_vinode, prev_vinode, vinodes)
         elif vinode.type == 'ReLU':
             nodes, inits = gen_relu(vinode)
+        elif vinode.type == 'Negative':
+            nodes, inits = gen_negative(vinode, vinodes)
         elif vinode.type == 'Concat':
             if is_constant(vinode, vinodes):
                 nodes, inits = [],[]
@@ -1797,6 +1967,23 @@ def gen_onnx(vinodes):
             nodes, inits = gen_tile(vinode)
         elif vinode.type == 'Pad':
             nodes, inits = gen_pad_10(vinode, vinodes)
+        elif vinode.type == 'Swish':
+            nodes, inits = gen_swish(vinode, vinodes)
+        elif vinode.type == 'HSwish':
+            nodes, inits = gen_hswish(vinode, vinodes)
+        # elif vinode.type == "VariadicSplit":
+        #     nodes, inits = gen_varsplit(vinode, vinodes)
+        elif vinode.type == 'Split':
+            nodes, inits = gen_split(vinode, vinodes)
+        elif vinode.type == 'ConvertLike':
+            # nodes, inits = gen_convertlike(vinode, vinodes)
+            nodes, inits = [], []
+            vidx += 1
+            continue
+        elif vinode.type == 'Negative':
+            nodes, inits = gen_negative(vinode, vinodes)
+        elif vinode.type == 'DepthToSpace':
+            nodes, inits = gen_depth_to_space(vinode, vinodes)
         else:
             raise NotImplementedError('{} not implemented'.format(vinode.type))
             continue
@@ -1885,30 +2072,6 @@ def convert_openvino_xml_to_onnx(vinodes, graph_name, version):
     return graph
 
 
-def save_stats(nodes, output_file):
-    stats = []
-    for node in nodes:
-        if not (node.min is None) and not (node.max is None):
-            if not (node.threshold is None):
-                stats.append({
-                    'name': node.name, 'id': node.id,
-                    'min': node.min.tolist(), 'max': node.max.tolist(), 'threshold': node.threshold.tolist(),
-                    'input': node.input, 'output': node.output})
-            elif not (node.mean is None):
-                stats.append({
-                    'name': node.name, 'id': node.id,
-                    'min': node.min.tolist(), 'max': node.max.tolist(), 'mean': node.mean.tolist(),
-                    'input': node.input, 'output': node.output})
-            else:
-                stats.append({
-                    'name': node.name, 'id': node.id,
-                    'min': node.min.tolist(), 'max': node.max.tolist(),
-                    'input': node.input, 'output': node.output})
-
-    with open(output_file, 'w') as f:
-        json.dump(stats, f)
-
-
 def cut_after_node(nodes, cut):
     cut_nodes = []
     for n in nodes:
@@ -1929,7 +2092,6 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument('xml')
-    parser.add_argument('-s', '--stats', action='store_true')
     parser.add_argument('-r', '--random', action='store_true')
     parser.add_argument('-i', '--image')
     parser.add_argument('-t', '--topk', action='store_true')
@@ -1946,9 +2108,6 @@ if __name__ == "__main__":
 
     graph = convert_openvino_xml_to_onnx(nodes, model_name, ir_version)
     onnx_helper.onnx_save_model(graph, onnx_name)
-
-    if args.stats: # save layer statistics
-        save_stats(nodes, model_name)
 
     if args.random: # test random input
         input_array = onnx_random_input(onnx_name)

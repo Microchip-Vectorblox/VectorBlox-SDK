@@ -1,0 +1,32 @@
+[
+    {
+        "type": "net",
+        "width": 416,
+        "height": 416,
+        "channels": 3
+    },
+    {
+        "type": "yolo",
+        "mask": "3,4,5",
+        "anchors": "10,14,  23,27,  37,58,  81,82,  135,169,  344,319",
+        "classes": 80,
+        "num": 6,
+        "h": 13,
+        "w": 13,
+        "c": 255,
+        "outputName": "Y15",
+        "layerNum": 16
+    },
+    {
+        "type": "yolo",
+        "mask": "0,1,2",
+        "anchors": "10,14,  23,27,  37,58,  81,82,  135,169,  344,319",
+        "classes": 80,
+        "num": 6,
+        "h": 26,
+        "w": 26,
+        "c": 255,
+        "outputName": "Y22",
+        "layerNum": 23
+    }
+]

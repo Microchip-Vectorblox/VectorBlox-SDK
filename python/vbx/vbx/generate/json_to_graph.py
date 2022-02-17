@@ -60,7 +60,8 @@ Node_struct = [('int32_t', 'type'),
                ('int32_t', 'scratchpad_bytes'),
                ('int32_t', 'dma_split'),
                ('int32_t', 'dma_channel_offset'),
-               ('int32_t', 'dma_buffer_offset'),
+               ('int32_t', 'dma_input_buffer_offset'),
+               ('int32_t', 'dma_output_buffer_offset'),
                ('offset', 'input_data'),
                ('offset', 'output_data'),
                ('int8_t[24]', 'input_description'),
@@ -83,6 +84,7 @@ Node_struct = [('int32_t', 'type'),
                ('int32_t', 'use_replay'),
                ('int64_t', 'replay_buffer'),
                ('int32_t', 'replay_buffer_size'),
+               ('int32_t[3]','input_shape'),
                ('int32_t[3]','output_shape'),
                ('union', {'conv': [('int32_t', 'fxp_scalar'),
                                    ('int32_t', 'bias_scalar'),
@@ -430,8 +432,12 @@ class subgraph_type(enum.IntEnum):
             return subgraph_type.TRANSPOSE
         if e == "SOFTMAX":
             return subgraph_type.ACTIVATION
+        if e == "SIGMOID":
+            return subgraph_type.ACTIVATION
         if e == "RESIZE":
             return subgraph_type.RESIZE
+        if e == "SIGMOID":
+            return subgraph_type.ACTIVATION
         if e == "REORG":
             return subgraph_type.REORG
         if e == "ARGMAX":
@@ -930,7 +936,7 @@ def float_to_fixed(flt_in, out_type, MAX_BITS=None, FRAC_BITS=None, ROUNDING=Tru
     max_min = ((1 << max_bits) - 1, (1 << max_bits) * -1)
     max_min = ((1 << max_bits) - 1, -1* ((1 << max_bits)-1))
     if out_type == calc_type.UINT8:
-        max_min = (max_min[1], 0)
+        max_min = (max_min[0], 0)
     if flt_in >= 0:
         value = flt_in * (1 << frac_bits) + rounding
     else:
@@ -969,7 +975,7 @@ def float_to_fixed_np(flt_in, out_type, MAX_BITS=None, FRAC_BITS=None, ROUNDING=
     max_min = ((1 << max_bits) - 1, (1 << max_bits) * -1)
     max_min = ((1 << max_bits) - 1, -1* ((1 << max_bits)-1))
     if out_type == calc_type.UINT8:
-        max_min = (max_min[1], 0)
+        max_min = (max_min[0], 0)
     tmp = flt_in * (1 << frac_bits)
     tmp = np.where(flt_in >= 0, tmp+rounding, tmp-rounding)
     tmp = np.clip(tmp, max_min[1], max_min[0])
@@ -1049,8 +1055,11 @@ def set_conv_vbx(node, sp_size, min_rows, inc_rows):
 
     if conv.m == 1 and conv.n == 1:
         conv.imaps = int((sp_size - (2*(conv.channels+conv.kernels))) / (2*2*conv.channels))
-        while (conv.kernels % conv.imaps) > 0:
-            conv.imaps -= 1
+        if conv.imaps == 0: # ignore conv_1x1_specialcase, as doesn't fit
+            conv.imaps = -1
+        else:
+            while (conv.kernels % conv.imaps) > 0:
+                conv.imaps -= 1
 
     if max_maps > 1:
         conv.maps = conv.core_maps
@@ -1782,14 +1791,13 @@ def conv_pack_parameters(weights, conv_cvi, padded_kernels, maps, input_unsigned
         if weights_small:
             print('small', node_n, node.unsigned_input, node.unsigned_output)
 
-    type_size = 2 if INPUT_SIZE_BYTES == 1 else 1
     if conv_cvi:
         padded_scale = pad_weights16(scale_i16, conv.kernels, 1, 1, 1, 1, padded_kernels, 1)
-        packed_scales = np.zeros(padded_kernels*type_size, dtype=np.uint8)
+        packed_scales = np.zeros(padded_kernels, dtype=np.uint8)
         for k in range(0, padded_kernels, maps):
             iscales = interleave_weights(padded_scale[k:k+maps],
                                          1, maps, 1, 1)
-            packed_scales[k*type_size:(k*type_size)+maps] = iscales
+            packed_scales[k:k+maps] = iscales
         conv.scale = len(weights)
         weights += packed_scales.tobytes()
 
@@ -1809,35 +1817,37 @@ def conv_pack_parameters(weights, conv_cvi, padded_kernels, maps, input_unsigned
                                        conv.channels//conv.group)
         assert num_padded_weights == len(padded_weights)
 
-        packed_weights = np.zeros(num_padded_weights*type_size, dtype=np.uint8)
+        packed_weights = np.zeros(num_padded_weights, dtype=np.uint8)
 
 
         offset = ((conv.channels//conv.group) *
                   conv.kernel_shape[0]*conv.kernel_shape[1])
 
         for k in range(0, padded_kernels, maps):
-            pack_weights(padded_weights[k*offset:], packed_weights[k*type_size*offset:], conv.kernel_shape[0], conv.kernel_shape[1], conv.channels//conv.group, maps, 1, maps)
+            pack_weights(padded_weights[k*offset:], packed_weights[k*offset:], conv.kernel_shape[0], conv.kernel_shape[1], conv.channels//conv.group, maps, 1, maps)
 
         if conv.use_depthwise:
-            packed_weights = np.zeros(num_padded_weights*type_size + padded_kernels*type_size*5, dtype=np.uint8)
+            packed_weights = np.zeros(((conv.kernel_shape[0]+2)//3*3*conv.kernel_shape[1] + 5)*padded_kernels, dtype=np.uint8)
             depthwise_pack_weights(padded_weights, packed_weights, scale_i16, conv.bias_scalar, biases_i16, conv.bias_lower_scalar, biases_lower_i16, conv.kernel_shape[0], conv.kernel_shape[1], conv.channels, padded_kernels, conv.group)
 
         conv.weights = len(weights)
         weights += packed_weights.tobytes()
 
     else:
+        conv.use_weights32 = 1 if layer_max_weight > 1.0 * (1 << ((16-1)-Q16)) else 0
         conv.acc_maps = 0
 
-        conv.weights = len(weights)
-        fmt = "{}h".format(num_padded_weights)
-        weights += struct.pack(fmt,
-                               *weights_i16)
-        conv.weights32 = len(weights)
-        fmt = "{}i".format(num_padded_weights)
-        weights += struct.pack(fmt,
-                               *weights_i32)
-    if not conv_cvi:
-        conv.use_weights32 = 1 if layer_max_weight > 1.0 * (1 << ((16-1)-Q16)) else 0
+        if conv.use_weights32:
+            conv.weights32 = len(weights)
+            fmt = "{}i".format(num_padded_weights)
+            weights += struct.pack(fmt,
+                                   *weights_i32)
+            conv.weights = 0
+        else:
+            conv.weights = len(weights)
+            fmt = "{}h".format(num_padded_weights)
+            weights += struct.pack(fmt,
+                                   *weights_i16)
 
     packed_biases = []
     packed_biases_lower = []
@@ -1846,26 +1856,26 @@ def conv_pack_parameters(weights, conv_cvi, padded_kernels, maps, input_unsigned
         padded_biases = pad_weights16(biases_i16,
                                       conv.kernels, 1, 1, 1, 1,
                                       padded_kernels, 1)
-        packed_biases = np.zeros(padded_kernels*type_size, dtype=np.uint8)
+        packed_biases = np.zeros(padded_kernels, dtype=np.uint8)
         offset = 1
         for k in range(0, padded_kernels, maps):
             interleaved_biases = interleave_weights(padded_biases[k:k+maps],
                                                     1, maps,
                                                     1, 1)
-            packed_biases[k*type_size:k*type_size + maps] = interleaved_biases
+            packed_biases[k:k + maps] = interleaved_biases
         conv.biases = len(weights)
         weights += packed_biases.tobytes()
 
         padded_biases_lower = pad_weights16(biases_lower_i16,
                                             conv.kernels, 1, 1, 1, 1,
                                             padded_kernels, 1)
-        packed_biases_lower = np.zeros(padded_kernels*type_size, dtype=np.uint8)
+        packed_biases_lower = np.zeros(padded_kernels, dtype=np.uint8)
         offset = 1
         for k in range(0, padded_kernels, maps):
             interleaved_biases_lower = interleave_weights(padded_biases_lower[k:k+maps],
                                                           1, maps,
                                                           1, 1)
-            packed_biases_lower[k*type_size:k*type_size + maps] = interleaved_biases_lower
+            packed_biases_lower[k:k + maps] = interleaved_biases_lower
 
         conv.biases_lower = len(weights)
         weights += packed_biases_lower.tobytes()
@@ -2128,10 +2138,12 @@ def json_to_graph(json_string, preset, io_info=None, script_dir=None, output_byt
                 if current_data_type == calc_type.INT8:
                     if sn.depthwise.unsigned_output == 1:
                         current_data_type = calc_type.UINT8
+                        node.output_data_type = calc_type.UINT8
 
                 if current_data_type == calc_type.UINT8:
                     if sn.depthwise.unsigned_output == 0:
                         current_data_type = calc_type.INT8
+                        node.output_data_type = calc_type.INT8
 
                 sn.type = layer_type.DEPTHWISE_CONV_I8
 
@@ -2308,12 +2320,16 @@ def json_to_graph(json_string, preset, io_info=None, script_dir=None, output_byt
         node.input_size = json_node['input_size']
         node.output_size = json_node['output_size']
 
+        node.input_shape = list(json_node['input_shape'])
+        while len(node.input_shape) < 3:
+            node.input_shape=[1]+node.input_shape
         node.output_shape = list(json_node['output_shape'])
-        while len(node.output_shape)<3:
+        while len(node.output_shape) < 3:
             node.output_shape=[1]+node.output_shape
 
         node.dma_channel_offset = json_node['dma_offset']
-        node.dma_buffer_offset = json_node['buffer_offset']*sizeof_calc_type(node.output_data_type)
+        node.dma_output_buffer_offset = json_node['output_buffer_offset']*sizeof_calc_type(node.output_data_type)
+        node.dma_input_buffer_offset = json_node['input_buffer_offset']*sizeof_calc_type(node.input_data_type)
         node.use_replay = json_node['use_replay']
 
         set_sublayer_attributes(node, node.subnode_array)
@@ -2473,9 +2489,6 @@ def json_to_graph(json_string, preset, io_info=None, script_dir=None, output_byt
                 if rows_at_once > node.transpose.m:
                     rows_at_once = node.transpose.m
 
-                # print("{}({}),{}({}),{}".format(node.transpose.channels, maps_at_once, node.transpose.m, rows_at_once, node.transpose.n))
-                # print(node.transpose.permutation)
-
             assert(maps_at_once > 0 and rows_at_once > 0)
 
             node.transpose.out_maps_at_once = maps_at_once
@@ -2510,7 +2523,7 @@ def json_to_graph(json_string, preset, io_info=None, script_dir=None, output_byt
                                   sizeof_calc_type(node.output_data_type),
                                   *[sublayer_bytes(sn.type) for sn in node.subnode_array])
             map_size = node.output_shape[1]*node.output_shape[2]
-            assert((sp_size-(map_size*4))//(map_size*calc_bytes) > node.output_shape[0])
+            assert((sp_size-(map_size*4)*2)//(map_size*calc_bytes) > node.output_shape[0])
             node.scratchpad_bytes = node.output_shape[0]*map_size*calc_bytes
             node.tile.channels = json_node["channels"]
             node.tile.m = json_node["m"]
@@ -2592,6 +2605,7 @@ def json_to_graph(json_string, preset, io_info=None, script_dir=None, output_byt
     io_buffer_size = [sz for sz in js['buffers']]
 
     REUSE_IO_MEMORY = all_corrections is None
+    REUSE_IO_MEMORY = False
     if REUSE_IO_MEMORY:
         # determine when each i/o buffer should be allocated and deallocated, and find its size in bytes
         alloc = dict()      # layer to allocate buffer; alloc[io_id] = layer index
@@ -2633,8 +2647,8 @@ def json_to_graph(json_string, preset, io_info=None, script_dir=None, output_byt
                         heap.append((heap_ptr[io], heap_ptr[io] + io_buffer_size[io]))
                     heap_max = max(heap_max, heap[-1][1])
             for io, dealloc_ind in dealloc.items():
-                if ind==dealloc_ind:    # find all deallocations during this layer
-                    for h in range(1,len(heap)):
+                if ind == dealloc_ind:    # find all deallocations during this layer
+                    for h in range(1, len(heap)):
                         if heap_ptr[io] == heap[h][0]:  # find the allocation in the heap
                             heap.pop(h)
                             break

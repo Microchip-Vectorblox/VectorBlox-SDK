@@ -142,11 +142,11 @@ int main(int argc, char** argv){
     if (post_process_str == "BLAZEFACE"){
         const int MAX_FACES=24;
         face_t faces[MAX_FACES];
-        fix16_t* output_buffer0=(fix16_t*)(uintptr_t)io_buffers[1];
-        fix16_t* output_buffer1=(fix16_t*)(uintptr_t)io_buffers[2];
-        int output_length0 = model_get_output_length(model, 0);
-        int output_length1 = model_get_output_length(model, 1);
-
+		// reverse
+        fix16_t* output_buffer1=(fix16_t*)(uintptr_t)io_buffers[1];
+        fix16_t* output_buffer0=(fix16_t*)(uintptr_t)io_buffers[2];
+        int output_length1 = model_get_output_length(model, 0);
+        int output_length0 = model_get_output_length(model, 1);
 	int facesLength = 0;
 	if (output_length0 < output_length1) {
 		facesLength = post_process_blazeface(faces,output_buffer0,output_buffer1,output_length0,
@@ -175,6 +175,12 @@ int main(int argc, char** argv){
         for(int o=0;o<9;++o){
             output_buffers[o]=(fix16_t*)(uintptr_t)io_buffers[1+o];
         }
+		// reverse
+		for(int left=0, right=8; left < right; left++, right--){
+			fix16_t* temp = output_buffers[left];
+			output_buffers[left] = output_buffers[right];
+			output_buffers[right] = temp;
+		}
         int input_length = model_get_input_length(model,0);
 	int image_h = 288;
 	int image_w = 512;
@@ -277,6 +283,12 @@ int main(int argc, char** argv){
 			int num_outputs = 2;
 			fix16_t *outputs[] = {(fix16_t*)io_buffers[1],
                                   (fix16_t*)io_buffers[2]};
+			// reverse
+			for(int left=0, right=1; left < right; left++, right--){
+				fix16_t* temp = outputs[left];
+				outputs[left] = outputs[right];
+				outputs[right] = temp;
+			}
 			float anchors[] = {10,14,23,27,37,58,81,82,135,169,344,319}; // 2*num
 			int mask_0[] = {3,4,5};
 			int mask_1[] = {1,2,3};
@@ -325,6 +337,12 @@ int main(int argc, char** argv){
                                        (fix16_t*)io_buffers[11],
                                        (fix16_t*)io_buffers[12]
         };
+		// reverse
+		for(int left=0, right=11; left < right; left++, right--){
+			fix16_t* temp = output_buffers[left];
+			output_buffers[left] = output_buffers[right];
+			output_buffers[right] = temp;
+		}
         fix16_t confidence_threshold=fix16_from_float(0.6);
         fix16_t nms_threshold=fix16_from_float(0.5);
         valid_boxes = post_process_ssdv2(boxes,max_boxes,output_buffers,91,confidence_threshold,nms_threshold);
@@ -355,9 +373,9 @@ int main(int argc, char** argv){
 				post_process_str.c_str());
 	}
 
-	int32_t checksum = fletcher32((uint16_t*)io_buffers[1],  model_get_output_length(model, 0));
+	unsigned checksum = fletcher32((uint16_t*)(io_buffers[1]),model_get_output_length(model, 0)*sizeof(fix16_t)/sizeof(uint16_t));
     for(unsigned o =1;o<model_get_num_outputs(model);++o){
-	  checksum ^= fletcher32((uint16_t*)io_buffers[1+o], model_get_output_length(model, o)*2);
+	  checksum ^= fletcher32((uint16_t*)io_buffers[1+o], model_get_output_length(model, o)*sizeof(fix16_t)/sizeof(uint16_t));
     }
 	printf("CHECKSUM = 0x%08x\n",checksum);
 	if (read_buffer) {

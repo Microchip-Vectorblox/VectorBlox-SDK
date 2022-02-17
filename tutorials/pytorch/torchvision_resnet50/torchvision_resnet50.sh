@@ -26,7 +26,7 @@ python ../../torchvision_to_onnx.py resnet50
 
 echo "Running Model Optimizer..."
 # model details @ https://pytorch.org/docs/stable/torchvision/models.html
-converter --input_model resnet50.onnx \
+mo --input_model resnet50.onnx \
 --reverse_input_channels \
 --mean_values [123.675,116.28,103.53] \
 --scale_values [58.395,57.12,57.375] \
@@ -36,6 +36,6 @@ echo "Generating VNNX for V1000 configuration..."
 generate_vnnx -x resnet50.xml  -c V1000 -f ../../sample_images -o torchvision_resnet50.vnnx
 
 echo "Running Simulation..."
-python $VBX_SDK/example/python/imagenet.py torchvision_resnet50.vnnx ../../oreo.jpg
+python $VBX_SDK/example/python/classifier.py torchvision_resnet50.vnnx ../../oreo.jpg
 
 deactivate

@@ -6,6 +6,25 @@ import vbx.postprocess.dataset as dataset
 import os
 import json
 
+from vbx.generate.openvino_infer import openvino_infer, get_model_input_shape as get_xml_input_shape
+from vbx.generate.onnx_infer import onnx_infer, load_input
+from vbx.generate.onnx_helper import get_model_input_shape as get_onnx_input_shape
+from vbx.generate.utils import pad_input
+
+def vnnx_infer(vnxx_model, modelInput):
+    import vbx.sim
+    with open(vnxx_model, "rb") as mf:
+        model = vbx.sim.Model(mf.read())
+    flattened = (modelInput.flatten()).astype('uint8')
+    outputList = model.run([flattened])
+    outputs = [out.astype('float32') * scale for out,scale in zip(outputList, model.output_scale_factor)]
+
+    bw = model.get_bandwidth_per_run()
+    print("Bandwidth per run = {} Bytes ({:.3} MB/s at 100MHz)".format(bw,bw/100E6))
+    print("Estimated {} seconds at 100MHz".format(model.get_estimated_runtime(100E6)))
+    print("If running at another frequency, scale these numbers appropriately")
+
+    return outputs
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -37,60 +56,41 @@ if __name__ == "__main__":
         for n in range(ioCfg[-1]['classes']):
             classLabel.append(str(n))
             
-    # pre-processing
     img = cv2.imread(args.image)
     imgDims = np.array(img.shape[:2])
     inputDims = np.array([ioCfg[0]['height'], ioCfg[0]['width']])
-    if args.padding:
-        resizeRatio = np.min(inputDims/imgDims)
-        resizeDims = np.round(imgDims * resizeRatio).astype('int')
-        imgResize = cv2.resize(img.astype('float32'), (resizeDims[1],resizeDims[0]), interpolation=cv2.INTER_LINEAR)
-        padTop = int((inputDims[0]-resizeDims[0])/2)
-        padBottom = inputDims[0]-resizeDims[0] - padTop
-        padLeft = int((inputDims[1]-resizeDims[1])/2)
-        padRight = inputDims[1]-resizeDims[1] - padLeft
-        imgPad = cv2.copyMakeBorder(imgResize/255.0, padTop, padBottom, padLeft, padRight, cv2.BORDER_CONSTANT, value=[0.5,0.5,0.5])
-        modelInput = imgPad.swapaxes(0,2).swapaxes(1,2)
-    else:
-        imgResize = cv2.resize(img.astype('float32'), (ioCfg[0]['width'], ioCfg[0]['height']), interpolation=cv2.INTER_LINEAR)
-        modelInput = imgResize.swapaxes(0,2).swapaxes(1,2) / 255.
-    modelInput = np.expand_dims(modelInput, axis=0)
     
     # model
-    if args.model.endswith('.onnx'):
-        import onnx
-        import onnxruntime
-        m = onnx.load(args.model)
-        session = onnxruntime.InferenceSession(m.SerializeToString())
-        inputName = session.get_inputs()[0].name
-        outputList = session.run([],{inputName:modelInput})
-        modelOutput = {}
-        for n,out in enumerate(session.get_outputs()):
-            modelOutput[out.name] = outputList[n]
-            if args.io:
-                with open(args.io) as f:
-                    d = json.load(f)
-                    for n, name in enumerate(d['output_ids']):
-                        if name == out.name:
-                            modelOutput[out.name] *= d['output_scale_factors'][n]
-    elif args.model.endswith('.vnnx'):
-        import vbx.sim
-        with open(args.model, "rb") as mf:
-            model = vbx.sim.Model(mf.read())
-        input_dtype = model.input_dtypes[0]
-        flattened = (255*modelInput.flatten()).astype('uint8')
-        outputList = model.run([flattened])
-        modelOutput = {}
-        for out,scale in zip(outputList, model.output_scale_factor):
-            out = out.astype('float32') * scale
-            for layer in ioCfg[1:]:
-                shape = (1,layer['c'],layer['h'],layer['w'])
-                if out.size == np.prod(shape):  # match output by size
-                    modelOutput[layer['outputName']] = out.reshape(shape)
-        bw = model.get_bandwidth_per_run()
-        print("Bandwidth per run = {} Bytes ({:.3} MB/s at 100MHz)".format(bw,bw/100E6))
-        print("Estimated {} seconds at 100MHz".format(model.get_estimated_runtime(100E6)))
-        print("If running at another frequency, scale these numbers appropriately")    
+    modelOutput = {}
+    if args.padding:
+        input_array = pad_input(args.image, inputDims)
+
+    if args.model.endswith('.vnnx'):
+        if not(args.padding):
+            input_shape = [ioCfg[0]['channels']]
+            input_shape.extend(inputDims.tolist())
+            input_array = load_input(args.image, 1., input_shape)  
+        outputs = vnnx_infer(args.model, input_array)
+
+    elif args.model.endswith('.xml'):
+        if not(args.padding):
+            weights=args.model.replace('.xml', '.bin')
+            input_shape = get_xml_input_shape(args.model, weights)
+            input_array = load_input(args.image, 1., input_shape)
+        outputs = openvino_infer(args.model, input_array)
+
+    elif args.model.endswith('.onnx'):
+        if not(args.padding):
+            input_shape = get_onnx_input_shape(args.model)
+            input_array = load_input(args.image, 1., input_shape)       
+        outputs = onnx_infer(args.model, input_array)
+
+    for output in outputs:
+        for layer in ioCfg[1:]:
+            shape = (1,layer['c'],layer['h'],layer['w'])
+            if output.size == np.prod(shape): # match output by size
+                modelOutput[layer['outputName']] = output.reshape(shape) 
+    
     # post-processing
     params = {}
     blobs = {}

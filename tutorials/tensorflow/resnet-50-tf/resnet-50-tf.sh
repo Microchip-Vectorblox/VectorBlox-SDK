@@ -25,18 +25,19 @@ echo "Downloading resnet-50-tf..."
 wget -x https://download.01.org/opencv/public_models/012020/resnet-50-tf/resnet_v1-50.pb
 
 echo "Running Model Optimizer..."
-# model details @ https://github.com/openvinotoolkit/open_model_zoo/blob/master/models/public/resnet-50-tf/resnet-50-tf.md
-converter --input_model download.01.org/opencv/public_models/012020/resnet-50-tf/resnet_v1-50.pb \
+# model details @ https://github.com/openvinotoolkit/open_model_zoo/blob/2021.3/models/public/resnet-50-tf/resnet-50-tf.md
+mo --input_model download.01.org/opencv/public_models/012020/resnet-50-tf/resnet_v1-50.pb \
 --input_shape=[1,224,224,3] \
 --mean_values=[123.68,116.78,103.94] \
 --input=map/TensorArrayStack/TensorArrayGatherV3 \
 --output=softmax_tensor \
---reverse_input_channels
+--reverse_input_channels \
+--static_shape
 
 echo "Generating VNNX for V1000 configuration..."
 generate_vnnx -x resnet_v1-50.xml  -c V1000 -f ../../sample_images -o resnet-50-tf.vnnx
 
 echo "Running Simulation..."
-python $VBX_SDK/example/python/imagenet.py resnet-50-tf.vnnx ../../oreo.jpg
+python $VBX_SDK/example/python/classifier.py resnet-50-tf.vnnx ../../oreo.jpg
 
 deactivate

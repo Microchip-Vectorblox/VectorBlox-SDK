@@ -39,6 +39,8 @@ typedef struct {
     int* mask;
 } yolo_info_t;
 
+void reverse(fix16_t* output_buffer[], int len);
+
 typedef void (*file_write)(const char*,int);
 extern char *imagenet_classes[];
 void post_process_classifier(fix16_t *outputs, const int output_size, int16_t* output_index, int topk);

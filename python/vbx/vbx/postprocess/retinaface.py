@@ -306,17 +306,20 @@ def retinaface(outputs, image_width, image_height, confidence_threshold=0.9, nms
         h8,h16 = 4*h32, 2*h32
         w8,w16 = 4*w32, 2*w32
 
-        outputs[0] = outputs[0].reshape((1,8,h8,w8)).transpose((0,2,3,1)).reshape((-1,4))
-        outputs[1] = outputs[1].reshape((1,8,h16,w16)).transpose((0,2,3,1)).reshape((-1,4))
-        outputs[2] = outputs[2].reshape((1,8,h32,w32)).transpose((0,2,3,1)).reshape((-1,4))
+        shapes_order = []
+        for dim in [8,4,20]:
+            shapes_order.append((1,dim,h8,w8))
+            shapes_order.append((1,dim,h16,w16))
+            shapes_order.append((1,dim,h32,w32))
 
-        outputs[3] = outputs[3].reshape((1,4,h8,w8)).transpose((0,2,3,1)).reshape((-1,2))
-        outputs[4] = outputs[4].reshape((1,4,h16,w16)).transpose((0,2,3,1)).reshape((-1,2))
-        outputs[5] = outputs[5].reshape((1,4,h32,w32)).transpose((0,2,3,1)).reshape((-1,2))
+        # re-order outputs by expected shapes
+        matched_outputs = []
+        for shape in shapes_order:
+            for output in outputs:
+                if output.size == np.prod(shape):
+                    matched_outputs.append(output.reshape(shape).transpose((0,2,3,1)).reshape((-1,shape[1]//2)))
+        outputs = matched_outputs
 
-        outputs[6] = outputs[6].reshape((1,20,h8,w8)).transpose((0,2,3,1)).reshape((-1,10))
-        outputs[7] = outputs[7].reshape((1,20,h16,w16)).transpose((0,2,3,1)).reshape((-1,10))
-        outputs[8] = outputs[8].reshape((1,20,h32,w32)).transpose((0,2,3,1)).reshape((-1,10))
         loc = np.concatenate((outputs[0], outputs[1], outputs[2]))
         conf = np.concatenate((outputs[3], outputs[4], outputs[5]))
 

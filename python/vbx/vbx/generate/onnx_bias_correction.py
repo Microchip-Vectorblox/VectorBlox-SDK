@@ -239,6 +239,13 @@ def vnnx_bias_corrections(json_string, onnx_model, size_conf, io_info, output_by
     onnx_save_activations(onnx_model, tmp_dir, inputs, input_shape, input_scale)
     vnnx_fname = os.path.join(tmp_dir, 'tmp.vnnx')
 
+    required_inputs = {}
+    deleted_nodes = []
+    for bl in bias_correction_nodes:
+        current_nodes = get_current_subgraph_nodes(js, bias_correction_nodes, bl)
+        input_ids, output_ids = get_io_ids(js, current_nodes)
+        required_inputs[bl] = input_ids
+
     for bl in bias_correction_nodes:
         if bl == bias_correction_nodes[0]:
             bias_corrections = None
@@ -296,14 +303,32 @@ def vnnx_bias_corrections(json_string, onnx_model, size_conf, io_info, output_by
                 output_file.write(graph_binary)
             run_subgraph_biases(input_ids, output_id, vnnx_fname, tmp_dir, inputs, input_shape, input_scale)
 
+        for prev_bl in bias_correction_nodes[:bias_correction_nodes.index(bl)]:
+            if prev_bl not in deleted_nodes:
+                prev_nodes = get_current_subgraph_nodes(js, bias_correction_nodes, prev_bl)
+                prev_input_ids, prev_output_ids = get_io_ids(js, prev_nodes)
+                assert(len(prev_output_ids) == 1)
+                prev_output_id = prev_output_ids[0]
+                can_delete = True
+                for next_bl in bias_correction_nodes[bias_correction_nodes.index(bl):]:
+                    if prev_output_id in required_inputs[next_bl]:
+                        can_delete = False
+                        break
+                if can_delete:
+                    vnnx_remove_inputs(prev_output_id, inputs, tmp_dir)
+                    deleted_nodes.append(prev_bl)
+
+
+
 
     #clean up
     for bl in bias_correction_nodes:
-        current_nodes = get_current_subgraph_nodes(js, bias_correction_nodes, bl)
-        input_ids, output_ids = get_io_ids(js, current_nodes)
-        assert(len(output_ids) == 1)
-        output_id = output_ids[0]
-        vnnx_remove_inputs(output_id, inputs, tmp_dir)
+        if bl not in deleted_nodes:
+            current_nodes = get_current_subgraph_nodes(js, bias_correction_nodes, bl)
+            input_ids, output_ids = get_io_ids(js, current_nodes)
+            assert(len(output_ids) == 1)
+            output_id = output_ids[0]
+            vnnx_remove_inputs(output_id, inputs, tmp_dir)
 
     onnx_remove_activations(inputs, tmp_dir)
     if os.path.exists(vnnx_fname):

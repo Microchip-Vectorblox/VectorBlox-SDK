@@ -255,8 +255,6 @@ def detections(boxes, classes, priors, num_classes, size, confidence_threshold=0
                     if overlap > nms_threshold:
                         keep = False
                         break
-                    else:
-                        print(c, idx, kept_idx, overlap)
                 if keep:
                     kept.append((idx, score))
 
@@ -313,8 +311,13 @@ def get_priors(params, img_size=(300,300)):
 
 def ssdv2_predictions(outputs, output_scale_factor, confidence_threshold=0.3, nms_threshold=0.3, top_k=100, num_classes=91):
     # reshape to original
-    elem = int(math.sqrt(outputs[0].size/12))
-    outputs[0] = np.reshape(outputs[0], (1,12,elem,elem))
+    try:
+        elem = int(math.sqrt(outputs[0].size/12))
+        outputs[0] = np.reshape(outputs[0], (1,12,elem,elem))
+    except:
+        outputs.reverse()
+        elem = int(math.sqrt(outputs[0].size/12))
+        outputs[0] = np.reshape(outputs[0], (1,12,elem,elem))
     elem = int(math.sqrt(outputs[1].size/273))
     outputs[1] = np.reshape(outputs[1], (1,273,elem,elem))
     for i in range(1,6):

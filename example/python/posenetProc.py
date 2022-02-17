@@ -1,5 +1,5 @@
 import json
-#import openvino.inference_engine as ie
+import openvino.inference_engine as ie
 import vbx.sim
 import numpy as np
 import cv2
@@ -7,6 +7,9 @@ import os
 from collections import namedtuple
 import posenet_python.posenet as pnpy
 import matplotlib.pyplot as plt
+
+from vbx.generate.openvino_infer import openvino_infer
+from vbx.generate.onnx_infer import onnx_infer
 
 GeometricOperationMetadata = namedtuple('GeometricOperationMetadata', ['type', 'parameters']) # matching openvino
 
@@ -56,28 +59,6 @@ def preprocessImage(data):
     data = np.expand_dims(data, axis=0)     # add an axis for the batch size
     return data, meta
 
-def openvino_infer(xml, weights, input_array, extension=None):
-    net = ie.IECore().read_network(model=xml, weights=weights)
-    assert(len(net.inputs) == 1)
-    i0 = [k for k in net.inputs.keys()][0]
-    plugin = ie.IEPlugin(device="CPU")
-    if extension:
-        plugin.add_cpu_extension(extension)
-    exec_net = plugin.load(network=net)
-    exec_net.requests[0].inputs[i0][:] = input_array.astype(np.float32)
-    exec_net.requests[0].infer()
-    outputs = exec_net.requests[0].outputs
-    prediction = {}
-    for p in outputs:
-        if 'heatmap' in p:
-            prediction['heatmap'] = outputs[p]
-        elif 'offset' in p:
-            prediction['offset'] = outputs[p]
-        elif 'displacement_fwd' in p:
-            prediction['displacement_fwd'] = outputs[p]
-        elif 'displacement_bwd' in p:
-            prediction['displacement_bwd'] = outputs[p]
-    return prediction
 
 def postProcess(prediction, meta, imageId=0):
     pose_scores, keypoint_scores, keypoint_coords = pnpy.decode_multiple_poses(
@@ -111,26 +92,31 @@ def postProcess(prediction, meta, imageId=0):
 def vnnx_infer(model, input_array):
     with open(model,'rb') as mf:
         m = vbx.sim.Model(mf.read())
-    input_dtype = m.input_dtypes[0]
     input_flat = input_array.flatten().astype(np.uint8)
     outputs = m.run([input_flat])
 
     for n in range(len(outputs)):
         outputs[n] = outputs[n].astype(np.float32) * m.output_scale_factor[n]
 
+    bw = m.get_bandwidth_per_run()
+    print("Bandwidth per run = {} Bytes ({:.3} MB/s at 100MHz)".format(bw,bw/100E6))    
+    print("Estimated {} seconds at 100MHz".format(m.get_estimated_runtime(100E6)))
+    print("If running at another frequency, scale these numbers appropriately")
+
+    return outputs
+
+def model_infer(model, input_array):
+    if '.vnnx' in model:
+        outputs = vnnx_infer(model, input_array)
+    elif '.xml' in model:
+        outputs = openvino_infer(model, input_array)
+    elif '.onnx' in model:
+        outputs = onnx_infer(model, input_array)
     prediction = {
         'heatmap':outputs[2].reshape(1,17,18,31),
         'offset':outputs[3].reshape(1,34,18,31),
         'displacement_fwd':outputs[1].reshape(1,32,18,31),
         'displacement_bwd':outputs[0].reshape(1,32,18,31)}
-    return prediction
-
-def model_infer(model, input_array):
-    if '.vnnx' in model:
-        prediction = vnnx_infer(model, input_array)
-    else:
-        weights = model.replace('.xml', '.bin')
-        prediction = openvino_infer(model, weights, input_array)
     return prediction
 
 def drawRes(res):

@@ -4,11 +4,9 @@ function install_venv() {
     $PYTHON_EXE -m venv  $SCRIPTDIR/vbx_env
     source $SCRIPTDIR/vbx_env/bin/activate
 
-    python -m pip install --upgrade "pip==20.3.4" "setuptools==50.3.2"
+	python -m pip install --upgrade "pip==21.3.1" "setuptools==50.3.2"
     python -m pip install wheel 
     python -m pip install -r $SCRIPTDIR/requirements.txt
-    python -m pip install -e $SCRIPTDIR/python/third_party/openvino/model-optimizer
-    python -m pip install -e $SCRIPTDIR/python/third_party/open_model_zoo/tools
     python -m pip install -e $SCRIPTDIR/python/vbx
     deactivate
 }
@@ -32,7 +30,7 @@ function has_installed() {
 		install_venv
 	fi
 	source $SCRIPTDIR/vbx_env/bin/activate
-	python -c 'import mxnet; import vbx' && command -v converter &> /dev/null && command -v downloader &> /dev/null
+	python -c 'import mxnet; import vbx' && command -v mo &> /dev/null && command -v omz_downloader &> /dev/null
 	VALID=$?
 	deactivate
 	if [ $VALID -gt 0 ]; then

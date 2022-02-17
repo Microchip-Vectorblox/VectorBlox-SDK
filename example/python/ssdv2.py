@@ -7,49 +7,60 @@ import vbx.sim
 import os
 import math
 
+from vbx.generate.openvino_infer import openvino_infer, get_model_input_shape as get_xml_input_shape
+from vbx.generate.onnx_infer import onnx_infer, load_input
+from vbx.generate.onnx_helper import get_model_input_shape as get_onnx_input_shape
 
-def convert_to_fixedpoint(data, dtype):
-    # this should go away eventually, and always input uint8 rather than fixedpoint Q1.7
-    if dtype == np.int16:
-        shift_amt = 13
-    elif dtype == np.int8:
-        shift_amt = 7
-    clip_max, clip_min = (1 << shift_amt)-1, -(1 << shift_amt)
-    float_img = flattened.astype(np.float32)/255 * (1 << shift_amt) + 0.5
+def vnnx_infer(vnnx_model, input_array):
+    with open(vnnx_model, "rb") as mf:
+        model = vbx.sim.Model(mf.read())
+    
+    flattened = input_array.flatten().astype('uint8')
+    outputs = model.run([flattened])
 
-    fixedpoint_img = np.clip(float_img, clip_min, clip_max).astype(dtype)
-    return fixedpoint_img
+    bw = model.get_bandwidth_per_run()
+    print("Bandwidth per run = {} Bytes ({:.3} MB/s at 100MHz)".format(bw,bw/100E6))
+    print("Estimated {} seconds at 100MHz".format(model.get_estimated_runtime(100E6)))
+    print("If running at another frequency, scale these numbers appropriately")
 
+    return [o.astype('float32') * sf for o,sf in zip(outputs, model.output_scale_factor)]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('model')
     parser.add_argument('image')
-    parser.add_argument('-o', '--output', default="output.png")
+    parser.add_argument('--output', '-o', default="output.png", help='output image to write labels to')
+    parser.add_argument('--height', type=int, default=300, help='expected height of image')
+    parser.add_argument('--width', type=int, default=300, help='expected width of image')
+    parser.add_argument('--channels', type=int, default=3, help='number of channels of image')
     args = parser.parse_args()
 
-    with open(args.model, "rb") as mf:
-        model = vbx.sim.Model(mf.read())
-    input_size = 300
-    input_dtype = model.input_dtypes[0]
     if not os.path.isfile(args.image):
         print('Error: {} could not be read'.format(args.image))
         os._exit(1)
     img = cv2.imread(args.image)
-    if img.shape != (input_size, input_size, 3):
-        img_resized = cv2.resize(img, (input_size, input_size)).clip(0, 255)
-    else:
-        img_resized = img
-    flattened = img_resized.swapaxes(1, 2).swapaxes(0, 1).flatten()
-    if input_dtype != np.uint8:
-        flattened = convert_to_fixedpoint(flattened, input_dtype)
 
-    outputs = model.run([flattened])
-
-    predictions = ssd.ssdv2_predictions(outputs, model.output_scale_factor, confidence_threshold=0.5, nms_threshold=0.4, top_k=1)
+    if args.model.endswith('.vnnx'):
+        input_shape = (args.channels, args.height, args.width)
+        input_array = load_input(args.image, 1., input_shape)
+        outputs = vnnx_infer(args.model, input_array)
+    elif args.model.endswith('.xml'):
+        weights=args.model.replace('.xml', '.bin')
+        input_shape = get_xml_input_shape(args.model, weights)
+        input_array = load_input(args.image, 1., input_shape)
+        outputs = openvino_infer(args.model, input_array)
+    elif args.model.endswith('onnx'):
+        input_shape = get_onnx_input_shape(args.model)
+        input_array = load_input(args.image, 1., input_shape)  
+        outputs = onnx_infer(args.model, input_array)
+        
+    # scaling occurs in _infer methods
+    output_scale_factor = len(outputs) * [1.0]
+    predictions = ssd.ssdv2_predictions(outputs, output_scale_factor, confidence_threshold=0.5, nms_threshold=0.4, top_k=1)
     
     output_img = cv2.resize(img, (1024, 1024), interpolation=cv2.INTER_NEAREST)
-    output_scale = 1024. / 300
+    output_scale_x = 1024. / args.width
+    output_scale_y = 1024. / args.height
 
     classes = ssd.coco91
     colors = dataset.coco_colors
@@ -58,8 +69,8 @@ if __name__ == "__main__":
                                                 int(100*p['confidence']),
                                                 int(p['xmin']), int(p['xmax']),
                                                 int(p['ymin']), int(p['ymax'])))
-        p1 = (int(p['xmin'] * output_scale), int(p['ymin'] * output_scale))
-        p2 = (int(p['xmax'] * output_scale), int(p['ymax'] * output_scale))
+        p1 = (int(p['xmin'] * output_scale_x), int(p['ymin'] * output_scale_y))
+        p2 = (int(p['xmax'] * output_scale_x), int(p['ymax'] * output_scale_y))
         color = colors[p['class_id']]
         cv2.rectangle(output_img, p1, p2, color, 2)
 

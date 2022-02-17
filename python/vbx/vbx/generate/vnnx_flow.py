@@ -3,6 +3,7 @@ import os.path
 import tempfile
 
 from . import onnx_convert
+from . import onnx_infer
 from . import onnx_helper
 from . import onnx_modify
 from . import onnx_normalize
@@ -14,8 +15,6 @@ from . import onnx_bias_correction
 def generate_vnnx(xml_filename,
                   size_conf,
                   keep_temp=False,
-                  binary_only=False,
-                  skip_normalization=False,
                   image=None,
                   samples_folder=None,
                   samples_count=None,
@@ -37,6 +36,7 @@ def generate_vnnx(xml_filename,
     model_name = os.path.join(tmp_dir, os.path.splitext(os.path.basename(xml_filename))[0])
 
     onnx_model = model_name + '.onnx'
+    onnx_model_opt = model_name + '.opt.onnx'
     onnx_stats = model_name + '.statistics.json'
     onnx_model_pre = model_name + '.pre.onnx'
     onnx_model_norm = model_name + '.norm.onnx'
@@ -46,34 +46,30 @@ def generate_vnnx(xml_filename,
     graph_json = model_name + '.json'
     channels_json = onnx_model_post + '.channels.json'
 
-    if not binary_only:
-        # convert from Openvino to ONNX
-        nodes, ir_version = onnx_convert.parse_openvino_xml(xml_filename)
-        if cut_node:
-            nodes = onnx_convert.cut_after_node(nodes, cut_node)
-        graph = onnx_convert.convert_openvino_xml_to_onnx(nodes, model_name, ir_version)
-        onnx_helper.onnx_save_model(graph, onnx_model)
+    # convert from Openvino to ONNX
+    nodes, ir_version = onnx_convert.parse_openvino_xml(xml_filename)
+    if cut_node:
+        nodes = onnx_convert.cut_after_node(nodes, cut_node)
+    graph = onnx_convert.convert_openvino_xml_to_onnx(nodes, model_name, ir_version)
+    onnx_helper.onnx_save_model(graph, onnx_model)
+    onnx_modify.onnx_optimize_graph(onnx_model, onnx_model_opt)
 
-        if samples_folder:
-            nodes = onnx_convert.gather_stats(onnx_model, nodes, samples_folder, samples_count, scale=None, kld_threshold=kld)
-        onnx_convert.save_stats(nodes, onnx_stats)
+    # gather stats
+    # stats_np = onnx_infer.onnx_gather_stats(onnx_model_opt, nodes, samples_folder, samples_count, scale=None, kld_threshold=kld)
+    # onnx_infer.onnx_save_stats(onnx_stats, stats_np)
 
-        # activation/weight normalization
-        onnx_modify.onnx_pre_graph(onnx_model, onnx_model_pre)
-        if not skip_normalization:
-            input_scale_factors, output_scale_factors = onnx_normalize.run_normalize_graph(onnx_model_pre, onnx_stats, onnx_model_norm)
-        else:
-            input_scale_factors, output_scale_factors = [1.0], [1.0]
-            onnx_model_norm = onnx_model_pre
-        onnx_modify.onnx_post_graph(onnx_model_norm, onnx_model_post)
+    # activation/weight normalization
+    onnx_modify.onnx_pre_graph(onnx_model_opt, onnx_model_pre)
+    stats_np = onnx_infer.onnx_gather_stats(onnx_model_pre, nodes, samples_folder, samples_count, scale=None, kld_threshold=kld)
+    onnx_infer.onnx_save_stats(onnx_stats, stats_np)
 
-        input_ids, output_ids = onnx_modify.onnx_get_io_ids(onnx_model_post)
-        with open(io_json, 'w') as jf:
-            io_info = {'input_ids': input_ids, 'output_ids': output_ids, 'input_scale_factors': input_scale_factors, 'output_scale_factors': output_scale_factors}
-            json.dump(io_info, jf)
+    input_scale_factors, output_scale_factors = onnx_normalize.run_normalize_graph(onnx_model_pre, onnx_stats, onnx_model_norm)
+    onnx_modify.onnx_post_graph(onnx_model_norm, onnx_model_post)
 
-    with open(io_json) as jf:
-        io_info = json.load(jf)
+    input_ids, output_ids = onnx_modify.onnx_get_io_ids(onnx_model_post)
+    io_info = {'input_ids': input_ids, 'output_ids': output_ids, 'input_scale_factors': input_scale_factors, 'output_scale_factors': output_scale_factors}
+    with open(io_json, 'w') as jf:
+        json.dump(io_info, jf)
 
     # perform bias correction
     if bias_correction:
@@ -83,7 +79,7 @@ def generate_vnnx(xml_filename,
 
 
     # convert ONNX to graph binary
-    json_string = onnx_to_json.run_generate_graph(onnx_model_post, onnx_stats, io_info, image, inline_depthwise=True)
+    json_string = onnx_to_json.run_generate_graph(onnx_model_post, onnx_stats, io_info, image, inline_depthwise=True, remove_nops=True)
     with open(graph_json, 'w') as jf:
         jf.write(json_string)
     if bias_correction:

@@ -29,7 +29,7 @@ python ../darknet_to_onnx.py yolov2-tiny-voc.cfg
 
 echo "Running Model Optimizer..."
 # model details @ https://pjreddie.com/darknet/yolo/
-converter --input_model yolov2-tiny-voc.onnx \
+mo --input_model yolov2-tiny-voc.onnx \
 --framework onnx \
 --input_shape [1,3,416,416] \
 --scale_values=[255.] \

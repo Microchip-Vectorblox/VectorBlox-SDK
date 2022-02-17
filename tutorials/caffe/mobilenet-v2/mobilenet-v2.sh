@@ -22,18 +22,19 @@ fi
 source $VBX_SDK/vbx_env/bin/activate
 
 echo "Downloading mobilenet-v2..."
-downloader --name mobilenet-v2
+omz_downloader --name mobilenet-v2
 
 echo "Running Model Optimizer..."
-# model details @ https://github.com/opencv/open_model_zoo/blob/2019_R3.1/models/public/mobilenet-v2/mobilenet-v2.md
-converter --input_model public/mobilenet-v2/mobilenet-v2.caffemodel \
+# model details @ https://github.com/opencv/open_model_zoo/blob/2021.3/models/public/mobilenet-v2/mobilenet-v2.md
+mo --input_model public/mobilenet-v2/mobilenet-v2.caffemodel \
 --mean_values [103.94,116.78,123.68] \
---scale_values [58.82]
+--scale_values [58.82] \
+--static_shape
 
 echo "Generating VNNX for V1000 configuration..."
 generate_vnnx -x mobilenet-v2.xml  -c V1000 -f ../../sample_images -o mobilenet-v2.vnnx --bias-correction
 
 echo "Running Simulation..."
-python $VBX_SDK/example/python/imagenet.py mobilenet-v2.vnnx ../../oreo.jpg
+python $VBX_SDK/example/python/classifier.py mobilenet-v2.vnnx ../../oreo.jpg
 
 deactivate

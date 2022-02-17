@@ -4,14 +4,17 @@ import numpy as np
 import tqdm
 import json
 import cv2
-from vbx.postprocess import classifier, yolo,dataset
+from vbx.postprocess import classifier, yolo,dataset, ssd
 from vbx.sim.model import Fletcher32
 import sys
+import os
+import glob
 import onnx
 import re
 from onnx import numpy_helper, helper, checker, shape_inference
 
-from .onnx_kld import collect_histogram_data
+from .onnx_kld import collect_histogram_data, get_optimal_threshold, get_valid_kld
+from . import onnx_helper
 
 
 np.set_printoptions(suppress=True, precision=4, linewidth=120)
@@ -182,11 +185,27 @@ def onnx_infer_batched(onnx_name, input_array, batch=8):
     return outputs
 
 
-def onnx_infer(onnx_name, input_array):
-    session = onnxruntime.InferenceSession(onnx_name, session_options)
+def onnx_infer(onnx_model, input_array):
+    onnxx = onnx.load(onnx_model)
+    session_options = onnxruntime.SessionOptions()
+    session = onnxruntime.InferenceSession(onnxx.SerializeToString())
     input_name = session.get_inputs()[0].name
-
-    return session.run([], {input_name: input_array})[0]
+    
+    if onnx_model.endswith('.post.onnx') or onnx_model.endswith('.norm.onnx'):
+        if onnx_model.endswith('.post.onnx'):
+            io = onnx_model.replace('.post.onnx', '.io.json')
+        else:
+            io = onnx_model.replace('.norm.onnx', '.io.json')
+        with open(io) as f:
+            io_dict = json.load(f)
+            output_scale_factors = io_dict['output_scale_factors']
+            input_scale_factors = io_dict['input_scale_factors']
+            input_array /= input_scale_factors[0]
+    
+    if onnx_model.endswith('.post.onnx') or onnx_model.endswith('.norm.onnx'):
+        return [o.flatten() * sf for o,sf in zip(session.run([], {input_name: input_array}), output_scale_factors)]
+    else:
+        return [o.flatten() for o in session.run([], {input_name: input_array})]
 
 def onnx_infer_all(onnx_name, input_array):
     session = onnxruntime.InferenceSession(onnx_name, session_options)
@@ -226,6 +245,73 @@ def onnx_allclose(model_a, model_b, scale_factor=1.0, atol=1e-05):
     return np.allclose(output_a, output_b, atol=atol)
 
 
+def onnx_gather_stats(onnx_model, nodes, input, count, scale, kld_threshold=False):
+
+    valid_kld = {}
+    if kld_threshold:
+        valid_kld = get_valid_kld(onnx_model)
+
+    if os.path.isdir(input):
+        inputs = []
+        extensions = ['*.jpg', '*.png', '*.jpeg', '*.npy']
+        extensions += [e.upper() for e in extensions]
+        for ext in extensions:
+            inputs += sorted(glob.glob(os.path.join(input, ext)))
+        if count:
+            inputs = inputs[:count]
+        input_shape = onnx_helper.get_model_input_shape(onnx_model)
+        input_arrays = np.vstack([load_input(i, scale, input_shape) for i in inputs])
+    else:
+        input_arrays = np.load(input)
+    stats = onnx_activations_batched(onnx_model, input_arrays, stats_only=True, histogram_dict=valid_kld)
+
+    stats_list = []
+    for output in sorted(stats.keys()):
+        entry = {'id':output,
+                'mean': stats[output]['mean'],
+                'max': stats[output]['max'],
+                'min': stats[output]['min']}
+        if 'hist' in stats[output]:
+            (hist, hist_edges, min_val, max_val, th) = stats[output]['hist']
+            _, _, _, opt = get_optimal_threshold(stats[output]['hist'], valid_kld[output])
+
+            entry['kld'] = opt
+
+        stats_list.append(entry)
+
+    return stats_list
+
+
+def onnx_save_stats(fname, stats_np):
+    stats = []
+    for entry_np in stats_np:
+        entry = entry_np.copy()
+        for key in entry:
+            if isinstance(entry[key], np.ndarray):
+                entry[key] = entry[key].tolist()
+            elif isinstance(entry[key], np.generic):
+                entry[key] = float(entry[key])
+        stats.append(entry)
+
+    with open(fname, 'w') as f:
+        json.dump(stats, f)
+
+
+def onnx_load_stats(fname, mode=None):
+    stats = {}
+    with open(fname) as f:
+        j = json.load(f)
+        for arr in j:
+            channel_maximums = np.asarray(arr['max'],dtype=np.float32)
+            channel_minimums = np.asarray(arr['min'],dtype=np.float32)
+            channel_abs = np.max(np.stack((np.abs(channel_maximums), np.abs(channel_minimums)), axis=-1),axis=-1)
+
+            stats[arr['id']] = {'abs': channel_abs, 'max': channel_maximums, 'min':channel_minimums} 
+            if 'kld' in arr:
+                stats[arr['id']]['kld'] = np.asarray(arr['kld'])
+    return stats
+
+
 def onnx_activation_stats(model_name, activations):
     graph = onnx.load(model_name).graph
 
@@ -243,23 +329,21 @@ def onnx_activation_stats(model_name, activations):
             print(layer, node.op_type, np.max(activation), np.min(activation))
     print()
 
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('onnx')
     parser.add_argument('-i', '--input', default='../oreo.224.jpg')
-    parser.add_argument('-n', '--normalized', action='store_true')
     parser.add_argument('-a', '--activations', action='store_true')
     parser.add_argument('-y', '--yolo', action='store_true')
-    parser.add_argument('--io')
+    parser.add_argument('-s', '--ssd', action='store_true')
+    parser.add_argument('-t', '--threshold', type=float, default=0.5)
 
     args = parser.parse_args()
 
-    from . import onnx_helper
     input_shape =  onnx_helper.get_model_input_shape(args.onnx)
-    scale = None
-    if args.normalized:
-        scale = 1./255.
-    input_array = load_input(args.input, scale, input_shape)
+    input_array = load_input(args.input, 1., input_shape)
+    outputs = onnx_infer(args.onnx, input_array)
 
     if args.activations:
         activations = onnx_activations(args.onnx, input_array)
@@ -271,39 +355,54 @@ def main():
 
     elif args.yolo:
         predictions = None
-        outputs = onnx_infer(args.onnx, input_array)
+        scale_factors = [1.0]
 
-        if 'voc' in args.onnx and '2' in args.onnx and 'tiny' not in args.onnx:
-            if 'post' in args.onnx:
-                scale_factors = [19.08]
-            else:
-                scale_factors = [1.0]
+        if 'voc' in args.onnx and '2' in args.onnx and 'tiny' not in args.onnx: 
             predictions = yolo.yolov2_voc(outputs, scale_factors, do_activations=True)
+        elif 'voc' in args.onnx and '2' in args.onnx and 'tiny' in args.onnx:
+            predictions = yolo.yolov2_tiny_voc(outputs, scale_factors)
+        elif 'voc' not in args.onnx and '2' in args.onnx and 'tiny' not in args.onnx:
+            predictions = yolo.yolov2_coco(outputs, scale_factors, do_activations=True)
+        elif 'voc' not in args.onnx and '2' in args.onnx and 'tiny' in args.onnx:
+            predictions = yolo.yolov2_tiny_coco(outputs, scale_factors)
+        # TODO currently not working
+        # elif 'voc' not in args.xml and '3' in args.xml and 'tiny' not in args.xml:
+        #     predictions = yolo.yolov3_coco(outputs, scale_factors)
+        # elif 'voc' not in args.xml and '3' in args.xml and 'tiny' in args.xml:
+        #     predictions = yolo.yolov3_tiny_coco(outputs, scale_factors)
+        
+        if 'voc' in args.onnx:
             classes = dataset.voc_classes
+        else:
+            classes = dataset.coco_classes
 
         for p in predictions:
             print("{}\t{}\t({}, {}, {}, {})".format(classes[p['class_id']],
                                                     int(100*p['confidence']),
                                                     int(p['xmin']), int(p['xmax']),
                                                     int(p['ymin']), int(p['ymax'])))
+    
+    elif args.ssd:
+        scale_factors = len(outputs) * [1.0]
+        predictions = ssd.ssdv2_predictions(outputs, scale_factors, args.threshold, nms_threshold=0.4, top_k=1)
+        classes = ssd.coco91
+
+        for p in predictions:
+            print("{}\t{}\t({}, {}, {}, {})".format(classes[p['class_id']],
+                                                int(100*p['confidence']),
+                                                int(p['xmin']), int(p['xmax']),
+                                                int(p['ymin']), int(p['ymax'])))
+    
+    # classifier
     else:
-        output = onnx_infer(args.onnx, input_array)
-
-        if len(output.flatten())==1001:
+        if len(outputs[0])==1001:
             classes = dataset.imagenet_classes_with_nul
-            classifier.print_topk(output[0].flatten(),classes=classes)
-        elif len(output.flatten())==1000:
+            classifier.print_topk(outputs[0],classes=classes)
+        elif len(outputs[0])==1000:
             classes = dataset.imagenet_classes
-            classifier.print_topk(output[0].flatten(),classes=classes)
+            classifier.print_topk(outputs[0],classes=classes)
         else:
-            outputs = onnx_infer_all(args.onnx, input_array)
-            scale_factors = [1. for _ in outputs]
-            if args.io:
-                with open(args.io) as f:
-                    scale_factors = json.load(f)['output_scale_factors']
-
-            for o,sf in zip(outputs, scale_factors):
-                print(sf*o.flatten()[:8])
+            print(outputs[:8])
 
 
 if __name__ == "__main__":

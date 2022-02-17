@@ -11,25 +11,18 @@ def main():
                         choices = ['V250','V500','V1000'], required=True)
     parser.add_argument('--cut', help='Cuts graph after OpenVINO node (use name specified by Netron)')
     parser.add_argument('-o','--output',help="Name of output file",required=True)
-    #undocumented arguments
-    #keep weights as they are
-    parser.add_argument('-s', '--skip-normalization', help=argparse.SUPPRESS,action='store_true')
-    #Keep temporary files around
-    parser.add_argument('--keep-temp',help=argparse.SUPPRESS,action='store_true')
-    #Only generates the binary (for different HW)
-    parser.add_argument('-b', '--binary', help=argparse.SUPPRESS, action='store_true')
     parser.add_argument('-bc', '--bias-correction', help="apply bias correction to layers to improve accuracy",action='store_true')
     parser.add_argument('-kld', '--kl-divergence', help="use KL divergence to determine layer thresholds",action='store_true')
+    #undocumented arguments
+    parser.add_argument('--keep-temp',help=argparse.SUPPRESS,action='store_true')#Keep temporary files around
     args = parser.parse_args()
 
     generate_vnnx(args.xml,
                   args.size_conf,
                   keep_temp=args.keep_temp,
-                  binary_only=args.binary,
                   image=args.image,
                   samples_folder=args.samples_folder,
                   samples_count=args.samples_count,
-                  skip_normalization=args.skip_normalization,
                   output_filename=args.output,
                   cut_node=args.cut,
                   bias_correction=args.bias_correction,

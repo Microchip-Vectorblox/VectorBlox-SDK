@@ -6,8 +6,9 @@ import numpy as np
 
 from .onnx_helper import get_node_inputs, get_node_source, get_previous_nodes
 from .onnx_helper import get_tensor, set_tensor, get_attr, set_attr
-from .onnx_helper import onnx_save_graph, load_statistics
+from .onnx_helper import onnx_save_graph
 from .onnx_infer import onnx_random_input, onnx_infer, onnx_activations
+from .onnx_infer import onnx_load_stats
 from .utils import one_elem
 
 np.set_printoptions(suppress=True, precision=4, linewidth=120)
@@ -17,7 +18,7 @@ weighted_nodes = ["Conv", "Gemm", "Mul"]
 memoized_weighted = {}
 
 
-def get_previous_weighted(nodes, node):
+def get_previous_weighted(nodes, node): #grabs previous node with weights
     global memoized_weighted
 
     if node.name in memoized_weighted:
@@ -35,24 +36,36 @@ def get_previous_weighted(nodes, node):
         multi = []
         if node.op_type == "Sum":
             multi += [node]
-        for p in previous:
-            multi += get_previous_weighted(nodes, p)
-        previous_weighted = multi
+        else:
+            for p in previous:
+                pw = get_previous_weighted(nodes, p)
+                if not pw is None:
+                    multi += pw
+        if multi == []:
+            previous_weighted = None
+        else:
+            previous_weighted = multi
 
     memoized_weighted[node.name] = previous_weighted
 
     return previous_weighted
 
 
-def get_previous_max(nodes, inits, maximums, node):
+def get_previous_max(nodes, inits, statistics, node):
     previous_weighted = get_previous_weighted(nodes, node)
-    if previous_weighted is None:
-        return maximums[node.input[0]]
+    if previous_weighted is None: # grabs input
+        previous = get_previous_nodes(nodes, node)
+        if len(previous) == 0:
+            return np.max(statistics[node.input[0]]['abs'])
+        else:
+            assert(len(previous) == 1)
+            return get_previous_max(nodes, inits, statistics, previous[0])
 
     elif len(previous_weighted) == 1:
-        if previous_weighted[0].name in maximums:
-            return get_node_max(nodes,inits,maximums,previous_weighted[0])
+        if len(previous_weighted[0].output) == 1 and previous_weighted[0].output[0] in statistics:
+            return get_node_max(nodes, inits, statistics, previous_weighted[0])
         else:
+
             if previous_weighted[0].op_type == 'Mul':
                 next_nodes = get_node_inputs(nodes, previous_weighted[0].output[0])
                 if len(next_nodes) == 1:
@@ -61,16 +74,17 @@ def get_previous_max(nodes, inits, maximums, node):
                     if next_nodes[0].op_type in ['Argmax']:
                         return np.asarray(1.)
                     if next_nodes[0].op_type in ['LRN']:
-                        return maximums[next_nodes[0].name]
+                        return np.max(statistics[next_nodes[0].output[0]]['abs'])
 
-            return get_previous_max(nodes, inits, maximums, previous_weighted[0])
+            return get_previous_max(nodes, inits, statistics, previous_weighted[0])
     else:
         #a = max([maximums[pw.name] for pw in previous_weighted])
-        b = max([get_node_max(nodes,inits,maximums,pw) for pw in previous_weighted])
+        b = max([get_node_max(nodes,inits,statistics,pw) for pw in previous_weighted])
         #print(a,b,np.abs(a-b))
         return b
 
-def get_node_max(nodes,inits,maximums,node):
+
+def get_node_max(nodes,inits,statistics,node):
     relu_after = False
     clip_after = False
     next_node = node
@@ -86,17 +100,18 @@ def get_node_max(nodes,inits,maximums,node):
         elif next_node.op_type in ('Clip', ):
             clip_after = next_node
         elif next_node.op_type not in ('Pad','Pool'):
-            #nodes that don't impact maximums
+            #nodes that don't impact statistics
             break
 
+
     if relu_after:
-        return maximums[relu_after.output[0]]
-        # return min(maximums[node.output[0]], maximums[relu_after.output[0]])
+        return np.max(statistics[relu_after.output[0]]['abs'])
+        # return min(statistics[node.output[0]], statistics[relu_after.output[0]])
     elif clip_after:
-        return maximums[clip_after.output[0]]
-        # return min(maximums[node.output[0]], maximums[clip_after.output[0]])
+        return np.max(statistics[clip_after.output[0]]['abs'])
+        # return min(statistics[node.output[0]], statistics[clip_after.output[0]])
     else:
-        return maximums[node.output[0]]
+        return np.max(statistics[node.output[0]]['abs'])
 
 
 def onnx_normalize_convolve(inits, arr, group, previous_max, next_max):
@@ -117,21 +132,27 @@ def onnx_normalize_scalar_mul(inits, arr, previous_max, next_max):
     return set_tensor(inits, arr, w0)
 
 
-def onnx_normalize_graph(nodes, inits, maximums, verbose=False):
+def onnx_normalize_graph(nodes, inits, outputs, statistics, verbose=False):
+    #TODO don't use clip max
     clip_nodes = [node for node in nodes if node.op_type == "Clip"]
     for node in clip_nodes:
         clip_max = get_tensor(inits, node.input[2])
-        maximums[one_elem(node.output)] = clip_max
+        current_max = statistics[one_elem(node.output)]['abs']
+        statistics[one_elem(node.output)]['abs'] = np.ones(current_max.shape, dtype=current_max.dtype)* clip_max
 
-    for node in nodes:
+    for n, node in enumerate(nodes):
         inputs = get_node_inputs(nodes, node.output[0])
+        previous_weighted = get_previous_weighted(nodes, node)
+        previous = get_previous_nodes(nodes, node)
         if len(inputs):
             next = inputs[0]
         else:
             next = None
-        prev = get_previous_max(nodes, inits, maximums, node)
+        prev = get_previous_max(nodes, inits, statistics, node)
+
+        current = None
         if node.op_type == "Conv":
-            current = get_node_max(nodes,inits,maximums,node)
+            current = get_node_max(nodes,inits,statistics,node)
             if verbose:
                 print('next', node.name, node.op_type, prev, current)
 
@@ -140,8 +161,7 @@ def onnx_normalize_graph(nodes, inits, maximums, verbose=False):
                 inits = onnx_normalize_scalar_add(inits, node.input[2], current)
 
         elif node.op_type == "Gemm":
-            current = maximums[node.output[0]]
-
+            current = get_node_max(nodes,inits,statistics,node)
             if verbose:
                 print('next', node.name, node.op_type, prev, current)
 
@@ -150,9 +170,7 @@ def onnx_normalize_graph(nodes, inits, maximums, verbose=False):
                 inits = onnx_normalize_scalar_add(inits, node.input[2], current)
 
         elif node.op_type == "Mul":  # constant mul
-            current = None
-
-            if node == nodes[-1]:
+            if node.output[0] in [o.name for o in outputs]:
                 if verbose:
                     print('last node')
                 current = prev
@@ -160,13 +178,13 @@ def onnx_normalize_graph(nodes, inits, maximums, verbose=False):
                 current = np.ones(prev.shape) # denormalize
 
             elif next and next.op_type in ["LRN"]:
-                current = np.ones(prev.shape) # denormalize
-
                 alpha = get_attr(next, 'alpha')
                 alpha_ = float(alpha * prev**2)
                 set_attr(next, 'alpha', alpha_)
 
                 current = prev
+            else:
+                assert(next)
 
             w = get_tensor(inits, node.input[1])
             if w is None:
@@ -175,31 +193,33 @@ def onnx_normalize_graph(nodes, inits, maximums, verbose=False):
                 src = node.input[1]
 
             if current is None:
-                if node.output[0] in maximums:
-                    current = maximums[node.output[0]]
-                else:
-                    current = prev * np.max(get_tensor(inits, src).flatten())
+                assert(node.output[0] in statistics)
+                current = get_node_max(nodes,inits,statistics,node)
 
                 if next and next.op_type == "Add":
                     # print('Optimize SS', current, get_tensor(inits, src).flatten(), get_tensor(inits, next.input[1]).flatten())
                     pass
 
-            previous = get_previous_nodes(nodes, node)
-            if len(previous) == 1 and previous[0].op_type == 'LRN':
-                current = maximums[node.input[0]]
+            if len(previous) == 1 and previous[0].op_type in ['Softmax', 'Sigmoid']:
+                prev = np.ones(prev.shape) # denormalize
+                current = np.ones(prev.shape) # denormalize
+
+            elif len(previous) == 1 and previous[0].op_type == 'LRN':
+                statistics[node.output[0]] = statistics[node.input[0]]
+
+            elif previous_weighted and len(previous_weighted) > 1:
+                current = prev
+                statistics[node.output[0]] = statistics[previous[0].output[0]]
 
             if verbose:
                 print('next', node.name, node.op_type, prev, current)
 
             inits = onnx_normalize_scalar_mul(inits, src, prev, current)
-            maximums[node.name] = current
 
         elif node.op_type == "Add":  # constant add
             if verbose:
                 print('next', node.name, node.op_type, prev)
             inits = onnx_normalize_scalar_add(inits, node.input[1], prev)
-            maximums[node.name] = np.asarray(prev)
-            # maximums[node.name] = np.asarray([prev, prev])
 
         elif node.op_type == "Clip":
             if verbose:
@@ -212,16 +232,16 @@ def onnx_normalize_graph(nodes, inits, maximums, verbose=False):
     return nodes, inits
 
 
-def onnx_normalize_graph_multi(nodes, inits, maximums, verbose=False):
+def onnx_normalize_graph_multi(nodes, inits, statistics, verbose=False):
 
     for node in nodes:
         previous = get_previous_nodes(nodes, node)
         if len(previous) > 1:
-            prev_max = get_previous_max(nodes, inits, maximums, node)
+            prev_max = get_node_max(nodes, inits, statistics, node)
             if verbose:
                 print(node.name, node.op_type, prev_max)
             for p in previous:
-                value = get_previous_max(nodes, inits, maximums, p)
+                value = get_node_max(nodes, inits, statistics, p)
                 if verbose:
                     print(p.op_type, value)
 
@@ -237,9 +257,9 @@ def run_normalize_graph(model_src, model_stats, model_dst):
     nodes, inits, inputs, outputs = graph.node, graph.initializer, graph.input, graph.output
 
     # normalize across layers
-    stats = load_statistics(model_stats)
+    stats = onnx_load_stats(model_stats)
 
-    nodes, inits = onnx_normalize_graph(nodes, inits, stats, False)
+    nodes, inits = onnx_normalize_graph(nodes, inits, outputs, stats, False)
     nodes, inits = onnx_normalize_graph_multi(nodes, inits, stats, False)
     onnx_save_graph(nodes, inputs, outputs, inits, model_dst, "normalized")
 
@@ -254,7 +274,12 @@ def run_normalize_graph(model_src, model_stats, model_dst):
 
         output_maximums.append(float(m))
 
-    input_maximums = [float(stats[nodes[0].input[0]])]
+    input_maximums = []
+    for input in inputs:
+        inodes = get_node_inputs(nodes, input.name)
+        assert(len(inodes) == 1)
+        m = get_previous_max(nodes,inits, stats, inodes[0])
+        input_maximums.append(float(m))
 
     return input_maximums, output_maximums
 
@@ -275,9 +300,9 @@ def normalize_graph(argv):
     nodes, inits, inputs, outputs = graph.node, graph.initializer, graph.input, graph.output
 
     # normalize across layers
-    stats = load_statistics(args.model_stats)
+    stats = onnx_load_stats(args.model_stats)
 
-    nodes, inits = onnx_normalize_graph(nodes, inits, stats, False)
+    nodes, inits = onnx_normalize_graph(nodes, inits, outputs, stats, False)
     nodes, inits = onnx_normalize_graph_multi(nodes, inits, stats, False)
     onnx_save_graph(nodes, inputs, outputs, inits, args.model_dst, "normalized")
 

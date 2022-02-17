@@ -213,7 +213,8 @@ typedef STRUCT_PACKED vnnx_subgraph_node {
 	int32_t scratchpad_bytes;
 	int32_t dma_split;
 	int32_t dma_channel_offset;
-	int32_t dma_buffer_offset;
+	int32_t dma_input_buffer_offset;
+	int32_t dma_output_buffer_offset;
 
 	obj_off_t input_data;
 	obj_off_t output_data;
@@ -235,6 +236,7 @@ typedef STRUCT_PACKED vnnx_subgraph_node {
 	int32_t use_replay;
 	obj_off_t replay_buffer;
 	int32_t replay_buffer_size;
+	int32_t input_shape[3];
 	int32_t output_shape[3];
 	union {
 		STRUCT_PACKED {
