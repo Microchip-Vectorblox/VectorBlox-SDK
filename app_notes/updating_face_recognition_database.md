@@ -61,4 +61,4 @@ Use the script below to export the Python database.
 python exportDb.py
 ```
 
-This will create the file `faceDb.c` that you can use as part of your C-code. In the video kit project, similar code can be found in `faceDetectDemo.c`.
+This creates `faceDb.c` containing C-code representing the embeddings. This code can be integrated into your project. For the VideoKit project, embeddings are found at the top of `faceDetection/faceDetectDemo.c`. Replace the default embeddings with the embeddings in `faceDb.c` to recognize your new faces.

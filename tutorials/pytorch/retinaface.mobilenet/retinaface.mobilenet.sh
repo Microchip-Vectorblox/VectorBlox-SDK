@@ -22,14 +22,16 @@ fi
 source $VBX_SDK/vbx_env/bin/activate
 
 echo "Downloading retinaface.mobilenet..."
+[ -f mobilenet0.25_Final.pth ] || gdown 'https://drive.google.com/uc?id=15zP8BP-5IvWXWZoYTNdvUJUiBqZ1hxu1&authuser=0&export=download'
+[ -f mobilenetV1X0.25_pretrain.tar ] || gdown 'https://drive.google.com/uc?id=1q36RaTZnpHVl4vRuNypoEMVWiiwCqhuD&authuser=0&export=download'
+[ -f mobilenet0.25_Final.pth ] || exit 1
+[ -f mobilenetV1X0.25_pretrain.tar ] || exit 1
 rm -rf Pytorch_Retinaface && git clone https://github.com/biubug6/Pytorch_Retinaface
 cd Pytorch_Retinaface
 sed -i 's/args.long_side, args.long_side/288, 512/' convert_to_onnx.py # model input size 512x288; must be multiples of 32
-gdown 'https://drive.google.com/uc?id=15zP8BP-5IvWXWZoYTNdvUJUiBqZ1hxu1&authuser=0&export=download'
-gdown 'https://drive.google.com/uc?id=1q36RaTZnpHVl4vRuNypoEMVWiiwCqhuD&authuser=0&export=download'
 mkdir weights
-mv mobilenet0.25_Final.pth weights
-mv mobilenetV1X0.25_pretrain.tar weights
+cp ../mobilenet0.25_Final.pth weights
+cp ../mobilenetV1X0.25_pretrain.tar weights
 python convert_to_onnx.py --trained_model ./weights/mobilenet0.25_Final.pth --network mobile0.25
 mv FaceDetector.onnx ../retinaface.mobilenet.onnx
 cd ..

@@ -8,7 +8,7 @@ import faceDemoClass
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--modelDet', default='../../../tutorials/pytorch/retinaface.mobilenet/retinaface.mobilenet.onnx')
-    parser.add_argument('--modelRec', default=['../../../tutorials/mxnet/mobilefacenet-arcface/model-y1-test2/model-symbol.json','../../../tutorials/mxnet/mobilefacenet-arcface/model-y1-test2/model-0000.params'])
+    parser.add_argument('--modelRec', default=['../../../tutorials/mxnet/mobilefacenet-arcface/arcface/model-y1-test2/model-symbol.json','../../../tutorials/mxnet/mobilefacenet-arcface/arcface/model-y1-test2/model-0000.params'])
     parser.add_argument('--imageDir', default='dbImages')
     parser.add_argument('--debugDir', default='dbDebug')
     parser.add_argument('--db', default='faceDb')

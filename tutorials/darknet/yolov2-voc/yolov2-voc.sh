@@ -23,7 +23,7 @@ source $VBX_SDK/vbx_env/bin/activate
 
 echo "Downloading yolov2-voc..."
 [ -f yolov2-voc.cfg ] || wget https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov2-voc.cfg
-[ -f yolov2-voc.weights ] || wget https://pjreddie.com/media/files/yolov2-voc.weights
+[ -f yolov2-voc.weights ] || wget http://web.archive.org/web/20210513105002/https://pjreddie.com/media/files/yolov2-voc.weights
 [ -f voc.names ] || wget https://raw.githubusercontent.com/pjreddie/darknet/master/data/voc.names
 python ../darknet_to_onnx.py yolov2-voc.cfg
 

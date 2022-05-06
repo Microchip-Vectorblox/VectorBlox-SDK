@@ -22,9 +22,11 @@ fi
 source $VBX_SDK/vbx_env/bin/activate
 
 echo "Downloading mobilefacenet-arcface..."
+[ -f model-y1.zip ] || gdown 'https://drive.google.com/uc?id=1RHyJIeYuHduVDDBTn3ffpYEZoXWRamWI&authuser=0&export=download'
+[ -f model-y1.zip ] || exit 1
 rm -rf arcface && mkdir arcface
 cd arcface
-[ -f model-y1.zip ] || gdown 'https://drive.google.com/uc?id=1RHyJIeYuHduVDDBTn3ffpYEZoXWRamWI&authuser=0&export=download'
+cp ../model-y1.zip .
 unzip model-y1.zip
 cd ..
 

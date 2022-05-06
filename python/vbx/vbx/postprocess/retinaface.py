@@ -210,7 +210,8 @@ def retinafaceVnnx(modelOut, inputWidth, inputHeight, detectThresh=0.75, maxIou=
     w8,w16 = 4*w32, 2*w32
     mapSizes = [[h8,w8],[h16,w16],[h32,w32]]
     mapPixels = np.array([h8*w8, h16*w16, h32*w32])
-    
+    modelOut.reverse()
+
     # each map shape is [anchor][channel][y][x]
     #   there are 2 anchors per pixel
     #   location map has 4 channels; confidence has 2 channels; landmarks has 10 channels

@@ -11,6 +11,8 @@ Below is a list of included tutorials. Frames per Second (FPS) assumes the cores
 
 | Tutorial Name | Source Framework| Task  |Accuracy Metric|Accuracy Score FP32 / 8-bit |V1000 fps   |V500 fps   |V250 fps   | More information |
 | ------------- |-----------------|-------|---------------|--------------|------------|-----------|-----------|----|
+|[retinaface.mobilenet](pytorch/retinaface.mobilenet/retinaface.mobilenet.sh)|pytorch|Object Detection|||77.19|64.90|33.87|[More Info]()|
+|[mobilefacenet-arcface](mxnet/mobilefacenet-arcface/mobilefacenet-arcface.sh)|mxnet|face_compare|||122.15|99.38|54.42|[More Info](https://github.com/openvinotoolkit/open_model_zoo/blob/master/models/public/face-recognition-mobilefacenet-arcface/model.yml)|
 |[mobilenet-v1-1.0-224](caffe/mobilenet-v1-1.0-224/mobilenet-v1-1.0-224.sh)|caffe|Classification|Top1|70.04/69.42|85.49|58.06|28.38|[More Info](https://github.com/opencv/open_model_zoo/blob/2021.3/models/public/mobilenet-v1-1.0-224/mobilenet-v1-1.0-224.md)|
 |[mobilenet-v2](caffe/mobilenet-v2/mobilenet-v2.sh)|caffe|Classification|Top1|71.9/71.44|67.58|52.34|26.87|[More Info](https://github.com/opencv/open_model_zoo/blob/2021.3/models/public/mobilenet-v2/mobilenet-v2.md)|
 |[mobilenet-v1-1.0-224-tf](tensorflow/mobilenet-v1-1.0-224-tf/mobilenet-v1-1.0-224-tf.sh)|tensorflow|Classification|Top1|72.18/71.62|85.53|59.00|28.72|[More Info](https://github.com/opencv/open_model_zoo/blob/2021.3/models/public/mobilenet-v1-1.0-224-tf/mobilenet-v1-1.0-224-tf.md)|
@@ -28,8 +30,6 @@ Below is a list of included tutorials. Frames per Second (FPS) assumes the cores
 |[yolov3-tiny](darknet/yolov3-tiny/yolov3-tiny.sh)|darknet|Object Detection|mAP(COCO)|35.42/34.49|28.00|17.09|9.19|[More Info](https://pjreddie.com/darknet/yolo/)|
 |[yolov2-voc](darknet/yolov2-voc/yolov2-voc.sh)|darknet|Object Detection|mAP(VOC)|74.79/74.13|6.21|3.44|1.67|[More Info](https://pjreddie.com/darknet/yolo/)|
 |[BlazeFace](pytorch/BlazeFace/BlazeFace.sh)|pytorch|Classification|||274.80|255.21|152.99|[More Info](https://github.com/hollance/BlazeFace-PyTorch)|
-|[retinaface.mobilenet](pytorch/retinaface.mobilenet/retinaface.mobilenet.sh)|pytorch|Object Detection|||77.19|64.90|33.87|[More Info]()|
-|[mobilefacenet-arcface](mxnet/mobilefacenet-arcface/mobilefacenet-arcface.sh)|mxnet|face_compare|||122.15|99.38|54.42|[More Info](https://github.com/openvinotoolkit/open_model_zoo/blob/master/models/public/face-recognition-mobilefacenet-arcface/model.yml)|
 |[license-plate-recognition-barrier-0007](tensorflow/license-plate-recognition-barrier-0007/license-plate-recognition-barrier-0007.sh)|tensorflow|Object Detection|||167.91|133.99|83.91|[More Info](https://github.com/openvinotoolkit/open_model_zoo/blob/master/models/public/)|
 |[vehicle-license-plate-detection-barrier-0123](tensorflow/vehicle-license-plate-detection-barrier-0123/vehicle-license-plate-detection-barrier-0123.sh)|tensorflow|Object Detection|||94.84|90.64|20.72|[More Info](https://github.com/openvinotoolkit/open_model_zoo/blob/master/models/public/)|
 |[mobilenet-v1-0.25-128](tensorflow/mobilenet-v1-0.25-128/mobilenet-v1-0.25-128.sh)|tensorflow|Classification|Top1|37.74/37.66|781.33|726.72|471.34|[More Info](https://github.com/opencv/open_model_zoo/blob/2021.3/models/public/mobilenet-v1-0.25-128/mobilenet-v1-0.25-128.md)|

@@ -93,7 +93,7 @@ int post_process_retinaface(face_t faces[],int max_faces, fix16_t *network_outpu
                     for(int i2=i_start; i2>i; i2--) // move down all lower elements
                         order[i2] = order[i2-1];
                     order[i] = n;
-                    orderLength++;
+		    if (orderLength < maxPreDetects) orderLength++;
                     break;
                 }
                 i++;

@@ -23,7 +23,7 @@ source $VBX_SDK/vbx_env/bin/activate
 
 echo "Downloading yolov3-tiny..."
 [ -f yolov3-tiny.cfg ] || wget https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3-tiny.cfg
-[ -f yolov3-tiny.weights ] || wget https://pjreddie.com/media/files/yolov3-tiny.weights
+[ -f yolov3-tiny.weights ] || wget http://web.archive.org/web/20210224135857/https://pjreddie.com/media/files/yolov3-tiny.weights
 [ -f coco.names ] || wget https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
 python ../darknet_to_onnx.py yolov3-tiny.cfg
 
