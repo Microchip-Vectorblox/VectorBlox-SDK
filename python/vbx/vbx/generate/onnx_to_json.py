@@ -1097,12 +1097,12 @@ def generate_mxp_graph(model_name, activations, stats, first_node_name, last_nod
     network = mxp_number_buffers(network, aliased_io)
     buffers = mxp_size_buffers(network, aliased_io)
 
+    if remove_nops:
+        network = mxp_remove_nop_identity(network)
+
     network = mxp_set_unsigned(network, unsigned_network_inputs)
     if inline_depthwise:
         network = mxp_inline_depthwise(network)
-
-    if remove_nops:
-        network = mxp_remove_nop_identity(network)
 
     network = mxp_number_layers(network)
 
