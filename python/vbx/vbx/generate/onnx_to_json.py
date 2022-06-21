@@ -9,6 +9,7 @@ from .utils import one_elem
 from .onnx_helper import get_node_index, get_node_source, get_node_inputs
 from .onnx_helper import get_tensor, get_attr, get_previous_nodes, get_model_input_shape
 from .onnx_infer import onnx_activations, load_input
+from .onnx_bias_correction import last_weighted_layer_output_ids
 
 np.set_printoptions(suppress=True, precision=4, linewidth=120)
 
@@ -16,7 +17,7 @@ np.set_printoptions(suppress=True, precision=4, linewidth=120)
 NETWORK_VERSION = 0.8
 DO_STRIDES = True
 CLIP_UNSIGNED = True
-CVI_1x1 = False
+CVI_1x1 = True
 INLINE_DEPTHWISE = True
 
 
@@ -157,13 +158,14 @@ def mxp_set_replay(network, io):
 
 
 def mxp_set_cvi(network):
+    last_output_ids = last_weighted_layer_output_ids(network['layers'])
     for l, layer in enumerate(network['layers']):
         if layer['op_type'] == 'Conv':
             network['layers'][l]['use_cvi'] = 1
             if layer['group'] == layer['kernels']:
                 if layer['strides'] in [[1,1], [2,2]] and layer['dilations'] == [1,1]:
                     network['layers'][l]['use_depthwise'] = 1
-            if not CVI_1x1:
+            if not CVI_1x1 or layer['output_id'] in last_output_ids:
                 if layer['m'] == 1 and layer['n'] == 1:
                     network['layers'][l]['use_cvi'] = 0
 
@@ -304,7 +306,7 @@ def mxp_remove_nop_identity(network):
                 n = next_layers[0]
                 next_layer = network['layers'][n]
                 prev_layers = [p for p, prev in enumerate(network['layers']) if next_layer['input_id'] == prev['output_id']]
-                if len(prev_layers) == 1:
+                if len(prev_layers) == 1 and next_layer['op_type'] not in ['Gemm']:
                     nop_pairs.append((l, n))
 
     for l, n in nop_pairs:
@@ -1087,9 +1089,6 @@ def generate_mxp_graph(model_name, activations, stats, first_node_name, last_nod
             break
 
     unsigned_network_inputs = input_type == np.uint8
-
-    if CVI_1x1:
-        network = mxp_gemm_to_conv(network)
 
     network = mxp_set_replay(network, io_info)
     network = mxp_set_cvi(network)

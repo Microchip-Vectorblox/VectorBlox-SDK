@@ -26,7 +26,7 @@ omz_downloader --name ssd_mobilenet_v1_coco
 wget https://raw.githubusercontent.com/openvinotoolkit/openvino/master/tools/mo/openvino/tools/mo/front/tf/ssd_v2_support.json
 
 echo "Running Model Optimizer..."
-# model details @ https://github.com/opencv/open_model_zoo/blob/2021.3/models/public/ssd_mobilenet_v1_coco/ssd_mobilenet_v1_coco.md
+# model details @ https://github.com/openvinotoolkit/open_model_zoo/tree/2021.4.2/models/public/ssd_mobilenet_v1_coco/
 mo --input_model=public/ssd_mobilenet_v1_coco/ssd_mobilenet_v1_coco_2018_01_28/frozen_inference_graph.pb \
 --framework tf \
 --input_shape [1,300,300,3] \

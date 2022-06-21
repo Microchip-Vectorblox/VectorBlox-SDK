@@ -25,7 +25,7 @@ echo "Downloading resnet-50-tf..."
 wget -x https://download.01.org/opencv/public_models/012020/resnet-50-tf/resnet_v1-50.pb
 
 echo "Running Model Optimizer..."
-# model details @ https://github.com/openvinotoolkit/open_model_zoo/blob/2021.3/models/public/resnet-50-tf/resnet-50-tf.md
+# model details @ https://github.com/openvinotoolkit/open_model_zoo/tree/2021.4.2/models/public/resnet-50-tf/
 mo --input_model download.01.org/opencv/public_models/012020/resnet-50-tf/resnet_v1-50.pb \
 --input_shape=[1,224,224,3] \
 --mean_values=[123.68,116.78,103.94] \

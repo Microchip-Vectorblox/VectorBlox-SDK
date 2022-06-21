@@ -25,7 +25,7 @@ echo "Downloading torchvision_googlenet..."
 python ../../torchvision_to_onnx.py googlenet
 
 echo "Running Model Optimizer..."
-# model details @ https://pytorch.org/docs/stable/torchvision/models.html
+# model details @ https://pytorch.org/vision/0.9/models.html#torchvision.models.googlenet
 mo --input_model googlenet.onnx \
 --reverse_input_channels \
 --mean_values [123.675,116.28,103.53] \

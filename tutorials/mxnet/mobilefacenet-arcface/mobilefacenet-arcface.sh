@@ -31,7 +31,7 @@ unzip model-y1.zip
 cd ..
 
 echo "Running Model Optimizer..."
-# model details @ https://github.com/openvinotoolkit/open_model_zoo/blob/master/models/public/face-recognition-mobilefacenet-arcface/model.yml
+# model details @ https://github.com/deepinsight/insightface
 mo --input_model=arcface/model-y1-test2/model-0000.params \
 --reverse_input_channels \
 --input_shape=[1,3,112,112] \

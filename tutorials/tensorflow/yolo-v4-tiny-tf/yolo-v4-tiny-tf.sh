@@ -29,7 +29,7 @@ python $DOWNLOAD_DIR/keras-YOLOv3-model-set/tools/model_converter/convert.py $DO
 python $DOWNLOAD_DIR/keras-YOLOv3-model-set/tools/model_converter/keras_to_tensorflow.py --input_model=yolo-v4-tiny.h5 --output_model=yolo-v4-tiny.pb
 
 echo "Running Model Optimizer..."
-# model details @ https://github.com/openvinotoolkit/open_model_zoo/blob/2021.4/models/public/yolo-v4-tiny-tf/yolo-v4-tiny-tf.md
+# model details @ https://github.com/openvinotoolkit/open_model_zoo/tree/2021.4.2/models/public/yolo-v4-tiny-tf/
 mo --input_model=yolo-v4-tiny.pb \
 --framework tf \
 --input_shape [1,416,416,3] \

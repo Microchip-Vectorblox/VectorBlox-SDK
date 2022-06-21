@@ -25,7 +25,7 @@ echo "Downloading mobilenet-v1-0.25-128..."
 omz_downloader --name mobilenet-v1-0.25-128
 
 echo "Running Model Optimizer..."
-# model details @ https://github.com/opencv/open_model_zoo/blob/2021.3/models/public/mobilenet-v1-0.25-128/mobilenet-v1-0.25-128.md
+# model details @ https://github.com/openvinotoolkit/open_model_zoo/tree/2021.4.2/models/public/mobilenet-v1-0.25-128/
 mo --input_model public/mobilenet-v1-0.25-128/mobilenet_v1_0.25_128_frozen.pb \
 --input_shape [1,128,128,3] \
 --reverse_input_channels \

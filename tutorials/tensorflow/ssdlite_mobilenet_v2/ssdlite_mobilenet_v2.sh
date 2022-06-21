@@ -26,7 +26,7 @@ omz_downloader --name ssdlite_mobilenet_v2
 wget https://raw.githubusercontent.com/openvinotoolkit/openvino/master/tools/mo/openvino/tools/mo/front/tf/ssd_v2_support.json
 
 echo "Running Model Optimizer..."
-# model details @ https://github.com/openvinotoolkit/open_model_zoo/blob/2021.3/models/public/ssdlite_mobilenet_v2/ssdlite_mobilenet_v2.md
+# model details @ https://github.com/openvinotoolkit/open_model_zoo/tree/2021.4.2/models/public/ssdlite_mobilenet_v2/
 mo --input_model public/ssdlite_mobilenet_v2/ssdlite_mobilenet_v2_coco_2018_05_09/frozen_inference_graph.pb \
 --framework tf \
 --input_shape [1,300,300,3] \

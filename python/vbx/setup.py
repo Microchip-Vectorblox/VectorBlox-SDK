@@ -3,9 +3,9 @@ import setuptools
 
 setuptools.setup(
     name="vbx",
-    version="0.0.1",
-    author="Joel Vandergriendt",
-    author_email="joel.vandergriendt@microchip.com",
+    version="1.3.3",
+    author="Joe Edwards",
+    author_email="joe.edwards@microchip.com",
     description="Python wrapper for vbx cnn simulator",
     install_requires=["onnx==1.9.0",
                       "onnxruntime==1.8.0",

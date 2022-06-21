@@ -25,7 +25,7 @@ echo "Downloading vehicle-license-plate-detection-barrier-0123..."
 omz_downloader --name vehicle-license-plate-detection-barrier-0123
 
 echo "Running Model Optimizer..."
-# model details @ https://github.com/openvinotoolkit/open_model_zoo/blob/master/models/public/
+# model details @ https://github.com/openvinotoolkit/open_model_zoo/tree/2021.4.2/models/public/vehicle-license-plate-detection-barrier-0123
 mo --input_model=public/vehicle-license-plate-detection-barrier-0123/model/model.pb.frozen \
 --framework tf \
 --input_shape [1,256,256,3] \

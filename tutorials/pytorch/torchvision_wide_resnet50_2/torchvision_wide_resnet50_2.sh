@@ -25,7 +25,7 @@ echo "Downloading torchvision_wide_resnet50_2..."
 python ../../torchvision_to_onnx.py wide_resnet50_2
 
 echo "Running Model Optimizer..."
-# model details @ https://pytorch.org/docs/stable/torchvision/models.html
+# model details @ https://pytorch.org/vision/0.9/models.html#torchvision.models.wide_resnet50_2
 mo --input_model wide_resnet50_2.onnx \
 --reverse_input_channels \
 --mean_values [123.675,116.28,103.53] \

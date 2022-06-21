@@ -25,7 +25,7 @@ echo "Downloading squeezenet1.0..."
 omz_downloader --name squeezenet1.0
 
 echo "Running Model Optimizer..."
-# model details @ https://github.com/openvinotoolkit/open_model_zoo/blob/2021.3/models/public/squeezenet1.0/squeezenet1.0.md
+# model details @ https://github.com/openvinotoolkit/open_model_zoo/tree/2021.4.2/models/public/squeezenet1.0/
 mo --input_model public/squeezenet1.0/squeezenet1.0.caffemodel \
 --mean_values [104,117,123] \
 --static_shape \

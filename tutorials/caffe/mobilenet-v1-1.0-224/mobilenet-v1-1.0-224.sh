@@ -25,7 +25,7 @@ echo "Downloading mobilenet-v1-1.0-224..."
 omz_downloader --name mobilenet-v1-1.0-224
 
 echo "Running Model Optimizer..."
-# model details @ https://github.com/opencv/open_model_zoo/blob/2021.3/models/public/mobilenet-v1-1.0-224/mobilenet-v1-1.0-224.md
+# model details @ https://github.com/openvinotoolkit/open_model_zoo/tree/2021.4.2/models/public/mobilenet-v1-1.0-224
 mo --input_model public/mobilenet-v1-1.0-224/mobilenet-v1-1.0-224.caffemodel \
 --mean_values [103.94,116.78,123.68] \
 --scale_values [58.82] \

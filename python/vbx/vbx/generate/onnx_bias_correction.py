@@ -75,14 +75,14 @@ def collect_inputs(samples_folder, samples_count):
     return inputs
 
 
-def get_previous_weighted_layer_output_ids(js, output_id):
+def get_previous_weighted_layer_output_ids(js_layers, output_id):
     previous_weighted_output_ids = []
-    layers = [l for l in js['layers'] if l['output_id'] == output_id]
+    layers = [l for l in js_layers if l['output_id'] == output_id]
     for layer in layers:
         if is_weighted_layer(layer):
             previous_weighted_output_ids += [layer['output_id']]
         else:
-            previous_weighted_output_ids += get_previous_weighted_layer_output_ids(js, layer['input_id'])
+            previous_weighted_output_ids += get_previous_weighted_layer_output_ids(js_layers, layer['input_id'])
     return previous_weighted_output_ids
 
 
@@ -90,12 +90,18 @@ def is_weighted_layer(layer):
     return (layer['op_type'] in ['Conv', 'Gemm']) or (layer['op_type'] == "Identity" and len(layer['sublayers']) and layer['sublayers'][-1]['op_type'] == 'Add')
 
 
-def jslayers_to_adjust(js):
-    _, output_ids = get_io_ids(js)
+def last_weighted_layer_output_ids(js_layers):
+    _, output_ids = get_io_ids(js_layers)
 
-    ignored_output_ids = []
+    last_weighted_layer_output_ids = []
     for output_id in output_ids:
-        ignored_output_ids += get_previous_weighted_layer_output_ids(js, output_id)
+        last_weighted_layer_output_ids += get_previous_weighted_layer_output_ids(js_layers, output_id)
+
+    return last_weighted_layer_output_ids
+
+
+def jslayers_to_adjust(js):
+    ignored_output_ids = last_weighted_layer_output_ids(js['layers'])
 
     layers = []
     for l, layer in enumerate(js['layers']):
@@ -109,13 +115,13 @@ def jslayers_to_adjust(js):
     return layers
 
 
-def get_io_ids(js, subgraph_nodes=None):
+def get_io_ids(js_layers, subgraph_nodes=None):
     if subgraph_nodes:
         js_subgraph = []
         for s in subgraph_nodes:
-            js_subgraph.append(js['layers'][s])
+            js_subgraph.append(js_layers[s])
     else:
-        js_subgraph = js['layers']
+        js_subgraph = js_layers
 
     inputs = [l['input_id'] for l in js_subgraph]
     outputs = [l['output_id'] for l in js_subgraph]
@@ -243,7 +249,7 @@ def vnnx_bias_corrections(json_string, onnx_model, size_conf, io_info, output_by
     deleted_nodes = []
     for bl in bias_correction_nodes:
         current_nodes = get_current_subgraph_nodes(js, bias_correction_nodes, bl)
-        input_ids, output_ids = get_io_ids(js, current_nodes)
+        input_ids, output_ids = get_io_ids(js['layers'], current_nodes)
         required_inputs[bl] = input_ids
 
     for bl in bias_correction_nodes:
@@ -253,7 +259,7 @@ def vnnx_bias_corrections(json_string, onnx_model, size_conf, io_info, output_by
             bias_corrections = os.path.join(tmp_dir, 'bias_corrections.json')
 
         current_nodes = get_current_subgraph_nodes(js, bias_correction_nodes, bl)
-        input_ids, output_ids = get_io_ids(js, current_nodes)
+        input_ids, output_ids = get_io_ids(js['layers'], current_nodes)
         assert(len(output_ids) == 1)
         output_id = output_ids[0]
         js_node = js['layers'][current_nodes[-1]]
@@ -306,7 +312,7 @@ def vnnx_bias_corrections(json_string, onnx_model, size_conf, io_info, output_by
         for prev_bl in bias_correction_nodes[:bias_correction_nodes.index(bl)]:
             if prev_bl not in deleted_nodes:
                 prev_nodes = get_current_subgraph_nodes(js, bias_correction_nodes, prev_bl)
-                prev_input_ids, prev_output_ids = get_io_ids(js, prev_nodes)
+                prev_input_ids, prev_output_ids = get_io_ids(js['layers'], prev_nodes)
                 assert(len(prev_output_ids) == 1)
                 prev_output_id = prev_output_ids[0]
                 can_delete = True
@@ -325,7 +331,7 @@ def vnnx_bias_corrections(json_string, onnx_model, size_conf, io_info, output_by
     for bl in bias_correction_nodes:
         if bl not in deleted_nodes:
             current_nodes = get_current_subgraph_nodes(js, bias_correction_nodes, bl)
-            input_ids, output_ids = get_io_ids(js, current_nodes)
+            input_ids, output_ids = get_io_ids(js['layers'], current_nodes)
             assert(len(output_ids) == 1)
             output_id = output_ids[0]
             vnnx_remove_inputs(output_id, inputs, tmp_dir)

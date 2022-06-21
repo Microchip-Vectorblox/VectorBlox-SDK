@@ -25,7 +25,7 @@ echo "Downloading torchvision_resnext101_32x8d..."
 python ../../torchvision_to_onnx.py resnext101_32x8d
 
 echo "Running Model Optimizer..."
-# model details @ https://pytorch.org/docs/stable/torchvision/models.html
+# model details @ https://pytorch.org/vision/0.9/models.html#torchvision.models.resnext101_32x8d
 mo --input_model resnext101_32x8d.onnx \
 --reverse_input_channels \
 --mean_values [123.675,116.28,103.53] \

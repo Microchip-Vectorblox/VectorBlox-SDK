@@ -37,7 +37,7 @@ mv FaceDetector.onnx ../retinaface.mobilenet.onnx
 cd ..
 
 echo "Running Model Optimizer..."
-# model details @ 
+# model details @ https://github.com/biubug6/Pytorch_Retinaface
 mo --input_model retinaface.mobilenet.onnx \
 --input_shape [1,3,288,512] \
 --mean_values [104,117,123] \

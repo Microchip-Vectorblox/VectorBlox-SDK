@@ -537,6 +537,7 @@ def onnx_optimize_replace_gemm_width_conv(nodes, inits):
     cut_nodes = []
     for node in nodes:
         if node.op_type == 'Gemm':
+            w = get_tensor(inits, node.input[1])
             cut_nodes.append(node)
             nodes, inits = replace_gemm_with_conv(nodes, inits, node)
     for cut_node in cut_nodes:
