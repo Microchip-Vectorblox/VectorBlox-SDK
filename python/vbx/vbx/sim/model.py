@@ -55,6 +55,12 @@ class Model:
         self.input_lengths = [
             c_shim.model_get_input_length(self.model_bytes,i)
             for i in range(self.num_inputs)]
+        self.output_dims = [
+            c_shim.model_get_output_dims(self.model_bytes,i)
+            for i in range(self.num_outputs)]
+        self.input_dims = [
+            c_shim.model_get_input_dims(self.model_bytes,i)
+            for i in range(self.num_inputs)]
         self.output_dtypes = [
             c_shim.model_get_output_datatype(self.model_bytes,i)
             for i in range(self.num_outputs)]

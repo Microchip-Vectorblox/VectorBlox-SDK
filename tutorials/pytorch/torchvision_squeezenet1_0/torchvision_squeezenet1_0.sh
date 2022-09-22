@@ -37,6 +37,6 @@ echo "Generating VNNX for V1000 configuration..."
 generate_vnnx -x squeezenet1_0.xml  -c V1000 -f ../../sample_images -o torchvision_squeezenet1_0.vnnx --bias-correction
 
 echo "Running Simulation..."
-python $VBX_SDK/example/python/classifier.py torchvision_squeezenet1_0.vnnx ../../oreo.jpg --channels 3 --height 227 --width 227
+python $VBX_SDK/example/python/classifier.py torchvision_squeezenet1_0.vnnx ../../test_images/oreo.jpg
 
 deactivate

@@ -16,13 +16,37 @@ from .utils import *
 np.set_printoptions(suppress=True, precision=4, linewidth=120)
 
 
+patterns = [
+        ['StridedSlice', 'Convert', 'Divide', 'Concat', 'Multiply', 'Floor', 'Convert'],
+        ['StridedSlice', 'ShapeOf', 'Const', 'Const', 'Gather', 'Concat', 'Convert', 'Convert', 'Divide', 'Const', 'Add'],
+
+        ['ShapeOf', 'Const', 'Const', 'Gather', 'Const', 'Unsqueeze', 'Const', 'Concat'],
+
+        ['ShapeOf', 'Convert', 'Const', 'Multiply', 'Convert'],
+        ['ShapeOf', 'Convert', 'Multiply', 'Convert'],
+        ['ShapeOf', 'Convert', 'Divide', 'Const', 'Add'],
+        ]
+
+
+def dynamic_shape_pattern(vinodes, vidx):
+
+    for pattern in patterns:
+        if len(vinodes) >= (vidx+len(pattern)) and all([vinodes[vidx+i].type == pattern[i] for i in range(len(pattern))]):
+            return True, len(pattern)
+
+    return False, 0
+
+
 def trunc(arr, decimals=8):
     # return np.trunc(arr*10**decimals)/(10**decimals)
     return arr
 
 
 def as_int(x):
-    values = [int(_) for _ in x.split(',')]
+    try:
+        values = [int(_) for _ in x.split(',')]
+    except:
+        return [1] # x is () or something similar
 
     if len(values) == 1:
         return values[0]
@@ -147,9 +171,12 @@ def gen_varsplit(vinode, vinodes):
     return nodes, inits
 
 def gen_input(vinode):
-    nodes, inits = [], []
-    return nodes, inits
+    _, out = io(vinode)
+    return onnx.helper.make_tensor_value_info('{}'.format(out[0]), onnx.TensorProto.FLOAT, vinode.odims[0])
 
+def gen_output(vinode):
+    inp, _ = io(vinode)
+    return onnx.helper.make_tensor_value_info('{}'.format(inp[0]), onnx.TensorProto.FLOAT, vinode.idims[0])
 
 def gen_conv(vinode):
     nodes, inits = [], []
@@ -220,23 +247,7 @@ def auto_pad_calc(auto_pad,input_shape,kernel_size,stride,dilations):
     return [int(p) for p in pads]
         
 
-def gen_negative(vinode, vinodes):
-    nodes, inits = [], []
-    inputs, outputs = io(vinode)
-    neg_tensor = onnx.helper.make_tensor('neg_{}'.format(vinode.id),
-            onnx.TensorProto.FLOAT,
-            (1,),
-            [-1.])
-    inits.append(neg_tensor)
-    inputs = inputs + ['neg_{}'.format(vinode.id)]
-    node = onnx.helper.make_node('Mul',
-            inputs=inputs,
-            outputs=outputs,
-            name=str(vinode.id))
-    nodes.append(node)
-    return nodes, inits
         
-
 def gen_conv_10(vinode, bias_vinode, vinodes):
     nodes, inits = [], []
     inputs, outputs = io(vinode)
@@ -304,33 +315,46 @@ def gen_conv_10(vinode, bias_vinode, vinodes):
     return nodes, inits
 
 
-def gen_group_conv_scaleshift(vinode, bias_vinode, vinodes):
+def gen_group_conv_scaleshift(vinode, next_vinode, vinodes):
     nodes, inits = [], []
-    inputs, outputs = io(vinode)
+    node_inputs, node_outputs = io(vinode)
+    next_inputs, next_outputs = io(next_vinode)
 
-    node_id = vinode.id
-    if bias_vinode:
-        bias_inputs, bias_outputs = io(bias_vinode)
-        node_id = bias_vinode.id
+    assert(len(node_inputs) == 2)
+    assert(len(next_inputs) == 2)
 
-    buf = bias_outputs[0]
-    node_outputs = bias_outputs
-
-    assert(len(inputs) == 2)
-    constant_input = [is_constant(vinodes[int(i.split(':')[0])], vinodes) for i in inputs]
+    constant_input = [is_constant(vinodes[int(i.split(':')[0])], vinodes) for i in node_inputs]
     if constant_input[0]:
-        weights = vinodes[int(inputs[0].split(':')[0])]
-        inputs = inputs[1:]
-        idims = vinode.idims[1]
+        node_weights = vinodes[int(node_inputs[0].split(':')[0])]
+        inputs = node_inputs[1:]
+        node_idims = vinode.idims[1]
     elif constant_input[1]:
-        weights = vinodes[int(inputs[1].split(':')[0])]
-        inputs = inputs[:-1]
-        idims = vinode.idims[0]
-    inputs = inputs + ['W{}'.format(node_id)]
+        node_weights = vinodes[int(node_inputs[1].split(':')[0])]
+        inputs = node_inputs[:-1]
+        node_idims = vinode.idims[0]
 
-    if bias_vinode:
-        biases = vinodes[int(bias_inputs[1].split(':')[0])]
-        inputs += ['b{}'.format(node_id)]
+    constant_input = [is_constant(vinodes[int(i.split(':')[0])], vinodes) for i in next_inputs]
+    if constant_input[0]:
+        next_weights = vinodes[int(next_inputs[0].split(':')[0])]
+        next_idims = next_vinode.idims[1]
+    elif constant_input[1]:
+        next_weights = vinodes[int(next_inputs[1].split(':')[0])]
+        next_idims = next_vinode.idims[0]
+
+    if vinode.type == 'Multiply':
+        idims = node_idims
+        weights = node_weights
+        biases = next_weights
+        negate_biases = next_vinode.type == 'Subtract'
+        scale_biases = False
+    else:
+        idims = next_idims
+        weights = next_weights
+        biases = node_weights
+        negate_biases = vinode.type == 'Subtract'
+        scale_biases = True
+
+    inputs += ['W{}'.format(next_vinode.id), 'b{}'.format(next_vinode.id)]
 
     kernels = idims[1]
     kernel_shape = [kernels,1,1,1]
@@ -340,36 +364,43 @@ def gen_group_conv_scaleshift(vinode, bias_vinode, vinodes):
         w = weights.data['arr'].tolist()
     else:
         w = [weights.data['arr'] for _ in range(kernels)]
+
     if biases_shape[1] == kernels:
         b = biases.data['arr'].tolist()
+        if scale_biases:
+            b = [b_*w_ for (b_,w_) in zip(b,w)]
+        if negate_biases:
+            b = [_ * -1.0 for _ in b]
     else:
         b = [biases.data['arr'] for _ in range(kernels)]
+        if scale_biases:
+            b = [b_*w_ for (b_,w_) in zip(b,w)]
+        if negate_biases:
+            b = [_ * -1.0 for _ in b]
 
     node = onnx.helper.make_node(
         'Conv',
         inputs = inputs,
-        outputs = node_outputs,
+        outputs = next_outputs,
         group = kernels,
         kernel_shape = [1,1],
-        name = str(node_id),
+        name = str(next_vinode.id),
     )
     nodes.append(node)
 
-    if weights:
-        tensor = onnx.helper.make_tensor('W{}'.format(node_id),
-                onnx.TensorProto.FLOAT,
-                kernel_shape,
-                w,
-                )
-        inits.append(tensor)
+    tensor = onnx.helper.make_tensor(inputs[1],
+            onnx.TensorProto.FLOAT,
+            kernel_shape,
+            w,
+            )
+    inits.append(tensor)
 
-    if bias_vinode and biases:
-        tensor = onnx.helper.make_tensor('b{}'.format(node_id),
-                onnx.TensorProto.FLOAT,
-                [kernels],
-                b,
-                )
-        inits.append(tensor)
+    tensor = onnx.helper.make_tensor(inputs[2],
+            onnx.TensorProto.FLOAT,
+            [kernels],
+            b,
+            )
+    inits.append(tensor)
 
     return nodes, inits
 
@@ -1818,6 +1849,213 @@ def gen_depth_to_space(vinode, vinodes):
     return nodes, inits
 
 
+def gen_subtract(vinode, vinodes):
+    nodes, inits = [], []
+    inputs, outputs = io(vinode)
+    name = str(vinode.id)
+    _buf = name + '_mulneg'
+
+
+    is_const = []
+    for input in inputs:
+        input = input.split(':')[0]
+        input_vinode = [_ for _ in vinodes if str(_.id) == input][0]
+        is_const.append(is_constant(input_vinode, vinodes))
+
+
+    if is_const[1]: # 2nd input is const
+        data_shape = as_int(vinodes[int(inputs[1].split(':')[0])].data['shape'])[1:]
+        data = vinodes[int(inputs[1].split(':')[0])].data['arr'].tolist()
+        data = [d * -1.0 for d in data]
+        inputs = inputs[:-1] + ['b{}'.format(vinode.id)]
+
+        node = onnx.helper.make_node(
+            'Add',
+            inputs=inputs,
+            outputs=outputs,
+            name=str(vinode.id),
+        )
+        nodes.append(node)
+
+        tensor = onnx.helper.make_tensor('b{}'.format(vinode.id),
+                onnx.TensorProto.FLOAT,
+                data_shape,
+                data,
+                )
+        inits.append(tensor)
+    else: # 2nd input is non-const
+        neg_tensor = onnx.helper.make_tensor('neg_{}'.format(vinode.id),
+                onnx.TensorProto.FLOAT,
+                (1,),
+                [-1.]
+                )
+        inits.append(neg_tensor)
+
+        mul_inputs = [inputs[1]] + ['neg_{}'.format(vinode.id)]
+        mul_outputs = [_buf]
+        node = onnx.helper.make_node(
+            'Mul',
+            inputs=mul_inputs,
+            outputs=mul_outputs,
+            name=inputs[1].split(':')[0]
+        )
+        nodes.append(node)
+
+        add_inputs = [inputs[0]] + mul_outputs
+        node = onnx.helper.make_node(
+            'Sum',
+            inputs=add_inputs,
+            outputs=outputs,
+            name=str(vinode.id),
+        )
+        nodes.append(node)
+
+    return nodes, inits
+
+
+def gen_divide(vinode, vinodes):
+    nodes, inits = [], []
+    inputs, outputs = io(vinode)
+    
+    is_const = []
+    for input in inputs:
+        input = input.split(':')[0]
+        input_vinode = [_ for _ in vinodes if str(_.id) == input][0]
+        is_const.append(is_constant(input_vinode, vinodes))
+
+    if is_const[1]: # 2nd input is const
+        data_shape = as_int(vinodes[int(inputs[1].split(':')[0])].data['shape'])[1:]
+        data = vinodes[int(inputs[1].split(':')[0])].data['arr'].tolist()
+        data = 1.0/data
+        inputs = inputs[:-1] + ['b{}'.format(vinode.id)]
+
+        node = onnx.helper.make_node(
+            'Mul',
+            inputs=inputs,
+            outputs=outputs,
+            name=str(vinode.id),
+        )
+        nodes.append(node)
+
+        tensor = onnx.helper.make_tensor('b{}'.format(vinode.id),
+                onnx.TensorProto.FLOAT,
+                data_shape,
+                data,
+                )
+        inits.append(tensor)
+    else: # 2nd input is non-const
+        raise NotImplementedError('Non-const {} not implemented'.format(vinode.type))
+
+    return nodes, inits
+
+
+def gen_maximum(vinode, vinodes):
+    nodes, inits = [], []
+    inputs, outputs = io(vinode)
+
+    is_const = False
+    for input in inputs:
+        input = input.split(':')[0]
+        input_vinode = [_ for _ in vinodes if str(_.id) == input][0]
+        if is_constant(input_vinode, vinodes):
+            is_const = True
+            break
+
+    if not is_const:
+        node = onnx.helper.make_node(
+            'Max',
+            inputs=inputs,
+            outputs=outputs,
+            name=str(vinode.id)
+        )
+        nodes.append(node)
+    else: 
+        raise NotImplementedError('Const {} not implemented'.format(vinode.type))
+
+    return nodes, inits
+
+
+def gen_minimum(vinode, vinodes):
+    nodes, inits = [], []
+    inputs, outputs = io(vinode)
+    
+    is_const = False
+    for input in inputs:
+        input = input.split(':')[0]
+        input_vinode = [_ for _ in vinodes if str(_.id) == input][0]
+        if is_constant(input_vinode, vinodes):
+            is_const = True
+            break
+
+    if not is_const:
+        node = onnx.helper.make_node(
+            'Min',
+            inputs=inputs,
+            outputs=outputs,
+            name=str(vinode.id)
+        )
+        nodes.append(node)
+    else: 
+        raise NotImplementedError('Const {} not implemented'.format(vinode.type))
+
+    return nodes, inits
+
+def gen_equal(vinode, vinodes):
+    nodes, inits = [], []
+    inputs, outputs = io(vinode)
+
+    node = onnx.helper.make_node(
+        'Equal',
+        inputs=inputs,
+        outputs=outputs,
+        name=str(vinode.id)
+    )
+    nodes.append(node)
+
+    return nodes, inits
+
+def gen_greater(vinode, vinodes):
+    nodes, inits = [], []
+    inputs, outputs = io(vinode)
+
+    node = onnx.helper.make_node(
+        'Greater',
+        inputs=inputs,
+        outputs=outputs,
+        name=str(vinode.id)
+    )
+    nodes.append(node)
+
+    return nodes, inits
+
+def gen_less(vinode, vinodes):
+    nodes, inits = [], []
+    inputs, outputs = io(vinode)
+
+    node = onnx.helper.make_node(
+        'Less',
+        inputs=inputs,
+        outputs=outputs,
+        name=str(vinode.id)
+    )
+    nodes.append(node)
+
+    return nodes, inits
+
+def gen_exp(vinode, vinodes):
+    nodes, inits = [], []
+    inputs, outputs = io(vinode)
+
+    node = onnx.helper.make_node(
+        'Exp',
+        inputs=inputs,
+        outputs=outputs,
+        name=str(vinode.id)
+    )
+    nodes.append(node)
+
+    return nodes, inits
+
 def is_constant(vinode, vinodes):
     if vinode.type in ['ShapeOf', 'Const']:
         return True
@@ -1831,28 +2069,24 @@ def is_constant(vinode, vinodes):
 def gen_graph_io(vinodes, nodes):
     inputs = []
     outputs = []
-    
-    for n in nodes:
-        previous_nodes = onnx_helper.get_previous_nodes(nodes, n)
-        if len(previous_nodes) == 0:
-            #is input node
-            vinode = one_elem([vi for vi in vinodes if str(vi.id) == n.name])
-            if vinode.type == 'Add':
-                #sometimes the node is named after the biasing vinode after it
-                #so we need to fine that actual node before it.
-                possible_vinode = [vi for vi in vinodes if len(vi._to) and vi.id == vinode._from[0]]
-                if len(possible_vinode)!=0:
-                    vinode = one_elem(possible_vinode)
 
-            #TODO Handle more than one input on an input node.
+    input_vinodes = [] # assumption: input nodes in openvino are always in the beginning of the openvino .xml
+    vn_idx = 0
+    vn = vinodes[vn_idx]
+    while vn.type == 'Parameter':
+        input_vinodes.append(vn)
+        vn_idx += 1
+        vn = vinodes[vn_idx]
+
+    for n in nodes:
+        for input in n.input:
             try:
-                constant_inputs = [is_constant(vinodes[int(i.split(':')[0])], vinodes) for i in io(vinode)[0]]
-                shape = vinode.idims[0]
-                if constant_inputs[0]:
-                    shape = vinode.idims[1]
+                input_id = int(input.split(':')[0])
+                if input_id < len(input_vinodes):
+                    shape = input_vinodes[input_id].odims[0] 
+                    inputs.append(onnx.helper.make_tensor_value_info('{}'.format(input), onnx.TensorProto.FLOAT, shape))
             except:
-                shape = vinode.odims[0]
-            inputs.append(onnx.helper.make_tensor_value_info('{}'.format(n.input[0]), onnx.TensorProto.FLOAT, shape))
+                continue
         next_nodes = []
         for no in n.output:
             next_nodes.extend(onnx_helper.get_node_inputs(nodes,no))
@@ -1868,20 +2102,41 @@ def gen_graph_io(vinodes, nodes):
 def gen_onnx(vinodes):
     graph_nodes = []
     graph_inits = []
+    graph_inputs = []
+    graph_outputs = []
 
     prev_vinode = None
     vidx = 0
     while vidx < len(vinodes):
+        is_skippable_pattern, pattern_len = dynamic_shape_pattern(vinodes, vidx)
+        if is_skippable_pattern:
+            vidx += pattern_len
+            continue
+
         vinode = vinodes[vidx]
         if vidx+1 < len(vinodes):
             next_vinode = vinodes[vidx+1]
         else:
             next_vinode = None
-        if vinode.type == 'Parameter':
-            nodes, inits = gen_input(vinode)
+
+        if vinode.type == 'Parameter': # Parameter means input
+            graph_input_vi = gen_input(vinode)
+            graph_inputs.append(graph_input_vi)
+            nodes, inits = [], []
+        elif vinode.type == 'Result': # Result means output node
+            graph_output_vi = gen_output(vinode)
+            graph_outputs.append(graph_output_vi)
+            nodes, inits = [],[]
+        elif vinode.type == 'StridedSlice':
+            raise NotImplementedError('{} not implemented'.format(vinode.type))
         elif vinode.type == 'PReLU':
             nodes, inits = gen_prelu_10(vinode, vinodes)
-        elif vinode.type in ['Result', 'ShapeOf', 'Convert', 'Range']:
+        elif vinode.type in ['Convert']:
+            if prev_vinode.type == 'Parameter':
+                nodes, inits = gen_identity(vinode)
+            else:
+                nodes, inits = [],[]
+        elif vinode.type in ['ShapeOf', 'Range']:
             nodes, inits = [],[]
         elif vinode.type == 'Gather':
             if is_constant(vinode, vinodes):
@@ -1895,35 +2150,38 @@ def gen_onnx(vinodes):
             continue
         elif vinode.type == 'Multiply':
             if len(vinodes) > vidx+2 and vinodes[vidx+1].type == 'Const' and vinodes[vidx+2].type == 'Add':
-                bias_vinode = vinodes[vidx+2]
+                next_vinode = vinodes[vidx+2]
                 vidx +=2
-                nodes, inits = gen_group_conv_scaleshift(vinode, bias_vinode, vinodes)
+                nodes, inits = gen_group_conv_scaleshift(vinode, next_vinode, vinodes)
             else:
                 nodes, inits = gen_multiply_10(vinode, vinodes)
         elif vinode.type == 'Add':
-            nodes, inits = gen_add_10(vinode, vinodes)
+            if len(vinodes) > vidx+2 and vinodes[vidx+1].type == 'Const' and vinodes[vidx+2].type == 'Multiply':
+                next_vinode = vinodes[vidx+2]
+                vidx +=2
+                nodes, inits = gen_group_conv_scaleshift(vinode, next_vinode, vinodes)
+            else:
+                nodes, inits = gen_add_10(vinode, vinodes)
         elif vinode.type == 'Convolution':
-            bias_vinode = None
+            next_vinode = None
             if len(vinodes) > vidx+2 and vinodes[vidx+1].type == 'Const' and vinodes[vidx+2].type == 'Add':
-                bias_vinode = vinodes[vidx+2]
+                next_vinode = vinodes[vidx+2]
                 vidx +=2
-            nodes, inits = gen_conv_10(vinode, bias_vinode, vinodes)
+            nodes, inits = gen_conv_10(vinode, next_vinode, vinodes)
         elif vinode.type == 'GroupConvolution':
-            bias_vinode = None
+            next_vinode = None
             if len(vinodes) > vidx+2 and vinodes[vidx+1].type == 'Const' and vinodes[vidx+2].type == 'Add':
-                bias_vinode = vinodes[vidx+2]
+                next_vinode = vinodes[vidx+2]
                 vidx +=2
-            nodes, inits = gen_group_conv_10(vinode, bias_vinode, vinodes)
+            nodes, inits = gen_group_conv_10(vinode, next_vinode, vinodes)
         elif vinode.type == 'MatMul':
-            bias_vinode = None
+            next_vinode = None
             if len(vinodes) > vidx+2 and vinodes[vidx+1].type == 'Const' and vinodes[vidx+2].type == 'Add':
-                bias_vinode = vinodes[vidx+2]
+                next_vinode = vinodes[vidx+2]
                 vidx +=2
-            nodes, inits = gen_matmul_10(vinode, bias_vinode, prev_vinode, vinodes)
+            nodes, inits = gen_matmul_10(vinode, next_vinode, prev_vinode, vinodes)
         elif vinode.type == 'ReLU':
             nodes, inits = gen_relu(vinode)
-        elif vinode.type == 'Negative':
-            nodes, inits = gen_negative(vinode, vinodes)
         elif vinode.type == 'Concat':
             if is_constant(vinode, vinodes):
                 nodes, inits = [],[]
@@ -1984,6 +2242,28 @@ def gen_onnx(vinodes):
             nodes, inits = gen_negative(vinode, vinodes)
         elif vinode.type == 'DepthToSpace':
             nodes, inits = gen_depth_to_space(vinode, vinodes)
+        elif vinode.type == 'Subtract':
+            if len(vinodes) > vidx+2 and vinodes[vidx+1].type == 'Const' and vinodes[vidx+2].type == 'Multiply':
+                next_vinode = vinodes[vidx+2]
+                vidx +=2
+                nodes, inits = gen_group_conv_scaleshift(vinode, next_vinode, vinodes)
+            else:
+                nodes, inits = gen_subtract(vinode, vinodes)
+        elif vinode.type == 'Maximum':
+            nodes, inits = gen_maximum(vinode, vinodes)
+        elif vinode.type == 'Minimum':
+            nodes, inits = gen_minimum(vinode, vinodes)
+        # TODO not supported yet
+        # elif vinode.type == 'Divide':
+        #     nodes, inits = gen_divide(vinode, vinodes)
+        # elif vinode.type == 'Equal':
+        #     nodes, inits = gen_equal(vinode, vinodes)
+        # elif vinode.type == 'Greater':
+        #     nodes, inits = gen_equal(vinode, vinodes)
+        # elif vinode.type == 'Less':
+        #     nodes, inits = gen_equal(vinode, vinodes)
+        # elif vinode.type == 'Exp':
+        #     nodes, inits = gen_exp(vinode, vinodes)
         else:
             raise NotImplementedError('{} not implemented'.format(vinode.type))
             continue
@@ -1991,7 +2271,7 @@ def gen_onnx(vinodes):
         vidx += 1
         graph_nodes += nodes
         graph_inits += inits
-    return graph_nodes, graph_inits
+    return graph_nodes, graph_inits, graph_inputs, graph_outputs
 
 
 def gen_pad_graph():
@@ -2052,9 +2332,9 @@ def gen_softmax_graph():
 
 
 def convert_openvino_xml_to_onnx(vinodes, graph_name, version):
-    assert(version == '10')
-    nodes, inits = gen_onnx(vinodes)
-    inputs, outputs = gen_graph_io(vinodes, nodes)
+    assert(version == '11')
+    nodes, inits, inputs, outputs = gen_onnx(vinodes)
+    # inputs, outputs = gen_graph_io(vinodes, nodes)
 
     for input in inputs:
         input.type.tensor_type.shape.dim[0].dim_param = "N"
@@ -2071,6 +2351,16 @@ def convert_openvino_xml_to_onnx(vinodes, graph_name, version):
 
     return graph
 
+def get_vino_to_onnx_io(vinodes, graph):
+    vino_2_onnx_names = {'inputs':{}, 'outputs':{}}
+    for i in graph.input:
+        inp_id = int(i.name.split(':')[0])
+        vino_2_onnx_names['inputs'][vinodes[inp_id].name] = {'onnx':i.name}
+    for o in graph.output:
+        out_id = int(o.name.split(':')[0])
+        vino_2_onnx_names['outputs'][vinodes[out_id].name] = {'onnx':o.name}
+
+    return vino_2_onnx_names
 
 def cut_after_node(nodes, cut):
     cut_nodes = []

@@ -36,6 +36,6 @@ echo "Generating VNNX for V1000 configuration..."
 generate_vnnx -x wide_resnet50_2.xml  -c V1000 -f ../../sample_images -o torchvision_wide_resnet50_2.vnnx
 
 echo "Running Simulation..."
-python $VBX_SDK/example/python/classifier.py torchvision_wide_resnet50_2.vnnx ../../oreo.jpg
+python $VBX_SDK/example/python/classifier.py torchvision_wide_resnet50_2.vnnx ../../test_images/oreo.jpg
 
 deactivate

@@ -66,6 +66,7 @@ typedef struct {
 	volatile uint32_t* ctrl_reg;
   int debug_print_ptr;
 #if defined(VBX_SOC_DRIVER) || defined(SPLASHKIT_PCIE)
+    int fd;
     uint8_t* dma_buffer;
     uint8_t* dma_buffer_end;
   size_t  dma_phys_trans_offset;
@@ -183,6 +184,23 @@ size_t model_get_output_length(const model_t* model,int output_index);
  */
 
 size_t model_get_input_length(const model_t* model,int input_index);
+
+/**
+ * Get dimensions of elements of an input buffer
+ * @param model The model to query
+ * @param index The index of the input to get the length of
+ * @return dimensions of in elements of input buffer
+ */
+int* model_get_input_dims(const model_t* model,int input_index);
+
+/**
+ * Get dimensions of elements of an output buffer
+ * @param model The model to query
+ * @param index The index of the output to get the length of
+ * @return dimensions of in elements of output buffer
+ */
+int* model_get_output_dims(const model_t* model,int output_index);
+
 /**
  * Get the datatype of an output buffer
  * @param model The model to query
@@ -265,7 +283,6 @@ void* model_get_test_input(const model_t* model,int input_index);
  */
 
 float model_get_output_scale_value(const model_t* model,int index);
-
 
 #ifdef __cplusplus
 }

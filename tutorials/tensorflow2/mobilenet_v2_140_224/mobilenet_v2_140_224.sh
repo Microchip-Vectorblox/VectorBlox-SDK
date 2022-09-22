@@ -39,6 +39,6 @@ echo "Generating VNNX for V1000 configuration..."
 generate_vnnx -x saved_model.xml  -c V1000 -f ../../sample_images -o mobilenet_v2_140_224.vnnx --bias-correction
 
 echo "Running Simulation..."
-python $VBX_SDK/example/python/classifier.py mobilenet_v2_140_224.vnnx ../../oreo.jpg
+python $VBX_SDK/example/python/classifier.py mobilenet_v2_140_224.vnnx ../../test_images/oreo.jpg
 
 deactivate

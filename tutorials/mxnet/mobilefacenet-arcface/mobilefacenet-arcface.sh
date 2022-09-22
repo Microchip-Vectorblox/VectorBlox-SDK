@@ -41,6 +41,6 @@ echo "Generating VNNX for V1000 configuration..."
 generate_vnnx -x model-0000.xml  -c V1000 -f ../../sample_images -o mobilefacenet-arcface.vnnx --bias-correction
 
 echo "Running Simulation..."
-python $VBX_SDK/example/python/face_compare.py mobilefacenet-arcface.vnnx ../../MattDamon0001_arcface.png ../../MattDamon0002_arcface.png --height 112 --width 112
+python $VBX_SDK/example/python/face_compare.py mobilefacenet-arcface.vnnx ../../test_images/MattDamon0001_arcface.jpg ../../test_images/MattDamon0002_arcface.jpg
 
 deactivate

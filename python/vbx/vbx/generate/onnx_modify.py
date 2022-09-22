@@ -101,7 +101,7 @@ def onnx_inject_scale_before_special(nodes, inits):
     for n, node in enumerate(nodes):
         if node.op_type in multipath_nodes or node.op_type in ['LRN', 'Softmax', 'Sigmoid']:
             prev = get_node_source(nodes, node.input[0])
-            if prev.op_type not in ['Split']:
+            if prev is None or prev.op_type not in ['Split']:
                 inputs = list(node.input)
                 for i, iname in enumerate(inputs):
                     buf = '{}_s{}'.format(iname, injected_nodes)
@@ -129,7 +129,8 @@ def onnx_inject_scale_after_special(nodes, inits):
     global injected_nodes
     nodes_to_inject = []
     for n, node in enumerate(nodes):
-        if node.op_type in ['LRN']:
+        next_nodes = get_node_inputs(nodes, node.output[0])
+        if len(next_nodes) and node.op_type in ['LRN']:
             output = node.output[0]
             buf = '{}_post_s{}'.format(output, injected_nodes)
             injected_nodes += 1
@@ -140,7 +141,6 @@ def onnx_inject_scale_after_special(nodes, inits):
 
             scale = onnx.helper.make_node('Mul', [output, wname], [buf], name=buf)
 
-            next_nodes = get_node_inputs(nodes, node.output[0])
             for next in next_nodes:
                 next.input[0] = buf
 
@@ -208,10 +208,15 @@ def onnx_inject_final_scale(nodes, inits, outputs):
 
 def onnx_inject_initial_identity(nodes, inputs):
     global injected_nodes
-    node = nodes[0]
-    if node.op_type not in subgraph_nodes:
-        iname = node.input[0]
-        buf = 'begin{}'.format(injected_nodes)
+
+    for input in inputs:
+        nnodes = get_node_inputs(nodes, input.name)
+        assert(len(nnodes)==1)
+        node=nnodes[0]
+
+        iname = input.name
+        buf = 'begin{}_{}'.format(injected_nodes,iname)
+ 
         injected_nodes += 1
 
         id = onnx.helper.make_node('Identity', [buf], [iname], name=buf)
@@ -220,10 +225,10 @@ def onnx_inject_initial_identity(nodes, inputs):
             idx = get_node_source_index(nodes, node.input[0]) + 1
             nodes = nodes[:idx] + [node] + nodes[idx:]
 
-
         for input in inputs:
             if input.name == iname:
                 input.name = buf
+
 
     return nodes, inputs
 
@@ -784,6 +789,70 @@ def onnx_optimize_remove_RGB2BGR(nodes, inits):
     return nodes, inits
 
 
+def onnx_optimize_remove_nhwc_input_transpose(nodes, inputs):
+
+    for input in inputs:
+        inodes = get_node_inputs(nodes, input.name)
+        assert(len(inodes) == 1)
+        node = inodes[0]
+        if node.op_type == 'Transpose' and get_attr(node, 'perm') == [0,3,1,2]:
+            # set node after tranpose to be the input
+            next_nodes = get_node_inputs(nodes, node.output[0])
+            assert(len(next_nodes) == 1)
+            next_nodes[0].input[0] = node.input[0]
+            nodes.remove(node)
+
+            # change input shape to transposed shape
+            channels = input.type.tensor_type.shape.dim[3].dim_value
+            height = input.type.tensor_type.shape.dim[1].dim_value
+            width = input.type.tensor_type.shape.dim[2].dim_value
+
+            input.type.tensor_type.shape.dim[1].dim_value = channels
+            input.type.tensor_type.shape.dim[2].dim_value = height
+            input.type.tensor_type.shape.dim[3].dim_value = width
+
+
+    return nodes, inputs
+
+
+def onnx_optimize_remove_nhwc_output_transpose(nodes, outputs):
+    for output in outputs:
+        node = get_node_source(nodes, output.name)
+        if node.op_type == 'Transpose' and get_attr(node, 'perm') == [0,2,3,1]:
+            # set node before tranpose to be the output
+            previous_nodes = get_previous_nodes(nodes, node)
+            assert(len(previous_nodes) == 1)
+            previous_nodes[0].output[0] = node.output[0]
+            nodes.remove(node)
+
+            # change output shape to transposed shape
+            channels = output.type.tensor_type.shape.dim[3].dim_value
+            height = output.type.tensor_type.shape.dim[1].dim_value
+            width = output.type.tensor_type.shape.dim[2].dim_value
+
+            output.type.tensor_type.shape.dim[1].dim_value = channels
+            output.type.tensor_type.shape.dim[2].dim_value = height
+            output.type.tensor_type.shape.dim[3].dim_value = width
+
+
+    return nodes, outputs
+
+
+def onnx_optimize_remove_input_identity(nodes, inputs):
+    for input in inputs:
+        inodes = get_node_inputs(nodes, input.name)
+        assert(len(inodes) == 1)
+        node = inodes[0]
+        if node.op_type == 'Identity':
+            # set node after tranpose to be the input
+            next_nodes = get_node_inputs(nodes, node.output[0])
+            assert(len(next_nodes) == 1)
+            next_nodes[0].input[0] = node.input[0]
+            nodes.remove(node)
+
+    return nodes, inputs
+
+
 
 def onnx_optimize_graph(model_src, model_dst, verbose=False):
     model = onnx.load(model_src)
@@ -792,6 +861,10 @@ def onnx_optimize_graph(model_src, model_dst, verbose=False):
     nodes, inits = graph.node, graph.initializer
 
     
+    nodes, inputs = onnx_optimize_remove_input_identity(nodes, inputs)
+    nodes, inputs = onnx_optimize_remove_nhwc_input_transpose(nodes, inputs)
+    nodes, outputs = onnx_optimize_remove_nhwc_output_transpose(nodes, outputs)
+
     nodes, inits = onnx_optimize_remove_RGB2BGR(nodes, inits)
     nodes, inits = onnx_optimize_replace_gemm_width_conv(nodes, inits)
     nodes = onnx_optimize_activations_up_reshape(nodes)

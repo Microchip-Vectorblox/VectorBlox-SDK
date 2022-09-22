@@ -9,8 +9,15 @@ from vbx.generate.openvino_infer import openvino_infer, get_model_input_shape as
 from vbx.generate.onnx_infer import onnx_infer, load_input
 from vbx.generate.onnx_helper import get_model_input_shape as get_onnx_input_shape
 
+
 def cosine_distance(arr0, arr1):
     return np.sum(arr0*arr1)/(np.sqrt(np.sum(arr0*arr0)) * np.sqrt(np.sum(arr1*arr1)))
+
+
+def get_vnnx_io_shapes(vnxx):
+    with open(vnxx, 'rb') as mf:
+        model = vbx.sim.Model(mf.read())
+    return model.input_dims[0], model.output_dims
 
 
 def vnnx_infer(vnnx_model, input_array):
@@ -33,9 +40,6 @@ if __name__ == "__main__":
     parser.add_argument('model')
     parser.add_argument('image1')
     parser.add_argument('image2')
-    parser.add_argument('--height', type=int, default=112, help='expected height of image')
-    parser.add_argument('--width', type=int, default=96, help='expected width of image')
-    parser.add_argument('--channels', type=int, default=3, help='number of channels of image')
     args = parser.parse_args()
     
     if not os.path.isfile(args.image1):
@@ -46,7 +50,7 @@ if __name__ == "__main__":
         os._exit(1)
 
     if args.model.endswith('.vnnx'):
-        input_shape = (args.channels, args.height, args.width)
+        input_shape, _ = get_vnnx_io_shapes(args.model)
 
         input_array = load_input(args.image1, 1., input_shape)
         image1_out = vnnx_infer(args.model,input_array)

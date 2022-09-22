@@ -96,9 +96,15 @@ def onnx_activations(model_name, input_array=None):
             input_array = np.zeros(shape,dtype=np.float32)+128
             inputs[session_input.name] = input_array
     else:
-        i0 = session.get_inputs()[0].name
-        inputs = {i0: input_array}
-    outputs = session.run([],inputs)
+        # i0 = session.get_inputs()[0].name
+        # inputs = {i0: input_array}
+        inputs = {}
+        for input in session.get_inputs():
+            if tuple(input.shape[1:]) == input_array.shape[1:]:
+                inputs[input.name] = input_array
+            else:
+                inputs[input.name] = np.random.randn(1, *input.shape[1:]).astype(np.float32)
+    outputs = session.run([], inputs)
 
     activations = {}
     for node, arr in zip(session.get_outputs(), outputs):
@@ -127,18 +133,24 @@ def onnx_activations(model_name, input_array=None):
 
 def onnx_activations_batched(model_name, input_array, batch=2, stats_only=False, histogram_dict={}):
     num_passes = int((input_array.shape[0] + batch-1) / batch)
-    if num_passes == 1:
+    if num_passes == 1 and stats_only==False:
         return onnx_activations(model_name, input_array)
 
     model_ = extend_model_outputs(onnx.load(model_name))
     session = onnxruntime.InferenceSession(model_.SerializeToString(), session_options)
-    i0 = session.get_inputs()[0].name
 
     activations = {}
     stats = {}
     
     for i in range(0, batch*num_passes, batch):
-        outputs = session.run([], {i0: input_array[i:i+batch]})
+        input_feed = {}
+        for input in session.get_inputs():
+            if tuple(input.shape[1:]) == input_array.shape[1:]:
+                input_feed[input.name] = input_array[i:i+batch]
+            else:
+                input_feed[input.name] = np.random.randn(batch, *input.shape[1:]).astype(np.float32) # TODO need to fix (was temp fix for gaze model)
+        outputs = session.run([], input_feed)
+        
         for out, arr in zip(session.get_outputs(), outputs):
             if stats_only:
                 reduce_axis = tuple((i for i in range(len(arr.shape)) if i != 1))
@@ -206,6 +218,45 @@ def onnx_infer(onnx_model, input_array):
         return [o.flatten() * sf for o,sf in zip(session.run([], {input_name: input_array}), output_scale_factors)]
     else:
         return [o.flatten() for o in session.run([], {input_name: input_array})]
+
+def onnx_infer_multi(onnx_model, input_feed, match_names=False):
+    onnxx = onnx.load(onnx_model)
+    session = onnxruntime.InferenceSession(onnxx.SerializeToString())
+    
+    out_names = [o.name for o in session.get_outputs()]
+    if match_names:
+        if onnx_model.endswith('.norm.onnx'):
+            key = 'norm'
+            io_names_json = onnx_model.replace('.norm.onnx', '.ionames.json')
+        elif onnx_model.endswith('.post.onnx'):
+            key = 'post'
+            io_names_json = onnx_model.replace('.post.onnx', '.ionames.json')
+        elif onnx_model.endswith('.onnx'):
+            key = 'onnx'
+            io_names_json = onnx_model.replace('.onnx', '.ionames.json')
+        with open(io_names_json) as fname:
+            io_names_dict = json.load(fname)
+        input_feed = {io_names_dict['inputs'][name][key]:val for name,val in input_feed.items()}
+
+        out_names = onnx_helper.get_model_output_xml_names(io_names_json, onnx_model)
+
+
+    if onnx_model.endswith('.post.onnx') or onnx_model.endswith('.norm.onnx'):
+        if onnx_model.endswith('.post.onnx'):
+            io = onnx_model.replace('.post.onnx', '.io.json')
+        else:
+            io = onnx_model.replace('.norm.onnx', '.io.json')
+        with open(io) as f:
+            io_dict = json.load(f)
+            output_scale_factors = io_dict['output_scale_factors']
+            input_scale_factors = io_dict['input_scale_factors']
+        for i,sf in zip(input_feed.items(),input_scale_factors): # NOTE TODO scale factors may need to be aligned correctly to proper io (?)
+            input_feed[i[0]] = i[1] / sf
+        outputs = [o.flatten() * sf for o,sf in zip(session.run([], input_feed), output_scale_factors)]
+    else:
+        outputs = [o.flatten() for o in session.run([], input_feed)]
+    
+    return {name:val for name,val in zip(out_names, outputs)}
 
 def onnx_infer_all(onnx_name, input_array):
     session = onnxruntime.InferenceSession(onnx_name, session_options)

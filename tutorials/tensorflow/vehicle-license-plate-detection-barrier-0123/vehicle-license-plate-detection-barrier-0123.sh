@@ -39,6 +39,6 @@ echo "Generating VNNX for V1000 configuration..."
 generate_vnnx -x model.pb.xml  -c V1000 -f ../../sample_images -o vehicle-license-plate-detection-barrier-0123.vnnx --bias-correction
 
 echo "Running Simulation..."
-python $VBX_SDK/example/python/vehicle.py vehicle-license-plate-detection-barrier-0123.vnnx ../../A0PQ76.jpg -p vehicle_priors.npy
+python $VBX_SDK/example/python/vehicle.py vehicle-license-plate-detection-barrier-0123.vnnx ../../test_images/A0PQ76.jpg -p vehicle_priors.npy
 
 deactivate

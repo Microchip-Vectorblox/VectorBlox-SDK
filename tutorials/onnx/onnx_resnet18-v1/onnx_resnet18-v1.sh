@@ -22,11 +22,12 @@ fi
 source $VBX_SDK/vbx_env/bin/activate
 
 echo "Downloading onnx_resnet18-v1..."
-wget https://media.githubusercontent.com/media/onnx/models/main/vision/classification/resnet/model/resnet18-v1-7.onnx
+wget --no-check-certificate https://media.githubusercontent.com/media/onnx/models/main/vision/classification/resnet/model/resnet18-v1-7.onnx
 
 echo "Running Model Optimizer..."
 # model details @ https://github.com/onnx/models/tree/main/vision/classification/resnet
 mo --input_model resnet18-v1-7.onnx \
+--input_shape [1,3,224,224] \
 --reverse_input_channels \
 --mean_values [123.675,116.28,103.53] \
 --scale_values [58.4,57.1,57.38] \
@@ -36,6 +37,6 @@ echo "Generating VNNX for V1000 configuration..."
 generate_vnnx -x resnet18-v1-7.xml  -c V1000 -f ../../sample_images -o onnx_resnet18-v1.vnnx
 
 echo "Running Simulation..."
-python $VBX_SDK/example/python/classifier.py onnx_resnet18-v1.vnnx ../../oreo.jpg
+python $VBX_SDK/example/python/classifier.py onnx_resnet18-v1.vnnx ../../test_images/oreo.jpg
 
 deactivate

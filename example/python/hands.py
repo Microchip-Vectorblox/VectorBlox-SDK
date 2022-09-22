@@ -620,6 +620,12 @@ def get_roi(detection, w, h, bp=False):
     return points
 
 
+def get_vnnx_io_shapes(vnxx):
+    with open(vnxx, 'rb') as mf:
+        model = vbx.sim.Model(mf.read())
+    return model.input_dims[0], model.output_dims
+
+
 def vnnx_infer(vnnx_model, input_array):
     model = vbx.sim.model.Model(open(vnnx_model,"rb").read())
 
@@ -707,7 +713,7 @@ def main():
         output_img = img.copy()
         for region_img_name, rect_points in cropped_ROIs:
             if args.landmark_model.endswith('.vnnx'):
-                input_shape = (3, args.landmark_size, args.landmark_size)
+                input_shape, _ = get_vnnx_io_shapes(args.model)
                 input_array = load_input(region_img_name, 1., input_shape)
                 outputs = vnnx_infer_landmarks(args.landmark_model, input_array)
 

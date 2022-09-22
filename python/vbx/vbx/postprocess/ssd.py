@@ -270,7 +270,58 @@ def detections(boxes, classes, priors, num_classes, size, confidence_threshold=0
                     })
 
     return valid
-        
+
+
+def reverse_prior(prior, shape, repeat, img_size):
+    img_h, img_w = img_size
+    h = shape[-2]
+    w = shape[-1]
+    step_h = img_h / h
+    step_w = img_w / w
+    offset = 0.5
+    center_x = offset * step_w
+    center_y = offset * step_h
+
+    height = []
+    width = []
+    for r in range(shape[1]//repeat):
+        xmin = prior[r][0]
+        ymin = prior[r][1]
+        xmax = prior[r][2]
+        ymax = prior[r][3]
+
+        # box_w = -2*(xmin * img_w - center_x)
+        # box_h = -2*(ymin * img_h - center_y)
+        box_w = 2*(xmax * img_w - center_x)
+        box_h = 2*(ymax * img_h - center_y)
+        width.append(box_w)
+        height.append(box_h)
+
+    return height, width
+
+
+def reverse_priors(priors_npy, raw_shapes, img_size):
+    params = []
+    priors = np.load(priors_npy).reshape((2,-1,4))[0]
+    sum_raw_shapes = np.sum([np.prod(_) for _ in raw_shapes])
+    assert(sum_raw_shapes % priors.shape[0] == 0)
+    repeat =  sum_raw_shapes // priors.shape[0]
+
+    idx = 0
+    for shape in raw_shapes:
+        inc = shape[-2]*shape[-1] * (shape[1]//repeat)
+        height, width = reverse_prior(priors[idx:idx+inc], shape, repeat, img_size)
+        param = {
+               'shape': shape,
+               'height': height,
+               'width' : width,
+               'offset' : 0.5,
+               'variance': [0.1,0.1,0.2,0.2]
+               }
+        params.append(param)
+        idx += inc
+    return params
+
 
 def get_priors(params, img_size=(300,300)):
     '''
@@ -296,6 +347,15 @@ def get_priors(params, img_size=(300,300)):
                 ymin = (center_y - box_h/2) / (img_h)
                 xmax = (center_x + box_w/2) / (img_w)
                 ymax = (center_y + box_h/2) / (img_h)
+
+                if xmin < 0.0:
+                    xmin = 0.0
+                if ymin < 0.0:
+                    ymin = 0.0
+                if xmax > 1.0:
+                    xmax = 1.0
+                if ymax > 1.0:
+                    ymax = 1.0
 
                 boxes.append([xmin, ymin, xmax, ymax])
     boxes = np.expand_dims(np.asarray(boxes), axis=0)

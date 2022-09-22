@@ -3,15 +3,15 @@ import argparse
 import os
 import numpy as np
 import cv2
-from  vbx.postprocess.blazeface import blazeface
+from vbx.postprocess.blazeface import blazeface
 
 from vbx.generate.openvino_infer import openvino_infer, get_model_input_shape as get_xml_input_shape
 from vbx.generate.onnx_infer import onnx_infer, load_input
 from vbx.generate.onnx_helper import get_model_input_shape as get_onnx_input_shape
 
+
 def plot_detections(img, detections, with_keypoints=True):
         output_img = img
-
 
         print("Found %d faces" % len(detections))
         for i in range(len(detections)):
@@ -33,6 +33,13 @@ def plot_detections(img, detections, with_keypoints=True):
 
         return output_img
 
+
+def get_vnnx_io_shapes(vnxx):
+    with open(vnxx, 'rb') as mf:
+        model = vbx.sim.Model(mf.read())
+    return model.input_dims[0], model.output_dims
+
+
 def vnnx_infer(vnnx_model, input_array):
     model = vbx.sim.model.Model(open(vnnx_model,"rb").read())
 
@@ -53,15 +60,12 @@ def main():
     parser.add_argument('image')
     parser.add_argument('-a', '--anchors', default='BlazeFace-PyTorch/anchors.npy')
     parser.add_argument('-s', '--size', type=int, default=128)
-    parser.add_argument('--height', type=int, default=128, help='expected height of image')
-    parser.add_argument('--width', type=int, default=128, help='expected width of image')
-    parser.add_argument('--channels', type=int, default=3, help='number of channels of image')
     parser.add_argument('-t', '--threshold', type=float, default=0.75)
 
     args = parser.parse_args()
 
     if args.model.endswith('.vnnx'):
-        input_shape = (args.channels, args.height, args.width)
+        input_shape, _ = get_vnnx_io_shapes(args.model)
         input_array = load_input(args.image, 1., input_shape)
         outputs = vnnx_infer(args.model, input_array)
     elif args.model.endswith('.xml'):

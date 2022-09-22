@@ -48,6 +48,6 @@ echo "Generating VNNX for V1000 configuration..."
 generate_vnnx -x retinaface.mobilenet.xml  -c V1000 -f ../../sample_images -o retinaface.mobilenet.vnnx --bias-correction
 
 echo "Running Simulation..."
-python $VBX_SDK/example/python/retinaface.py retinaface.mobilenet.vnnx ../../3faces.png  --width 512 --height 288
+python $VBX_SDK/example/python/retinaface.py retinaface.mobilenet.vnnx ../../test_images/3faces.jpg
 
 deactivate

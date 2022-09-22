@@ -38,6 +38,6 @@ echo "Generating VNNX for V1000 configuration..."
 generate_vnnx -x graph.pb.xml  -c V1000 -f ../../sample_images -o license-plate-recognition-barrier-0007.vnnx --bias-correction
 
 echo "Running Simulation..."
-python $VBX_SDK/example/python/plate_recognition.py license-plate-recognition-barrier-0007.vnnx ../../Sichuan.jpg -c chinese
+python $VBX_SDK/example/python/plate_recognition.py license-plate-recognition-barrier-0007.vnnx ../../test_images/Sichuan.jpg -c chinese
 
 deactivate

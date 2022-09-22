@@ -4,10 +4,11 @@ import os
 import matplotlib.pyplot as plt
 import posenetProc as pn
 
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('model')
-    parser.add_argument('-i', '--image', default='../../ski.273.481.png')
+    parser.add_argument('-i', '--image', default='../../test_images/ski.273.481.jpg')
     parser.add_argument('-o', '--out_dir', default='output')
     parser.add_argument('-n', '--out_name', default='output')
     args = parser.parse_args()

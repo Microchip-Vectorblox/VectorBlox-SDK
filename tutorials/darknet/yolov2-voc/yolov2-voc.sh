@@ -40,6 +40,6 @@ echo "Generating VNNX for V1000 configuration..."
 generate_vnnx -x yolov2-voc.xml  -c V1000 -f ../../sample_images -o yolov2-voc.vnnx
 
 echo "Running Simulation..."
-python $VBX_SDK/example/python/yoloInfer.py yolov2-voc.vnnx ../../dog.jpg -j yolov2-voc.json -l voc.names
+python $VBX_SDK/example/python/yoloInfer.py yolov2-voc.vnnx ../../test_images/dog.jpg -j yolov2-voc.json -l voc.names
 
 deactivate

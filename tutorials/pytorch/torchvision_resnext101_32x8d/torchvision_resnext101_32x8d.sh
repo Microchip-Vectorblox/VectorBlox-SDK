@@ -36,6 +36,6 @@ echo "Generating VNNX for V1000 configuration..."
 generate_vnnx -x resnext101_32x8d.xml  -c V1000 -f ../../sample_images -o torchvision_resnext101_32x8d.vnnx
 
 echo "Running Simulation..."
-python $VBX_SDK/example/python/classifier.py torchvision_resnext101_32x8d.vnnx ../../oreo.jpg
+python $VBX_SDK/example/python/classifier.py torchvision_resnext101_32x8d.vnnx ../../test_images/oreo.jpg
 
 deactivate

@@ -13,6 +13,7 @@ from vbx.generate.onnx_infer import onnx_infer
 
 GeometricOperationMetadata = namedtuple('GeometricOperationMetadata', ['type', 'parameters']) # matching openvino
 
+
 def preprocessImage(data):
     model_h = 273
     model_w = 481
@@ -89,6 +90,7 @@ def postProcess(prediction, meta, imageId=0):
             res.append(newRes)
     return res
 
+
 def vnnx_infer(model, input_array):
     with open(model,'rb') as mf:
         m = vbx.sim.Model(mf.read())
@@ -105,19 +107,31 @@ def vnnx_infer(model, input_array):
 
     return outputs
 
+
 def model_infer(model, input_array):
     if '.vnnx' in model:
         outputs = vnnx_infer(model, input_array)
+        prediction = {
+            'heatmap':outputs[1].reshape(1,17,18,31),
+            'offset':outputs[0].reshape(1,34,18,31),
+            'displacement_fwd':outputs[2].reshape(1,32,18,31),
+            'displacement_bwd':outputs[3].reshape(1,32,18,31)}
     elif '.xml' in model:
         outputs = openvino_infer(model, input_array)
+        prediction = {
+            'heatmap':outputs[2].reshape(1,17,18,31),
+            'offset':outputs[3].reshape(1,34,18,31),
+            'displacement_fwd':outputs[1].reshape(1,32,18,31),
+            'displacement_bwd':outputs[0].reshape(1,32,18,31)} 
     elif '.onnx' in model:
-        outputs = onnx_infer(model, input_array)
-    prediction = {
-        'heatmap':outputs[2].reshape(1,17,18,31),
-        'offset':outputs[3].reshape(1,34,18,31),
-        'displacement_fwd':outputs[1].reshape(1,32,18,31),
-        'displacement_bwd':outputs[0].reshape(1,32,18,31)}
+        outputs = onnx_infer(model, input_array)   
+        prediction = {
+            'heatmap':outputs[1].reshape(1,17,18,31),
+            'offset':outputs[0].reshape(1,34,18,31),
+            'displacement_fwd':outputs[2].reshape(1,32,18,31),
+            'displacement_bwd':outputs[3].reshape(1,32,18,31)}
     return prediction
+
 
 def drawRes(res):
     ax = plt.gca()

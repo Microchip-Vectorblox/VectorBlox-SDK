@@ -3,7 +3,7 @@ import setuptools
 
 setuptools.setup(
     name="vbx",
-    version="1.3.3",
+    version="1.4.0",
     author="Joe Edwards",
     author_email="joe.edwards@microchip.com",
     description="Python wrapper for vbx cnn simulator",

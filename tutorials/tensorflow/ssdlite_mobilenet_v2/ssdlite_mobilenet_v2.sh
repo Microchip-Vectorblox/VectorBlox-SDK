@@ -41,6 +41,6 @@ echo "Generating VNNX for V1000 configuration..."
 generate_vnnx -x frozen_inference_graph.xml  -c V1000 -f ../../sample_images -o ssdlite_mobilenet_v2.vnnx --bias-correction
 
 echo "Running Simulation..."
-python $VBX_SDK/example/python/ssdv2.py ssdlite_mobilenet_v2.vnnx ../../dog.jpg
+python $VBX_SDK/example/python/ssdv2.py ssdlite_mobilenet_v2.vnnx ../../test_images/dog.jpg
 
 deactivate

@@ -86,6 +86,22 @@ def openvino_infer(xml_model, input_array):
     outputs = [k for k in net.outputs.keys()]
     return [exec_net.requests[0].output_blobs[o].buffer.flatten() for o in outputs]
 
+def openvino_infer_multi(xml_model, input_feed):
+    weights=xml_model.replace('.xml', '.bin')
+    core = ie.IECore()
+    net = core.read_network(model=xml_model, weights=weights)
+    exec_net = core.load_network(network=net, device_name="CPU")
+
+    in_names = [k for k in net.input_info.keys()]
+    assert(all(name in in_names for name in input_feed.keys()))
+    for name in in_names:
+        exec_net.requests[0].input_blobs[name].buffer[:] = input_feed[name]
+
+    exec_net.requests[0].infer()
+    out_names = [k for k in net.outputs.keys()]
+    # return [exec_net.requests[0].output_blobs[o].buffer.flatten() for o in out_names]
+    return {name:exec_net.requests[0].output_blobs[name].buffer.flatten() for name in out_names}
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('xml')

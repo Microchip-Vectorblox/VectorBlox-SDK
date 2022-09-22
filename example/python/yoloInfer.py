@@ -10,9 +10,16 @@ from vbx.generate.openvino_infer import openvino_infer, get_model_input_shape as
 from vbx.generate.onnx_infer import onnx_infer, load_input
 from vbx.generate.onnx_helper import get_model_input_shape as get_onnx_input_shape
 from vbx.generate.utils import pad_input
+import vbx.sim
+
+
+def get_vnnx_io_shapes(vnxx):
+    with open(vnxx, 'rb') as mf:
+        model = vbx.sim.Model(mf.read())
+    return model.input_dims[0], model.output_dims
+
 
 def vnnx_infer(vnxx_model, modelInput):
-    import vbx.sim
     with open(vnxx_model, "rb") as mf:
         model = vbx.sim.Model(mf.read())
     flattened = (modelInput.flatten()).astype('uint8')
@@ -67,8 +74,7 @@ if __name__ == "__main__":
 
     if args.model.endswith('.vnnx'):
         if not(args.padding):
-            input_shape = [ioCfg[0]['channels']]
-            input_shape.extend(inputDims.tolist())
+            input_shape, _ = get_vnnx_io_shapes(args.model)
             input_array = load_input(args.image, 1., input_shape)  
         outputs = vnnx_infer(args.model, input_array)
 

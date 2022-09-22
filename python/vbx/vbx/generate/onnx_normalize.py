@@ -34,7 +34,7 @@ def get_previous_weighted(nodes, node): #grabs previous node with weights
             previous_weighted = [previous[0]]
     else:
         multi = []
-        if node.op_type == "Sum":
+        if node.op_type in ['Sum', 'Concat']:
             multi += [node]
         else:
             for p in previous:
@@ -144,6 +144,8 @@ def onnx_normalize_graph(nodes, inits, outputs, statistics, verbose=False):
         inputs = get_node_inputs(nodes, node.output[0])
         previous_weighted = get_previous_weighted(nodes, node)
         previous = get_previous_nodes(nodes, node)
+        if(len(previous)==1 and previous[0].op_type == 'Reshape'): # set previous to the node before Reshape (catch softmax, etc. before the reshape)
+            previous = get_previous_nodes(nodes, previous[0])
         if len(inputs):
             next = inputs[0]
         else:
@@ -173,7 +175,8 @@ def onnx_normalize_graph(nodes, inits, outputs, statistics, verbose=False):
             if node.output[0] in [o.name for o in outputs]:
                 if verbose:
                     print('last node')
-                current = prev
+                # current = prev
+                current = get_node_max(nodes,inits,statistics,node)
             elif next and next.op_type in ["Softmax", "Sigmoid"]:
                 current = np.ones(prev.shape) # denormalize
 

@@ -11,6 +11,12 @@ from vbx.generate.onnx_infer import onnx_infer, load_input
 from vbx.generate.onnx_helper import get_model_input_shape as get_onnx_input_shape
 
 
+def get_vnnx_io_shapes(vnxx):
+    with open(vnxx, 'rb') as mf:
+        model = vbx.sim.Model(mf.read())
+    return model.input_dims[0], model.output_dims
+
+
 def vnnx_infer(vnnx_model, input_array):
     model = vbx.sim.model.Model(open(vnnx_model,"rb").read())
 
@@ -29,15 +35,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('model')
     parser.add_argument('image')
-    parser.add_argument('--width', type=int, default=320)
-    parser.add_argument('--height', type=int, default=320)
-    parser.add_argument('--channels', type=int, default=3) 
     parser.add_argument('-t', '--threshold', type=float, default=0.8)
     parser.add_argument('-nms', '--nms-threshold', type=float, default=0.4)
 
     args = parser.parse_args()
     if '.vnnx' in args.model:
-        input_shape = (args.channels, args.height, args.width)
+        input_shape, _ = get_vnnx_io_shapes(args.model)
         input_array = load_input(args.image, 1., input_shape)
         outputs = vnnx_infer(args.model, input_array)
     elif '.xml' in args.model:
@@ -50,10 +53,10 @@ def main():
         input_array = load_input(args.image, 1., input_shape)  
         outputs = onnx_infer(args.model, input_array)
 
-    faces = vbx.postprocess.retinaface.retinaface(outputs, args.width, args.height,args.threshold, args.nms_threshold)
+    faces = vbx.postprocess.retinaface.retinaface(outputs, input_shape[2], input_shape[1],args.threshold, args.nms_threshold)
     img = cv2.imread(args.image)
-    if img.shape != (args.height,args.width,args.channels):
-        img = cv2.resize(img,(args.width,args.height))
+    if img.shape != input_shape:
+        img = cv2.resize(img,(input_shape[2],input_shape[1]))
 
     for f in faces:
         text = "{:.4f}".format(f['score'])

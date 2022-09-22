@@ -22,7 +22,7 @@ fi
 source $VBX_SDK/vbx_env/bin/activate
 
 echo "Downloading mnist..."
-wget https://media.githubusercontent.com/media/onnx/models/main/vision/classification/mnist/model/mnist-1.onnx -O mnist-1.onnx
+wget --no-check-certificate https://media.githubusercontent.com/media/onnx/models/main/vision/classification/mnist/model/mnist-1.onnx -O mnist-1.onnx
 
 echo "Running Model Optimizer..."
 # model details @ https://github.com/onnx/models/tree/main/vision/classification/mnist
@@ -34,6 +34,6 @@ echo "Generating VNNX for V1000 configuration..."
 generate_vnnx -x mnist-1.xml  -c V1000 -f ../../sample_images -o mnist.vnnx
 
 echo "Running Simulation..."
-python $VBX_SDK/example/python/classifier.py mnist.vnnx ../../seven.28.png --channels 1 --height 28 --width 28
+python $VBX_SDK/example/python/classifier.py mnist.vnnx ../../test_images/seven.28.jpg
 
 deactivate

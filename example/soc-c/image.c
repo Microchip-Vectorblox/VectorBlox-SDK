@@ -280,12 +280,19 @@ my_error_exit (j_common_ptr cinfo)
  */
 
 
-int read_JPEG_file (char * filename,int* width,int*height,unsigned char** image)
+int read_JPEG_file (char * filename,int* width,int*height,unsigned char** image, const int grayscale)
 {
   /* This struct contains the JPEG decompression parameters and pointers to
    * working space (which is allocated as needed by the JPEG library).
    */
   struct jpeg_decompress_struct cinfo;
+
+  cinfo.out_color_space = JCS_RGB;
+  if (grayscale) {
+	  cinfo.out_color_space = JCS_GRAYSCALE;
+  }
+  
+  /* cinfo.JCS_GRAYSCALE */
   /* We use our private extension JPEG error handler.
    * Note that this struct must live as long as the main JPEG parameter
    * struct, to avoid dangling-pointer problems.
@@ -453,10 +460,10 @@ void resize_image(uint8_t* image_in,int in_w,int in_h,
 	  int y1=h*in_h/out_h;
 	  int y2=y1+1;
 	  int y_alpha=w*in_h % out_h;
-	  int a = image_in[in_w*y1 + x1] *(out_w-x_alpha) /out_w + image_in[in_w*y1 + x2] *x_alpha/out_w ;
-	  int b = image_in[in_w*y2 + x1] *(out_w-x_alpha) /out_w + image_in[in_w*y2 + x2] *x_alpha/out_w ;
-	  int c = a *(out_h-y_alpha) /out_h + b *y_alpha/out_h ;
-	  image_out[h*out_w+w] = c;
+	  int a = image_in[in_w*y1 + x1] *(out_w-x_alpha) + image_in[in_w*y1 + x2] *x_alpha;
+	  int b = image_in[in_w*y2 + x1] *(out_w-x_alpha) + image_in[in_w*y2 + x2] *x_alpha;
+	  int c = a *(out_h-y_alpha) + b *y_alpha;
+	  image_out[h*out_w+w] = c / (out_w*out_h);
 	}
   }
 

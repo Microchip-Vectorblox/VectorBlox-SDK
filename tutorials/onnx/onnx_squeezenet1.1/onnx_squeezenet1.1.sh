@@ -22,7 +22,7 @@ fi
 source $VBX_SDK/vbx_env/bin/activate
 
 echo "Downloading onnx_squeezenet1.1..."
-wget https://media.githubusercontent.com/media/onnx/models/main/vision/classification/squeezenet/model/squeezenet1.1-7.onnx
+wget --no-check-certificate https://media.githubusercontent.com/media/onnx/models/main/vision/classification/squeezenet/model/squeezenet1.1-7.onnx
 
 echo "Running Model Optimizer..."
 # model details @ https://github.com/onnx/models/tree/main/vision/classification/squeezenet
@@ -36,6 +36,6 @@ echo "Generating VNNX for V1000 configuration..."
 generate_vnnx -x squeezenet1.1-7.xml  -c V1000 -f ../../sample_images -o onnx_squeezenet1.1.vnnx --bias-correction
 
 echo "Running Simulation..."
-python $VBX_SDK/example/python/classifier.py onnx_squeezenet1.1.vnnx ../../oreo.jpg
+python $VBX_SDK/example/python/classifier.py onnx_squeezenet1.1.vnnx ../../test_images/oreo.jpg
 
 deactivate

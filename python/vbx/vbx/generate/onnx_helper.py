@@ -193,3 +193,107 @@ def get_node_index(nodes, nname):
     return node
 
 
+
+def dump_onnx_io_names(json_file, graph):
+    with open(json_file, 'r') as f:
+        data = json.load(f)
+
+    onnxx = onnx.load(graph)
+    in_names = [k.name for k in onnxx.graph.input]
+    out_names = [k.name for k in onnxx.graph.output]
+
+    if '.opt.' in graph:
+        key = 'opt'
+    elif '.pre.' in graph:
+        key = 'pre'
+    elif '.norm.' in graph:
+        key = 'norm'
+    elif '.post.' in graph:
+        key = 'post'
+    for n,xml_name in enumerate(data['inputs'].keys()):
+        data['inputs'][xml_name][key] = in_names[n]
+    for n,xml_name in enumerate(data['outputs'].keys()):
+        data['outputs'][xml_name][key] = out_names[n]
+
+    with open(json_file, 'w') as f:
+        json.dump(data, f, indent=4)
+
+
+def get_model_output_xml_names(json_file, graph):
+    with open(json_file, 'r') as f:
+        data = json.load(f)
+
+    onnxx = onnx.load(graph)
+    out_names = [k.name for k in onnxx.graph.output]
+    if '.opt.' in graph:
+        key = 'opt'
+    elif '.pre.' in graph:
+        key = 'pre'
+    elif '.norm.' in graph:
+        key = 'norm'
+    elif '.post.' in graph:
+        key = 'post'
+    else:
+        key = 'onnx'
+
+    xml_names_in_order=[]
+    for name in out_names:
+        for xml_name,mapping in data['outputs'].items():
+            if mapping[key] == name:
+                xml_names_in_order.append(xml_name)
+                break
+        
+    return xml_names_in_order
+
+# TODO dump input_description, output_description names instead
+def dump_vnnx_io_names(ionames_json, vnnx_json_string):
+    with open(ionames_json, 'r') as f:
+        data = json.load(f)
+    vnnx_graph = json.loads(vnnx_json_string)
+
+    js_layers = vnnx_graph['layers']
+    inputs = [l['input_id'] for l in js_layers]
+    outputs = [l['output_id'] for l in js_layers]
+    output_indices = [n for n, l in enumerate(js_layers) if l['output_id'] not in inputs]
+    input_indices = [n for n, l in enumerate(js_layers) if l['input_id'] not in outputs]
+    graph_outputs = [(js_layers[i]['output_id'], js_layers[i]['output_description']) for i in output_indices]
+    graph_inputs = [(js_layers[i]['input_id'], js_layers[i]['input_description']) for i in input_indices]
+
+    # assumption: vnnx node input/output descriptions would be the same as names used in post.onnx
+    for inp_id, inp_name in graph_inputs:
+        for xml_name, mapping in data['inputs'].items():
+            if inp_name == mapping['post']:
+                data['inputs'][xml_name]['vnnx'] = inp_id
+                break
+    for out_id, out_name in graph_outputs:
+        for xml_name, mapping in data['outputs'].items():
+            if out_name == mapping['post']:
+                data['outputs'][xml_name]['vnnx'] = out_id
+                break
+
+    with open(ionames_json, 'w') as f:
+        json.dump(data, f, indent=4)
+
+# TODO adjust for input_description, output_description names instead
+def reorder_vnnx_input_arrays(sess_inputs, json_file):
+    with open(json_file, 'r') as f:
+        data = json.load(f)
+
+    vnnx_inputs = sorted(sess_inputs.items(), key = lambda x : data['inputs'][x[0]]['vnnx'])
+    vnnx_inputs = [v[1] for v in vnnx_inputs]
+
+    return vnnx_inputs
+
+
+def get_vnnx_output_xml_names(json_file):
+    with open(json_file, 'r') as f:
+        data = json.load(f)
+    vnnx_out_to_xml_name = dict()
+
+    for xml_name,mapping in data['outputs'].items():
+        vnnx_out_to_xml_name[mapping['vnnx']] = xml_name
+
+    vnnx_out_to_xml_name = sorted(vnnx_out_to_xml_name.items(), key = lambda x : vnnx_out_to_xml_name[x[0]])
+    out_names_in_order = [v[1] for v in vnnx_out_to_xml_name]
+    
+    return out_names_in_order

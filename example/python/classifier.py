@@ -11,6 +11,13 @@ from vbx.generate.openvino_infer import openvino_infer, get_model_input_shape as
 from vbx.generate.onnx_infer import onnx_infer, load_input
 from vbx.generate.onnx_helper import get_model_input_shape as get_onnx_input_shape
 
+
+def get_vnnx_io_shapes(vnxx):
+    with open(vnxx, 'rb') as mf:
+        model = vbx.sim.Model(mf.read())
+    return model.input_dims[0], model.output_dims
+
+
 def vnnx_infer(vnxx, input_array):
     with open(vnxx, 'rb') as mf:
         model = vbx.sim.Model(mf.read())
@@ -24,14 +31,12 @@ def vnnx_infer(vnxx, input_array):
 
     return [o.astype('float32') * sf for o,sf in zip(outputs, model.output_scale_factor)]
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('model')
     parser.add_argument('image')
     parser.add_argument('--output', '-o', default="output.png", help='output image to write labels to')
-    parser.add_argument('--height', type=int, default=224, help='expected height of image')
-    parser.add_argument('--width', type=int, default=224, help='expected width of image')
-    parser.add_argument('--channels', type=int, default=3, help='number of channels of image')
     args = parser.parse_args()
 
     if not os.path.isfile(args.image):
@@ -40,24 +45,24 @@ if __name__ == "__main__":
     img = cv2.imread(args.image)
 
     if args.model.endswith('.vnnx'):
-        input_shape = (args.channels, args.height, args.width)
+        input_shape, _ = get_vnnx_io_shapes(args.model)
         input_array = load_input(args.image, 1., input_shape)
-        outputs = vnnx_infer(args.model, input_array)[0]
+        output = vnnx_infer(args.model, input_array)[0]
     elif args.model.endswith('.xml'):
         weights=args.model.replace('.xml', '.bin')
         input_shape = get_xml_input_shape(args.model, weights)
         input_array = load_input(args.image, 1., input_shape)
-        outputs = openvino_infer(args.model, input_array)[0]
+        output = openvino_infer(args.model, input_array)[0]
     elif args.model.endswith('.onnx'):
         input_shape = get_onnx_input_shape(args.model)
         input_array = load_input(args.image, 1., input_shape)  
-        outputs = onnx_infer(args.model, input_array)[0]
+        output = onnx_infer(args.model, input_array)[0]
 
-    sorted_classes = classifier.topk(outputs)
+    sorted_classes = classifier.topk(output)
 
-    if len(outputs)==1001:
+    if len(output)==1001:
         classes = dataset.imagenet_classes_with_nul
-    elif len(outputs)==1000:
+    elif len(output)==1000:
         classes = dataset.imagenet_classes
     else: # mnist
         classes = None

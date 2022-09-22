@@ -91,7 +91,16 @@ size_t model_get_output_length(const model_t* model,int index){
 	const vnnx_subgraph_node_t* node = get_output_node(graph,index);
 	return node?node->output_size:-1;
 }
-
+int* model_get_input_dims(const model_t* model,int index){
+	vnnx_graph_t* graph = (vnnx_graph_t*)model;
+	const vnnx_subgraph_node_t* node = get_input_node(graph,index);
+	return (int*)(node?node->input_shape:NULL);
+}
+int* model_get_output_dims(const model_t* model,int index){
+	vnnx_graph_t* graph = (vnnx_graph_t*)model;
+	const vnnx_subgraph_node_t* node = get_output_node(graph,index);
+	return (int*)(node?node->output_shape:NULL);
+}
 void* model_get_test_input(const model_t* model,int index){
 	vnnx_graph_t* graph = (vnnx_graph_t*)model;
 	const vnnx_subgraph_node_t* node = get_input_node(graph,index);

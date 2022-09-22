@@ -99,6 +99,17 @@ def model_get_output_length(model,output_index):
 _so.model_get_input_length.restype = c_size_t
 def model_get_input_length(model,input_index):
     return _so.model_get_input_length(c_char_p(model),c_int(input_index))
+#size_t* model_get_output_dims(const model_t* model,int output_index);
+_so.model_get_output_dims.restype = ctypes.POINTER(c_int)
+def model_get_output_dims(model,output_index):
+    ret = _so.model_get_output_dims(c_char_p(model),c_int(output_index))
+    return [ret[_] for _ in range(3)]
+#
+#size_t* model_get_input_dims(const model_t* model,int input_index);
+_so.model_get_input_dims.restype = ctypes.POINTER(c_int)
+def model_get_input_dims(model,input_index):
+    ret = _so.model_get_input_dims(c_char_p(model),c_int(input_index))
+    return [ret[_] for _ in range(3)]
 #
 #vbx_cnn_calc_type_e model_get_output_datatype(const model_t* model,int output_index);
 def model_get_output_datatype(model,output_index):

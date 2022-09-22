@@ -11,6 +11,13 @@ from vbx.generate.openvino_infer import openvino_infer, get_model_input_shape as
 from vbx.generate.onnx_infer import onnx_infer, load_input
 from vbx.generate.onnx_helper import get_model_input_shape as get_onnx_input_shape
 
+
+def get_vnnx_io_shapes(vnxx):
+    with open(vnxx, 'rb') as mf:
+        model = vbx.sim.Model(mf.read())
+    return model.input_dims[0], model.output_dims
+
+
 def vnnx_infer(vnnx_model, input_array):
     with open(vnnx_model, "rb") as mf:
         model = vbx.sim.Model(mf.read())
@@ -30,9 +37,6 @@ if __name__ == "__main__":
     parser.add_argument('model')
     parser.add_argument('image')
     parser.add_argument('--output', '-o', default="output.png", help='output image to write labels to')
-    parser.add_argument('--height', type=int, default=300, help='expected height of image')
-    parser.add_argument('--width', type=int, default=300, help='expected width of image')
-    parser.add_argument('--channels', type=int, default=3, help='number of channels of image')
     args = parser.parse_args()
 
     if not os.path.isfile(args.image):
@@ -41,7 +45,7 @@ if __name__ == "__main__":
     img = cv2.imread(args.image)
 
     if args.model.endswith('.vnnx'):
-        input_shape = (args.channels, args.height, args.width)
+        input_shape, _ = get_vnnx_io_shapes(args.model)
         input_array = load_input(args.image, 1., input_shape)
         outputs = vnnx_infer(args.model, input_array)
     elif args.model.endswith('.xml'):
@@ -59,8 +63,8 @@ if __name__ == "__main__":
     predictions = ssd.ssdv2_predictions(outputs, output_scale_factor, confidence_threshold=0.5, nms_threshold=0.4, top_k=1)
     
     output_img = cv2.resize(img, (1024, 1024), interpolation=cv2.INTER_NEAREST)
-    output_scale_x = 1024. / args.width
-    output_scale_y = 1024. / args.height
+    output_scale_x = 1024. / input_shape[2]
+    output_scale_y = 1024. / input_shape[1]
 
     classes = ssd.coco91
     colors = dataset.coco_colors

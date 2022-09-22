@@ -1,6 +1,7 @@
 import numpy as np
 import cv2
 import vbx.postprocess.retinaface
+import vbx.postprocess.scrfd
 import os
 
 # SphereFace uses five facial landmarks (two eyes, nose point and two mouth corners)
@@ -27,9 +28,10 @@ arcface_coord4 = np.array([[38.2946, 51.6963],
                            [56.1396, 92.284805]])
 
 class faceDemo:
-    def __init__(self, modelDet, modelRec, anchorsFile, createDict=False, debugImages=False, crop=False):
+    def __init__(self, modelDet, modelRec, modelAtr, anchorsFile, createDict=False, debugImages=False, crop=False):
         self.modelDet = modelDet
         self.modelRec = modelRec
+        self.modelAtr = modelAtr
         self.anchorsFile = anchorsFile
         self.createDict = createDict
         self.debugImages = debugImages
@@ -64,6 +66,11 @@ class faceDemo:
                             self.detectorInputDims = [640,640]
                         else:
                             assert(0)
+                    elif 'scrfd' in modelDet.lower():
+                        if self.detector.input_lengths[0] == 512*288*3:   # retinaface 512x288
+                            self.detectorInputDims = [288,512]
+                        else:
+                            assert(0)
                     else:
                         if self.detector.input_lengths[0] == 256*256*3:   # Blazeface back
                             self.detectorInputDims = [256,256]    
@@ -84,41 +91,60 @@ class faceDemo:
                 else:
                     assert(0)
         
-        if isinstance(modelRec,list):   # mxnet
-            import mxnet as mx
-            ctx = mx.cpu()
-            self.recognizer = mx.gluon.nn.SymbolBlock.imports(modelRec[0], ['data'], modelRec[1], ctx=ctx)
-            self.recognizerInputDims = [112,112]    # assume arcface; can we get these from the model?
-            self.coord5 = arcface_coord5
-            self.coord4 = arcface_coord4
-        else:    
-            if '.vnnx' in modelRec:
-                import vbx.sim
-                self.recognizer = vbx.sim.model.Model(open(modelRec,"rb").read())
-                if self.recognizer.input_lengths[0] == 112*112*3:   # arcface
-                    self.recognizerInputDims = [112,112]
-                elif self.recognizer.input_lengths[0] == 112*96*3:  # sphereface
-                    self.recognizerInputDims = [112,96]
-                else:
-                    assert(0)
-            elif '.onnx' in modelRec:
-                import onnxruntime
-                self.recognizer = onnxruntime.InferenceSession(modelRec, None)
-                self.recognizerInputDims = self.recognizer.get_inputs()[0].shape[2:4]
-            else:
-                assert(0)
-            if 'sphere' in modelRec.lower():
-                self.coord5 = sphereface_coord5
-                self.coord4 = sphereface_coord4
-            elif 'arc' in modelRec.lower():
+        if modelRec:
+            if isinstance(modelRec,list):   # mxnet
+                import mxnet as mx
+                ctx = mx.cpu()
+                self.recognizer = mx.gluon.nn.SymbolBlock.imports(modelRec[0], ['data'], modelRec[1], ctx=ctx)
+                self.recognizerInputDims = [112,112]    # assume arcface; can we get these from the model?
                 self.coord5 = arcface_coord5
                 self.coord4 = arcface_coord4
+            else:    
+                if '.vnnx' in modelRec:
+                    import vbx.sim
+                    self.recognizer = vbx.sim.model.Model(open(modelRec,"rb").read())
+                    if self.recognizer.input_lengths[0] == 112*112*3:   # arcface
+                        self.recognizerInputDims = [112,112]
+                    elif self.recognizer.input_lengths[0] == 112*96*3:  # sphereface
+                        self.recognizerInputDims = [112,96]
+                    else:
+                        assert(0)
+                elif '.onnx' in modelRec:
+                    import onnxruntime
+                    self.recognizer = onnxruntime.InferenceSession(modelRec, None)
+                    self.recognizerInputDims = self.recognizer.get_inputs()[0].shape[2:4]
+                else:
+                    assert(0)
+                if 'sphere' in modelRec.lower():
+                    self.coord5 = sphereface_coord5
+                    self.coord4 = sphereface_coord4
+                elif 'arc' in modelRec.lower():
+                    self.coord5 = arcface_coord5
+                    self.coord4 = arcface_coord4
+                else:
+                    assert(0)
+        
+        if modelAtr:
+            if '.vnnx' in modelAtr:
+                import vbx.sim
+                self.attributer = vbx.sim.model.Model(open(modelAtr,"rb").read())
+                if self.attributer.input_lengths[0] == 96*96*3:
+                    self.attributerInputDims = [96,96]
+                else:
+                    assert(0)
+            elif '.onnx' in modelAtr:
+                import onnxruntime
+                self.attributer = onnxruntime.InferenceSession(modelAtr, None)
+                self.attributerInputDims = self.attributer.get_inputs()[0].shape[2:4]
             else:
                 assert(0)
+
             
     def detectFaces(self, img):
         if 'retina' in self.modelDet.lower():
             faces = self.runRetinaFace(img)
+        elif 'scrfd' in self.modelDet.lower():
+            faces = self.runScrfd(img)
         elif 'mtcnn' == self.modelDet.lower():
             faces = self.detector.detect_faces(img)
             for f in faces:
@@ -136,7 +162,7 @@ class faceDemo:
             modelInput = mx.nd.array(modelInput)
             outputs = self.recognizer(modelInput)
             output = outputs[0].asnumpy()
-        if '.vnnx' in self.modelRec:
+        elif '.vnnx' in self.modelRec:
             inputFlat = modelInput.flatten().astype(np.uint8)
             outputs = self.recognizer.run([inputFlat])
             outputs = [o.astype(np.float32)/(1<<16) for o in outputs]
@@ -146,7 +172,23 @@ class faceDemo:
             outputs = self.recognizer.run([], {input_name: modelInput.astype(np.float32)})
             output = outputs[0][0]
         return output
-    
+
+    def runAttributeModel(self, img):
+        modelInput = img.transpose(2,0,1)
+        modelInput = np.expand_dims(modelInput, axis=0)
+        if '.vnnx' in self.modelAtr:
+            inputFlat = modelInput.flatten().astype(np.uint8)
+            outputs = self.attributer.run([inputFlat])
+            outputs = [o.astype(np.float32)/(1<<16) for o in outputs]
+            outputs = np.concatenate((outputs[1],outputs[0]))
+        elif '.onnx' in self.modelAtr:
+            input_name = self.attributer.get_inputs()[0].name
+            #modelInput = (modelInput[:,::-1,:,:].astype(np.float32)-127.5)/128.0 # this is for the onnx export from pytorch
+            modelInput = modelInput[:,::-1,:,:].astype(np.float32)
+            outputs = self.attributer.run([], {input_name: modelInput})
+            outputs = outputs[0][0]
+        return outputs
+
     def blazeFacePostProc(self, raw_score_tensor, raw_box_tensor, anchors, scale=256.0, thresh=0.75):
         
         def calcIou(A,B):
@@ -288,6 +330,40 @@ class faceDemo:
 
         return faces
     
+    def runScrfd(self, img):
+        inputImg,meta = self.preProcess(img,self.detectorInputDims)
+        self.meta = meta
+        if '.vnnx' in self.modelDet:
+            modelInput = inputImg.transpose(2,0,1).copy()
+            outputs = self.detector.run([modelInput.flatten()])
+            outputs = [o/(1<<16) for o in outputs]
+            outputs = [outputs[8],outputs[5],outputs[2],outputs[7],outputs[4],outputs[1],outputs[6],outputs[3],outputs[0]]
+        elif '.onnx' in self.modelDet:            
+            modelInput = inputImg.transpose(2,0,1).copy()
+            modelInput = np.expand_dims(modelInput, axis=0)
+            inputName = self.detector.get_inputs()[0].name
+            outputs = self.detector.run([], {inputName: modelInput.astype(np.float32)})
+        else:
+            assert(0)
+
+        raw_faces = vbx.postprocess.scrfd.scrfd(outputs,self.detectorInputDims[1],self.detectorInputDims[0],detectThresh=0.76, maxIou=0.34)
+       
+        faces = []
+        for f in raw_faces:
+            f['box'][0] = (f['box'][0] - meta['padLeft'])/meta['resizeX']*meta['imageX']  # scale to original image
+            f['box'][2] = (f['box'][2] - meta['padLeft'])/meta['resizeX']*meta['imageX']  # scale to original image
+            f['box'][1] = (f['box'][1] - meta['padTop'])/meta['resizeY']*meta['imageY']  # scale to original image
+            f['box'][3] = (f['box'][3] - meta['padTop'])/meta['resizeY']*meta['imageY']  # scale to original image
+
+            for n in range(len(f['landmarks'])):
+                f['landmarks'][n] = (f['landmarks'][n] - [meta['padLeft'],meta['padTop']])
+                f['landmarks'][n] = (f['landmarks'][n] / [meta['resizeX'],meta['resizeY']])
+                f['landmarks'][n] = (f['landmarks'][n] * [meta['imageX'],meta['imageY']])
+            face = dict(box=f['box'], keypoints=f['landmarks'], detectScore=f['score'])
+            faces.append(face)
+
+        return faces
+
     def preProcess(self, img, inputDims):
         imgDims = np.array(img.shape[:2])
         
@@ -352,6 +428,7 @@ class faceDemo:
         
         for face in faces:
             self.recognizeFace(img, face)
+            self.attributeFace(img, face)
             
         return faces,img
 
@@ -367,6 +444,33 @@ class faceDemo:
         imgFace = cv2.warpAffine(img,M,(inputDims[1],inputDims[0]))
         return imgFace
 
+    def cropAtrFace(self, img, face):
+        inputDims = self.attributerInputDims
+        # method from https://github.com/deepinsight/insightface/blob/master/python-package/insightface/model_zoo/attribute.py
+        # starting at line 73
+        bbox = face['box']
+        w, h = (bbox[2] - bbox[0]), (bbox[3] - bbox[1])
+        center = (bbox[2] + bbox[0]) / 2, (bbox[3] + bbox[1]) / 2
+        radius = max(w, h) * 0.75
+        keypoints = np.array([center-radius,center+radius])
+        coordAtr = np.array([[0,0],inputDims])
+        M = cv2.estimateAffinePartial2D(keypoints,coordAtr,method=cv2.LMEDS,maxIters=10000, confidence=0.001)[0]
+        imgFace = cv2.warpAffine(img,M,(inputDims[1],inputDims[0]))
+        return imgFace
+
+    def attributeFace(self, img, face):
+        imgFace = self.cropAtrFace(img, face)
+
+        attributes = self.runAttributeModel(imgFace)
+        face['gender'] = attributes[0]
+        face['age'] = 100 * attributes[2]
+
+        if self.debugImages:
+            cv2.imwrite("faceAtrCrop.png",imgFace)
+
+        return face
+
+        
     def recognizeFace(self, img, face):
         inputDims = self.recognizerInputDims
         numK = face['keypoints'].shape[0]   # number of keypoints
@@ -375,6 +479,9 @@ class faceDemo:
             coord = self.coord4
         else:
             coord = self.coord5
+        M = cv2.estimateAffinePartial2D(keypoints,coord,method=cv2.LMEDS,maxIters=10000, confidence=0.001)[0]
+        imgFace = cv2.warpAffine(img,M,(inputDims[1],inputDims[0]))
+
 
         if self.useRotation:   # rotation
             if self.rotationMode == 'estimate':
@@ -412,16 +519,16 @@ class faceDemo:
         
         embedding = self.runRecognitionModel(imgFace)
         face['embedding'] = embedding/np.sqrt(sum(pow(embedding,2)))     #normalize emebdding
-        
+
         if self.debugImages:
-            cv2.imwrite("face.png",imgFace)
+            cv2.imwrite("faceRecCrop.png",imgFace)
             temp = np.column_stack((keypoints,np.ones(numK)))
             keypointsWarp = np.matmul(temp,M.transpose())
             for kp in keypointsWarp:
                 cv2.circle(imgFace, (int(kp[0]),int(kp[1])), 1, (0,255,0), 1)
             for kp in self.coord5:
                 cv2.circle(imgFace, (int(kp[0]),int(kp[1])), 2, (0,0,255), 1)
-            cv2.imwrite("face_points.png",imgFace)
+            cv2.imwrite("faceRecPoints.png",imgFace)
         
         return face
 

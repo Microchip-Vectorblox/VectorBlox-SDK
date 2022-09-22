@@ -125,6 +125,14 @@ Node_struct = [('int32_t', 'type'),
                                  ('int32_t', 'num_inputs'),
                                  ('int32_t', 'maps'),
                                  ('int32_t', 'rows')],
+                          'max':[('int32_t', 'channels'),
+                                    ('int32_t', 'm'),
+                                    ('int32_t', 'n'),
+                                    ('int32_t', 'num_inputs')],
+                          'min':[('int32_t', 'channels'),
+                                    ('int32_t', 'm'),
+                                    ('int32_t', 'n'),
+                                    ('int32_t', 'num_inputs')],
                           'argmax':[('int32_t', 'channels'),
                                     ('int32_t', 'm'),
                                     ('int32_t', 'n'),
@@ -183,8 +191,12 @@ Node_struct = [('int32_t', 'type'),
                                     ('int32_t', 'maps'),
                                     ('int32_t', 'rows')],
                           'activation':[('offset', 'scale'),
-                                     ('int32_t', 'size'),
-                                     ('int32_t', 'mode')]
+                                     ('int32_t', 'mode'),
+                                     ('int32_t', 'channels'),
+                                     ('int32_t', 'm'),
+                                     ('int32_t', 'n'),
+                                     ('int32_t', 'maps'),
+                                     ('int32_t', 'rows')]
                          })]
 
 Subnode_struct = [('int32_t', 'type'),
@@ -382,6 +394,13 @@ class resize_mode(enum.IntEnum):
 class activation_mode(enum.IntEnum):
     SOFTMAX = 0
     SIGMOID = 1
+    TANH = 2
+    MISH = 3
+    ELU = 4
+    SELU = 5
+    SWISH = 6
+    HTANH = 7
+    HSWISH = 8
 
 
 class calc_type(enum.IntEnum):
@@ -414,7 +433,9 @@ class subgraph_type(enum.IntEnum):
     ARGMAX = 9
     REDUCEMEAN = 10
     TILE = 11
-    UNKNOWN = 12
+    MAX = 12
+    MIN = 13
+    UNKNOWN = 14
 
     def from_str(e):
         e = e.upper()
@@ -436,8 +457,6 @@ class subgraph_type(enum.IntEnum):
             return subgraph_type.ACTIVATION
         if e == "RESIZE":
             return subgraph_type.RESIZE
-        if e == "SIGMOID":
-            return subgraph_type.ACTIVATION
         if e == "REORG":
             return subgraph_type.REORG
         if e == "ARGMAX":
@@ -446,6 +465,10 @@ class subgraph_type(enum.IntEnum):
             return subgraph_type.REDUCEMEAN
         if e == "TILE":
             return subgraph_type.TILE
+        if e == "MAX":
+            return subgraph_type.MAX
+        if e == "MIN":
+            return subgraph_type.MIN
         return subgraph_type.UNKNOWN
 
 
@@ -562,6 +585,8 @@ def enum_to_union_name(e):
                    (subgraph_type.ARGMAX, "argmax"),
                    (subgraph_type.REDUCEMEAN, "reduce"),
                    (subgraph_type.TILE, "tile"),
+                   (subgraph_type.MAX, "max"),
+                   (subgraph_type.MIN, "min"),
                    (subgraph_type.UNKNOWN, "unknown"),
                    (layer_type.GLOBAL_AVGPOOL_I8, ""),
                    (layer_type.GLOBAL_AVGPOOL_I16, ""),
@@ -626,6 +651,8 @@ def requires16(t, output_bytes):
         subgraph_type.ARGMAX: 0,
         subgraph_type.REDUCEMEAN: 0,
         subgraph_type.TILE: 0,
+        subgraph_type.MAX: 0,
+        subgraph_type.MIN: 0,
         subgraph_type.UNKNOWN: 1 if output_bytes > 1 else 0
     }[t]
 
@@ -2429,6 +2456,30 @@ def json_to_graph(json_string, preset, io_info=None, script_dir=None, output_byt
                 node.sum.rows = min(partial_map_size// (node.sum.n + node.sublayer_columns),node.sum.rows)
 
             node.scratchpad_bytes = node.sum.maps * node.sum.rows*node.sum.n*sum_bytes
+        elif node.type == subgraph_type.MAX:
+            node.max.channels = json_node['channels']
+            node.max.m = json_node['m']
+            node.max.n = json_node['n']
+            node.max.num_inputs = json_node['num_inputs']
+
+            calc_bytes = max(sizeof_calc_type(node.input_data_type),
+                                  sizeof_calc_type(node.output_data_type),
+                                  *[sublayer_bytes(sn.type) for sn in node.subnode_array])
+
+            map_size = node.output_shape[1]*node.output_shape[2]
+            node.scratchpad_bytes = node.output_shape[0]*map_size*calc_bytes
+        elif node.type == subgraph_type.MIN:
+            node.min.channels = json_node['channels']
+            node.min.m = json_node['m']
+            node.min.n = json_node['n']
+            node.min.num_inputs = json_node['num_inputs']
+
+            calc_bytes = max(sizeof_calc_type(node.input_data_type),
+                                  sizeof_calc_type(node.output_data_type),
+                                  *[sublayer_bytes(sn.type) for sn in node.subnode_array])
+
+            map_size = node.output_shape[1]*node.output_shape[2]
+            node.scratchpad_bytes = node.output_shape[0]*map_size*calc_bytes
         elif node.type == subgraph_type.ARGMAX:
             argmax = node.argmax
             argmax.channels = json_node['channels']
@@ -2457,12 +2508,18 @@ def json_to_graph(json_string, preset, io_info=None, script_dir=None, output_byt
             assert node.lrn.maps*CORES == node.lrn.channels
         elif node.type == subgraph_type.ACTIVATION:
             float_array = json_node['scale']
+            node.activation.channels = json_node["channels"]
+            node.activation.m = json_node["m"]
+            node.activation.n = json_node["n"]
             node.activation.scale = len(weights)
-            node.activation.size = len(float_array)
             weights += struct.pack("f"*len(float_array), *float_array)
 
             node.activation.mode = {"Softmax":activation_mode.SOFTMAX,
                                 "Sigmoid":activation_mode.SIGMOID}[json_node['op_type']]
+
+            assert(sp_size > (4*4*node.activation.n))
+            node.activation.maps = 1
+            node.activation.rows = 1
             node.scratchpad_bytes = 0
 
         elif node.type == subgraph_type.TRANSPOSE:
@@ -2798,7 +2855,7 @@ def json_to_graph(json_string, preset, io_info=None, script_dir=None, output_byt
         m = vbx.sim.Model(data)
         try:
             m.run(m.test_input)
-        except Exception:
+        except:
             sys.stderr.write("ERROR: An unexpected error occurred, please contact Microchip for support\n")
             sys.exit(1)
         instr_count=vbx.sim.c.vbxsim_get_instructions()

@@ -14,6 +14,13 @@ from vbx.generate.onnx_helper import get_model_input_shape as get_onnx_input_sha
 
 colors = np.array([[0,0,0,0.3],[0,255,0,0.5],[0,0,255,0.5],[0,255,255,0.7]])#,dtype='uint8')
 
+
+def get_vnnx_io_shapes(vnxx):
+    with open(vnxx, 'rb') as mf:
+        model = vbx.sim.Model(mf.read())
+    return model.input_dims[0], model.output_dims
+
+
 def vnnx_infer(vnxx, input_array):
     with open(vnxx, 'rb') as mf:
         model = vbx.sim.Model(mf.read())
@@ -32,9 +39,6 @@ if __name__ == "__main__":
     parser.add_argument('model')
     parser.add_argument('image')
     parser.add_argument('--output', '-o', default="output", help='output image to write labels to')
-    parser.add_argument('--height', type=int, default=288, help='expected height of image')
-    parser.add_argument('--width', type=int, default=800, help='expected width of image')
-    parser.add_argument('--channels', type=int, default=3, help='number of channels of image')
     args = parser.parse_args()
 
     if not os.path.isfile(args.image):
@@ -42,7 +46,7 @@ if __name__ == "__main__":
         os._exit(1)
 
     if args.model.endswith('.vnnx'):
-        input_shape = (args.channels, args.height, args.width)
+        input_shape, _ = get_vnnx_io_shapes(args.model)
         input_array = load_input(args.image, 1., input_shape)
         outputs = vnnx_infer(args.model, input_array)
         output = outputs[0].reshape((1, 201, 18, 4))
@@ -80,11 +84,14 @@ if __name__ == "__main__":
     loc[out_j == cfg_griding_num] = 0
     out_j = loc
 
+    num_lanes_detected = 0
     for i in range(out_j.shape[1]):
         if np.sum(out_j[:, i] != 0) > 2:
+            num_lanes_detected += 1
             for k in range(out_j.shape[0]):
                 if out_j[k, i] > 0:
                     ppp = (int(out_j[k, i] * col_sample_w * img_w / 800) - 1, int(img_h * (row_anchor[cls_num_per_lane-1-k]/288)) - 1 )
                     cv2.circle(img,ppp,5,(0,255,0),-1)
 
     cv2.imwrite(args.output+'_output.png', img)
+    print("Found {} lanes".format(num_lanes_detected))

@@ -18,11 +18,12 @@ then
          python3-enchant \
          python3-venv \
          python3-dev \
+         libjpeg-dev \
          build-essential   
     if grep -iEq "ubuntu 20.04" /etc/issue
     then
         #on 20.04 a few more packages are needed to build some pip wheels
-        sudo apt-get install -y cmake protobuf-compiler libenchant-dev
+        sudo apt-get install -y cmake protobuf-compiler libenchant-dev libjpeg-dev
     fi
 else
     echo "Unknown OS, please install dependencies manually" && exit 1

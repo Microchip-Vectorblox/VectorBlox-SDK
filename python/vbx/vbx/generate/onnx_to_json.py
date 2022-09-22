@@ -24,6 +24,8 @@ INLINE_DEPTHWISE = True
 multi_input_nodes = [
         "Sum",
         "Concat",
+        "Max",
+        "Min",
         ]
 
 multi_output_nodes = [
@@ -162,7 +164,7 @@ def mxp_set_cvi(network):
     for l, layer in enumerate(network['layers']):
         if layer['op_type'] == 'Conv':
             network['layers'][l]['use_cvi'] = 1
-            if layer['group'] == layer['kernels']:
+            if layer['group'] == layer['kernels'] and layer['kernels'] > 1:
                 if layer['strides'] in [[1,1], [2,2]] and layer['dilations'] == [1,1]:
                     network['layers'][l]['use_depthwise'] = 1
             if not CVI_1x1 or layer['output_id'] in last_output_ids:
@@ -204,7 +206,7 @@ def set_unsigned(network, io):
         network['layers'][n]['input_unsigned'] = 1
 
 
-def mxp_set_unsigned(network, use_uint8_inputs=False):
+def mxp_set_unsigned(network, stats, io_info):
     ''' currently sets unsigned inputs if initial uint8 layer set to True'''
     ''' conv cvi outputs unsigned if Relu + followed by conv cvi'''
     ''' following conv cvi nodes get unsigned inputs (still conservative)'''
@@ -213,16 +215,23 @@ def mxp_set_unsigned(network, use_uint8_inputs=False):
         network['layers'][l]['input_unsigned'] = 0
         network['layers'][l]['output_unsigned'] = 0
 
-    if use_uint8_inputs:
-        first = network['layers'][0]
-        first_sublayers = [_['op_type'] for _ in first['sublayers']]
-        first['input_unsigned'] = 1
-        # if first['op_type'] == 'Identity' and 'Add' not in first_sublayers and 'Mul' not in first_sublayers:
-        if first['op_type'] == 'Identity' and 'Add' not in first_sublayers:
-            next_layer_ids = [n for n, next in enumerate(network['layers']) if first['output_id'] == next['input_id']]
-            if all([network['layers'][n]['op_type'] == 'Conv' for n in next_layer_ids]):
-                if all([network['layers'][n]['use_cvi'] for n in next_layer_ids]):
-                    set_unsigned(network, ([0], next_layer_ids))
+    stats_ids = [s['id'] for s in stats]
+    for input_id in io_info['input_ids']:
+        for net_idx,layer in enumerate(network['layers']):
+            if input_id == layer['input_description']:
+                if input_id in stats_ids:
+                    stats_idx = stats_ids.index(input_id)
+                else:
+                    stats_idx = stats_ids.index(input_id.split('_')[-1])
+                if all([n>=0. for n in stats[stats_idx]['min']]):
+                    input = layer
+                    input_sublayers = [_['op_type'] for _ in input['sublayers']]
+                    input['input_unsigned'] = 1
+                    if input['op_type'] == 'Identity' and 'Add' not in input_sublayers:
+                        next_layer_ids = [n for n, next in enumerate(network['layers']) if input['output_id'] == next['input_id']]
+                        if all([network['layers'][n]['op_type'] == 'Conv' for n in next_layer_ids]):
+                            if all([network['layers'][n]['use_cvi'] for n in next_layer_ids]):
+                                set_unsigned(network, ([net_idx], next_layer_ids))
 
     for l, layer in enumerate(network['layers']):
         if layer['op_type'] == 'Conv' and layer['use_cvi']:
@@ -275,6 +284,7 @@ def fuse_layers(network, fuse_pairs):
         previous_layer['sublayers'].append(fuse_layer)
         previous_layer['sublayers'] += sublayers
         previous_layer['output_shape'] = fuse_layer['output_shape']
+        previous_layer['output_unsigned'] = fuse_layer['output_unsigned']
 
     for _, f in fuse_pairs[::-1]:
         network['layers'] = network['layers'][:f] + network['layers'][f+1:]
@@ -313,6 +323,7 @@ def mxp_remove_nop_identity(network):
         nop_layer = network['layers'][l]
         next_layer = network['layers'][n]
 
+        next_layer['input_unsigned'] = nop_layer['input_unsigned']
         next_layer['input_id'] = nop_layer['input_id']
         next_layer['input_description'] = nop_layer['input_description']
 
@@ -349,11 +360,18 @@ def get_shapes(activations, stats, node):
     return input_shapes, output_shapes
 
 
-def shape3d(shape):
+def shape3d(shape, squeeze=False):
     if len(shape) == 1:
         return 1, 1, shape[0]
     elif len(shape) == 2:
         return 1, shape[0], shape[1]
+    elif len(shape) == 3 and squeeze:
+        if shape[2] == 1 and shape[1] == 1:
+            return 1, 1, shape[0]
+        elif shape[2] == 1:
+            return 1, shape[0], shape[1]
+        else:
+            return shape
     else:
         return shape
 
@@ -552,7 +570,7 @@ def generate_mxp_graph(model_name, activations, stats, first_node_name, last_nod
             node_inputs = get_previous_nodes(nodes, node)
             shapes = input_shapes
 
-            if node.op_type == "Sum":
+            if node.op_type in ["Sum", "Max", "Min"]:
                 assert(all([x == shapes[0] for x in shapes[1:]]))
             elif node.op_type == "Concat":
                 assert(all([x[1:] == shapes[0][1:] for x in shapes[1:]]))
@@ -617,6 +635,54 @@ def generate_mxp_graph(model_name, activations, stats, first_node_name, last_nod
                         "sublayers": [],
                         }
                 network['layers'].append(concat_layer)
+            elif node.op_type == "Max":
+                channels, m, n = shape3d(output_shape)
+                max_layer = {
+                        'op_type': "Max",
+                        'name': node.name,
+                        'use_replay': 1,
+                        'input_size': int(sum([np.prod(s) for s in input_shapes])),
+                        'output_size': int(np.prod(output_shape)),
+                        'input_shape':input_shapes[0],
+                        'output_shape':output_shape,
+                        'input_id': input_id,
+                        'output_id': output_id,
+                        'input_description': ','.join(input_descriptions),
+                        'output_description': output_id,
+                        'channels': channels,
+                        'm': m,
+                        'n': n,
+                        'dma_offset': 0,
+                        'input_buffer_offset': input_buffer_offset,
+                        'output_buffer_offset': 0,
+                        'num_inputs': len(node.input),
+                        "sublayers": [],
+                        }
+                network['layers'].append(max_layer)
+            elif node.op_type == "Min":
+                channels, m, n = shape3d(output_shape)
+                max_layer = {
+                        'op_type': "Min",
+                        'name': node.name,
+                        'use_replay': 1,
+                        'input_size': int(sum([np.prod(s) for s in input_shapes])),
+                        'output_size': int(np.prod(output_shape)),
+                        'input_shape':input_shapes[0],
+                        'output_shape':output_shape,
+                        'input_id': input_id,
+                        'output_id': output_id,
+                        'input_description': ','.join(input_descriptions),
+                        'output_description': output_id,
+                        'channels': channels,
+                        'm': m,
+                        'n': n,
+                        'dma_offset': 0,
+                        'input_buffer_offset': input_buffer_offset,
+                        'output_buffer_offset': 0,
+                        'num_inputs': len(node.input),
+                        "sublayers": [],
+                        }
+                network['layers'].append(max_layer)
 
         elif node.op_type == "Identity":
             shapes = input_shapes
@@ -801,12 +867,7 @@ def generate_mxp_graph(model_name, activations, stats, first_node_name, last_nod
             skip = False
             if node.op_type == "Mul":
                 next_nodes = get_node_inputs(nodes, node.output[0])
-                if output_id in io_info['output_ids']:
-                    if verbose:
-                        print('removing final scale node')
-                    skip = True
-
-                elif previous['op_type'] in ["LRN"]:
+                if previous['op_type'] in ["LRN"]:
                     if verbose:
                         print('skipping mul after lrn')
                     array = get_tensor(inits, node.input[1])
@@ -817,7 +878,7 @@ def generate_mxp_graph(model_name, activations, stats, first_node_name, last_nod
 
                     skip = True
 
-                elif next_nodes[0].op_type in ["Softmax", "Sigmoid"]:
+                elif len(next_nodes) and next_nodes[0].op_type in ["Softmax", "Sigmoid"]:
                     if verbose:
                         print('skipping mul before softmax')
                     skip = True
@@ -831,7 +892,7 @@ def generate_mxp_graph(model_name, activations, stats, first_node_name, last_nod
 
             dims = array.shape
             if node.op_type in ["Add"]: # TODO for scalar Add
-                if dims == 0:
+                if dims == ():
                     array = np.ones((c, 1)) * array
                     dims = array.shape
 
@@ -999,8 +1060,8 @@ def generate_mxp_graph(model_name, activations, stats, first_node_name, last_nod
                 raise NotImplementedError("Broadcast scale not implemented for softmax")
 
             shapes = input_shapes
-            channels, m, n = shape3d(output_shape)
-            softmax_layer = {
+            channels, m, n = shape3d(output_shape, squeeze=True)
+            activation_layer = {
                 'op_type': node.op_type,
                 'name': node.name,
                 'use_replay': 0,
@@ -1022,7 +1083,7 @@ def generate_mxp_graph(model_name, activations, stats, first_node_name, last_nod
                 'scale': scale,
                 'size': len(scale),
             }
-            network['layers'].append(softmax_layer)
+            network['layers'].append(activation_layer)
 
         elif node.op_type == "Transpose":
             shapes = input_shapes
@@ -1095,11 +1156,12 @@ def generate_mxp_graph(model_name, activations, stats, first_node_name, last_nod
 
     network = mxp_number_buffers(network, aliased_io)
     buffers = mxp_size_buffers(network, aliased_io)
+    # network = mxp_set_unsigned(network, unsigned_network_inputs)
+    network = mxp_set_unsigned(network, stats, io_info)
 
     if remove_nops:
         network = mxp_remove_nop_identity(network)
 
-    network = mxp_set_unsigned(network, unsigned_network_inputs)
     if inline_depthwise:
         network = mxp_inline_depthwise(network)
 

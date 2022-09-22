@@ -195,7 +195,6 @@ def calcIouLTRB(A,B):
     else:
         return 0
     
-    
 def retinafaceVnnx(modelOut, inputWidth, inputHeight, detectThresh=0.75, maxIou=0.35):
     variance = [0.1, 0.2]
     mapStrides = [8,16,32]

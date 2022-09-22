@@ -6,7 +6,28 @@ import cv2
 import vbx.generate.onnx_infer as onnx_infer
 import vbx.generate.onnx_helper as onnx_helper
 from vbx.postprocess.ocr import ctc_greedy_decode, lpr_chinese_characters, lpr_characters 
+from vbx.generate.onnx_infer import onnx_infer, load_input
 import json
+
+
+def get_vnnx_io_shapes(vnxx):
+    with open(vnxx, 'rb') as mf:
+        model = vbx.sim.Model(mf.read())
+    return model.input_dims[0], model.output_dims
+
+
+def vnnx_infer(vnxx, input_array):
+    with open(vnxx, 'rb') as mf:
+        model = vbx.sim.Model(mf.read())
+    flattened = input_array.flatten().astype('uint8')
+    outputs = model.run([flattened])
+
+    bw = model.get_bandwidth_per_run()
+    print("Bandwidth per run = {} Bytes ({:.3} MB/s at 100MHz)".format(bw,bw/100E6))
+    print("Estimated {} seconds at 100MHz".format(model.get_estimated_runtime(100E6)))
+    print("If running at another frequency, scale these numbers appropriately")
+
+    return [o.astype('float32') * sf for o,sf in zip(outputs, model.output_scale_factor)]
 
 
 def convert_to_fixedpoint(data, dtype):
@@ -47,35 +68,14 @@ if __name__ == "__main__":
                 output = scale_factors[0] * output
         output = np.squeeze(np.transpose(output, [0,2,3,1]))
     else:
-        with open(args.model, "rb") as mf:
-            model = vbx.sim.Model(mf.read())
-        input_width = 94
-        if args.characters == 'latin':
-            input_width = 112
-        input_height = 24
-        input_dtype = model.input_dtypes[0]
-        if not os.path.isfile(args.image):
-            print('Error: {} could not be read'.format(args.image))
-            os._exit(1)
-        img = cv2.imread(args.image)
-        if img.shape != (input_width, input_height, 3):
-            img_resized = cv2.resize(img, (input_width, input_height)).clip(0, 255)
-        else:
-            img_resized = img
-        flattened = img_resized.swapaxes(1, 2).swapaxes(0, 1).flatten()
-        if input_dtype != np.uint8:
-            flattened = convert_to_fixedpoint(flattened, input_dtype)
-
-        outputs = model.run([flattened])
-        output = outputs[0].astype(np.float32)*model.output_scale_factor[0]
+        input_shape, _ = get_vnnx_io_shapes(args.model)
+        input_array = load_input(args.image, 1., input_shape)
+        output = vnnx_infer(args.model, input_array)[0]
         if args.characters == 'latin':
             output = output.reshape((1,37,1,106))
         else:   
             output = output.reshape((1,71,1,88))
         output = np.squeeze(np.transpose(output, [0,2,3,1]))
-
-        print("bandwidth per run = {}".format(model.get_bandwidth_per_run()))
-        print("estimated {} ms at 133MHz".format(model.get_estimated_runtime(133*1E6)*1000))
 
     characters = None
     if args.characters == 'latin':

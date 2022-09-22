@@ -41,6 +41,6 @@ echo "Generating VNNX for V1000 configuration..."
 generate_vnnx -x yolo-v4-tiny.xml  -c V1000 -f ../../sample_images -o yolo-v4-tiny-tf.vnnx --bias-correction
 
 echo "Running Simulation..."
-python $VBX_SDK/example/python/yoloInfer.py yolo-v4-tiny-tf.vnnx ../../dog.jpg -j yolo-v4-tiny-tf.json -l coco.names
+python $VBX_SDK/example/python/yoloInfer.py yolo-v4-tiny-tf.vnnx ../../test_images/dog.jpg -j yolo-v4-tiny-tf.json -l coco.names
 
 deactivate

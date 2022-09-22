@@ -36,6 +36,8 @@ typedef enum{
 	ARGMAX_SUBGRAPH,
 	REDUCEMEAN_SUBGRAPH,
 	TILE_SUBGRAPH,
+	MAX_SUBGRAPH,
+	MIN_SUBGRAPH,
 	UNKNOWN_SUBGRAPH
 } subgraph_type_e;
 
@@ -286,6 +288,18 @@ typedef STRUCT_PACKED vnnx_subgraph_node {
 			int32_t channels;
 			int32_t m;
 			int32_t n;
+			int32_t num_inputs;
+		} max;
+		STRUCT_PACKED {
+			int32_t channels;
+			int32_t m;
+			int32_t n;
+			int32_t num_inputs;
+		} min;
+		STRUCT_PACKED {
+			int32_t channels;
+			int32_t m;
+			int32_t n;
             int32_t pixels_per_loop;
 		} argmax;
 		STRUCT_PACKED {
@@ -359,8 +373,12 @@ typedef STRUCT_PACKED vnnx_subgraph_node {
 		}reorg;
 		STRUCT_PACKED{
 			obj_off_t scale;
-			int32_t size;
 			int32_t mode;
+			int32_t channels;
+			int32_t m;
+			int32_t n;
+			int32_t maps;
+			int32_t rows;
 		}activation;
 	};
 } vnnx_subgraph_node_t;

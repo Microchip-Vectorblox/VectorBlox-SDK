@@ -103,19 +103,17 @@ static int find_uio_dev_num(void *ctrl_reg_addr){
   }
   return -1;
 }
-static void* uio_mmap(int dev_num,int map_num){
+static void* uio_mmap(int fd, int dev_num,int map_num){
   char filename[64];
   snprintf(filename,sizeof(filename),"/sys/class/uio/uio%d/maps/map%d/size",dev_num,map_num);
   int64_t size=u64_from_attribute(filename);
-  snprintf(filename,sizeof(filename),"/dev/uio%d",dev_num);
-  int fd = open(filename, O_RDWR);
   void* _ptr = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED,
                 fd, map_num * sysconf(_SC_PAGESIZE));
-  close(fd);
+  
   return _ptr;
 }
-static void* mmap_vbx_registers(int dev_num){
-  return uio_mmap(dev_num,0);
+static void* mmap_vbx_registers(int fd, int dev_num){
+  return uio_mmap(fd, dev_num,0);
 
 }
 #define DMA_DEV "udmabuf-ddr-nc0"
@@ -159,11 +157,15 @@ vbx_cnn_t *vbx_cnn_init(void *ctrl_reg_addr,void *instruction_blob) {
   vbx_cnn_t* the_cnn = (vbx_cnn_t*)malloc(sizeof(vbx_cnn_t));
 #if VBX_SOC_DRIVER
   int uio_dev_num = find_uio_dev_num(ctrl_reg_addr);
-  ctrl_reg_addr = (void*)mmap_vbx_registers(uio_dev_num);
+
+  char filename[64];
+  snprintf(filename,sizeof(filename),"/dev/uio%d",uio_dev_num);
+  the_cnn->fd = open(filename, O_RDWR);
+
+  ctrl_reg_addr = (void*)mmap_vbx_registers(the_cnn->fd, uio_dev_num);
   the_cnn->dma_buffer=mmap_vbx_dma(uio_dev_num);
   the_cnn->dma_phys_trans_offset = uio_dma_phys_addr(uio_dev_num)-(uintptr_t)the_cnn->dma_buffer;
   the_cnn->dma_buffer_end = the_cnn->dma_buffer + uio_dma_size(uio_dev_num)-1;
-  vbx_allocate_dma_buffer(the_cnn,0x1FFFFFFF,0);
   void* dma_instr_blob = vbx_allocate_dma_buffer(the_cnn,VBX_INSTRUCTION_SIZE,21);
   memcpy(dma_instr_blob,instruction_blob,VBX_INSTRUCTION_SIZE);
   the_cnn->io_buffers = vbx_allocate_dma_buffer(the_cnn,MAX_IO_BUFFERS*sizeof(vbx_cnn_io_ptr_t), 3);
@@ -204,31 +206,6 @@ vbx_cnn_t *vbx_cnn_init(void *ctrl_reg_addr,void *instruction_blob) {
   return the_cnn;
 }
 
-
-#define DEBUG_PRINT_SPOOL_SIZE (16*1024)
-int vbx_cnn_get_debug_prints(vbx_cnn_t* vbx_cnn,char* buf,size_t max_chars){
-#if SPLASHKIT_PCIE
-  static char orca_std_out[DEBUG_PRINT_SPOOL_SIZE];
-  read_fpga((uintptr_t)(vbx_cnn->instruction_blob) + VBX_INSTRUCTION_SIZE - DEBUG_PRINT_SPOOL_SIZE,
-      orca_std_out,
-      DEBUG_PRINT_SPOOL_SIZE);
-#else
-  volatile char* orca_std_out = (volatile char*)(vbx_cnn->instruction_blob);
-  orca_std_out+=VBX_INSTRUCTION_SIZE-DEBUG_PRINT_SPOOL_SIZE;
-#endif
-  volatile int32_t* orca_pointer = (volatile int32_t*)(orca_std_out + 16*1024-4);
-  size_t char_count=0;
-  while(vbx_cnn->debug_print_ptr != *orca_pointer && char_count+1 <= max_chars){
-    buf[char_count]=orca_std_out[vbx_cnn->debug_print_ptr];
-    vbx_cnn->debug_print_ptr++;
-    char_count++;
-    if(vbx_cnn->debug_print_ptr >=DEBUG_PRINT_SPOOL_SIZE-4){
-      vbx_cnn->debug_print_ptr=0;
-    }
-  }
-  return (int)char_count;
-
-}
 #if VBX_SOC_DRIVER || SPLASHKIT_PCIE
 void* vbx_allocate_dma_buffer(vbx_cnn_t* vbx_cnn,size_t request_size,size_t phys_alignment_bits){
   size_t request_size_aligned = (request_size+1023) & (~1023);
@@ -332,6 +309,12 @@ vbx_cnn_state_e vbx_cnn_get_state(vbx_cnn_t *vbx_cnn) {
 
 int vbx_cnn_model_poll(vbx_cnn_t *vbx_cnn) {
   int status = read_register(vbx_cnn->ctrl_reg,CTRL_OFFSET);
+  if (status & CTRL_REG_SOFT_RESET) {
+       return -3;
+  }
+  if (status & CTRL_REG_ERROR) {
+      return -1;
+  }
   if (status & CTRL_REG_OUTPUT_VALID) {
     // write 1 to clear output valid
     write_register(vbx_cnn->ctrl_reg,CTRL_OFFSET,CTRL_REG_OUTPUT_VALID);
@@ -339,9 +322,6 @@ int vbx_cnn_model_poll(vbx_cnn_t *vbx_cnn) {
   }
   if ((status & CTRL_REG_START) || (status & CTRL_REG_RUNNING)) {
     return 1;
-  }
-  if (status & CTRL_REG_ERROR) {
-    return -1;
   }
   return -2;
 }
