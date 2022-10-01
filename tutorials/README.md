@@ -53,7 +53,7 @@ Below is a list of included tutorials. Frames per Second (FPS) assumes the cores
 |[ultralytics.yolov5m.relu](pytorch/ultralytics.yolov5m.relu/ultralytics.yolov5m.relu.sh)|pytorch|Object Detection|mAP(COCO)|54.6/54.38|6.68|3.56|1.85|[More Info](https://github.com/ultralytics/yolov5)|
 |[license-plate-recognition-latin](tensorflow/license-plate-recognition-latin/license-plate-recognition-latin.sh)|tensorflow|Object Detection|||145.71|113.65|70.13|[More Info](https://github.com/openvinotoolkit/training_extensions/tree/misc/misc/tensorflow_toolkit/lpr)|
 |[yolo-v3-tf](tensorflow/yolo-v3-tf/yolo-v3-tf.sh)|tensorflow|Object Detection|||2.35|1.22||[More Info](https://github.com/openvinotoolkit/open_model_zoo/tree/2021.4.2/models/public/yolo-v3-tf/)|
-|[deeplabv3](tensorflow/deeplabv3/deeplabv3.sh)|tensorflow|segmentation|||2.19|||[More Info](https://pytorch.org/vision/0.9/models.html)|
+|[deeplabv3](tensorflow/deeplabv3/deeplabv3.sh)|tensorflow|segmentation|||2.19|||[More Info](https://github.com/openvinotoolkit/open_model_zoo/tree/master/models/public/deeplabv3)|
 |[Sphereface](caffe/Sphereface/Sphereface.sh)|caffe|face_compare|||36.32|22.99|12.81|[More Info](https://github.com/openvinotoolkit/open_model_zoo/tree/2021.4.2/models/public/Sphereface/)|
 |[ultralytics.yolov3-tiny.plates](pytorch/ultralytics.yolov3-tiny.plates/ultralytics.yolov3-tiny.plates.sh)|pytorch|Object Detection|||28.33|17.34|9.59|[More Info](https://github.com/ultralytics/yolov3)|
 |[retinaface.mobilenet.320](pytorch/retinaface.mobilenet.320/retinaface.mobilenet.320.sh)|pytorch|Object Detection|||94.91|79.14|47.21|[More Info](https://github.com/biubug6/Pytorch_Retinaface)|

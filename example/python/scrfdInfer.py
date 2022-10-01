@@ -51,10 +51,13 @@ def main():
         input_shape = get_xml_input_shape(args.model, weights)
         input_array = load_input(args.image, 1., input_shape)
         outputs = openvino_infer(args.model, input_array)
+        outputs = [outputs[0],outputs[3],outputs[6],outputs[1],outputs[4],outputs[7],outputs[2],outputs[5],outputs[8]]
+
     elif '.onnx' in args.model:
         input_shape = get_onnx_input_shape(args.model)
         input_array = load_input(args.image, 1., input_shape)
         outputs = onnx_infer(args.model, input_array)
+        outputs = [outputs[2],outputs[5],outputs[8],outputs[1],outputs[4],outputs[7],outputs[0],outputs[3],outputs[6]]
 
     faces = vbx.postprocess.scrfd.scrfd(outputs, input_shape[-1], input_shape[-2] ,args.threshold, args.nms_threshold)
     img = cv2.imread(args.image)

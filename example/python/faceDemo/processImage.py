@@ -7,7 +7,7 @@ import faceDemoClass
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--modelDet', default='../../../tutorials/onnx/scrfd/scrfd_500m_bnkps.vnnx') #'../../../tutorials/pytorch/retinaface.mobilenet/retinaface.mobilenet.vnnx')
+    parser.add_argument('--modelDet', default='../../../tutorials/onnx/scrfd_500m_bnkps/scrfd_500m_bnkps.vnnx')
     parser.add_argument('--modelRec', default='../../../tutorials/mxnet/mobilefacenet-arcface/mobilefacenet-arcface.vnnx')
     parser.add_argument('--modelAtr', default='../../../tutorials/onnx/genderage/genderage.vnnx')
     parser.add_argument('--image', default='garden.jpg')
@@ -31,13 +31,13 @@ def main():
         
     for face in faces:
         if face['similarity']>0.475:
-            resText = '{:.3} {}'.format(face['similarity'], face['name'])
+            resText = '{:.3}% {}'.format(face['similarity'], face['name'])
             print(face['similarity'], face['name'])
             color = (0,250,0)
             if face['similarity']<0.525:
                 color = (0,250,250)
         else:
-            resText = '{:.3}'.format(face['similarity'])
+            resText = '{:.3}%'.format(face['similarity'])
             color = (0,0,250)
         if face['gender']>0:
             atrText = 'F'

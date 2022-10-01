@@ -25,7 +25,7 @@ echo "Downloading deeplabv3..."
 omz_downloader --name deeplabv3
 
 echo "Running Model Optimizer..."
-# model details @ https://pytorch.org/vision/0.9/models.html
+# model details @ https://github.com/openvinotoolkit/open_model_zoo/tree/master/models/public/deeplabv3
 mo --input_model public/deeplabv3/deeplabv3_mnv2_pascal_train_aug/frozen_inference_graph.pb \
 --input_shape=[1,513,513,3] \
 --input=1:mul_1 \

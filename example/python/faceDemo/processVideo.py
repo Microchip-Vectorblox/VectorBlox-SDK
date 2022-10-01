@@ -1,20 +1,20 @@
 import argparse
 import numpy as np
 import cv2
-# import os
 import faceDemoClass
 import faceTracker
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--modelDet', default='../../../tutorials/onnx/scrfd/scrfd_500m_bnkps.vnnx') #'../../../tutorials/pytorch/retinaface.mobilenet/retinaface.mobilenet.vnnx')
+    parser.add_argument('--modelDet', default='../../../tutorials/onnx/scrfd_500m_bnkps/scrfd_500m_bnkps.vnnx')
     parser.add_argument('--modelRec', default='../../../tutorials/mxnet/mobilefacenet-arcface/mobilefacenet-arcface.vnnx')
     parser.add_argument('--modelAtr', default='../../../tutorials/onnx/genderage/genderage.vnnx')
-    parser.add_argument('--video', default='gardenIn.mp4') #'Friends_ Joey Finds Out (Season 5 Clip) _ TBS.mp4')
+    parser.add_argument('--video', default='gardenIn.mp4')
     parser.add_argument('--videoOut', default='demoOutput.mp4')
-    parser.add_argument('--imgOutDir',default='videoOut')     # 'videoOut'
+    parser.add_argument('--imgOutDir',default='videoOut')
     parser.add_argument('--db', default='faceDb.npy')
     parser.add_argument('--crop', default=True) # if true, image is cropped to match model shape; otherwise padded
+    parser.add_argument('--maxFrame', type=int) # set max frame
     args = parser.parse_args()
     
     vidIn = cv2.VideoCapture(args.video)
@@ -68,7 +68,7 @@ def main():
                 
             if track['name']:
                 color = (0,250,0)
-                resText = '{:02} {}'.format(round(100*track['similarity']),track['name'])
+                resText = '{:02}% {}'.format(round(100*track['similarity']),track['name'])
             else:
                 color = (250,0,0) #(0,0,250)
                 resText = ''    #'{:.3f}'.format(track['similarity'])
@@ -109,12 +109,13 @@ def main():
         vidOut.write(img)
         if args.imgOutDir:
             cv2.imwrite(args.imgOutDir+'/frame{}.jpg'.format(frameNum),img)
+        if args.maxFrame and frameNum > args.maxFrame:
+            break
         vidInSuccess,img = vidIn.read()
         frameNum += 1
         
     vidIn.release()
     vidOut.release()
-    #np.save(os.path.splitext(args.videoOut)[0]+'.npy', histMaxVal)
     
 if __name__ == "__main__":
     main()

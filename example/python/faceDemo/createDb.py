@@ -7,14 +7,15 @@ import faceDemoClass
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--modelDet', default='../../../tutorials/pytorch/retinaface.mobilenet/retinaface.mobilenet.onnx')
-    parser.add_argument('--modelRec', default=['../../../tutorials/mxnet/mobilefacenet-arcface/arcface/model-y1-test2/model-symbol.json','../../../tutorials/mxnet/mobilefacenet-arcface/arcface/model-y1-test2/model-0000.params'])
+    parser.add_argument('--modelDet', default='../../../tutorials/onnx/scrfd_500m_bnkps/scrfd_500m_bnkps.xml')
+    parser.add_argument('--modelRec', default='../../../tutorials/mxnet/mobilefacenet-arcface/model-0000.xml')
+    parser.add_argument('--modelAtr', default='../../../tutorials/onnx/genderage/genderage.xml')
     parser.add_argument('--imageDir', default='dbImages')
     parser.add_argument('--debugDir', default='dbDebug')
     parser.add_argument('--db', default='faceDb')
     args = parser.parse_args()
 
-    fdc = faceDemoClass.faceDemo(args.modelDet, args.modelRec, None, createDict=True, debugImages=False)
+    fdc = faceDemoClass.faceDemo(args.modelDet, args.modelRec, args.modelAtr, None, createDict=True, debugImages=False)
     results = []
     folders = sorted(glob.glob(os.path.join(args.imageDir,'*')))
     if args.debugDir:

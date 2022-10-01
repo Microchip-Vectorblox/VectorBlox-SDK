@@ -78,6 +78,15 @@ class faceDemo:
                             self.detectorInputDims = [128,128]
                         else:
                             assert(0)
+                elif '.xml' in modelDet:
+                    import openvino.inference_engine as ie
+                    weights=modelDet.replace('.xml', '.bin')
+                    core = ie.IECore()
+                    net = core.read_network(model=modelDet, weights=weights)
+                    assert(len(net.input_info) == 1)
+                    self.detector = core.load_network(network=net, device_name="CPU")
+                    inputName = list(self.detector.requests[0].input_blobs.keys())[0]
+                    self.detectorInputDims = self.detector.requests[0].input_blobs[inputName].buffer.shape[2:4]
                 elif '.onnx' in modelDet:
                     import onnxruntime
                     self.detector = onnxruntime.InferenceSession(modelDet, None)
@@ -109,6 +118,15 @@ class faceDemo:
                         self.recognizerInputDims = [112,96]
                     else:
                         assert(0)
+                elif '.xml' in modelRec:
+                    import openvino.inference_engine as ie
+                    weights=modelRec.replace('.xml', '.bin')
+                    core = ie.IECore()
+                    net = core.read_network(model=modelRec, weights=weights)
+                    assert(len(net.input_info) == 1)
+                    self.recognizer = core.load_network(network=net, device_name="CPU")
+                    inputName = list(self.recognizer.requests[0].input_blobs.keys())[0]
+                    self.recognizerInputDims = self.recognizer.requests[0].input_blobs[inputName].buffer.shape[2:4]
                 elif '.onnx' in modelRec:
                     import onnxruntime
                     self.recognizer = onnxruntime.InferenceSession(modelRec, None)
@@ -132,6 +150,15 @@ class faceDemo:
                     self.attributerInputDims = [96,96]
                 else:
                     assert(0)
+            elif '.xml' in modelAtr:
+                import openvino.inference_engine as ie
+                weights=modelAtr.replace('.xml', '.bin')
+                core = ie.IECore()
+                net = core.read_network(model=modelAtr, weights=weights)
+                assert(len(net.input_info) == 1)
+                self.attributer = core.load_network(network=net, device_name="CPU")
+                inputName = list(self.attributer.requests[0].input_blobs.keys())[0]
+                self.attributerInputDims = self.attributer.requests[0].input_blobs[inputName].buffer.shape[2:4]
             elif '.onnx' in modelAtr:
                 import onnxruntime
                 self.attributer = onnxruntime.InferenceSession(modelAtr, None)
@@ -167,6 +194,13 @@ class faceDemo:
             outputs = self.recognizer.run([inputFlat])
             outputs = [o.astype(np.float32)/(1<<16) for o in outputs]
             output = outputs[0]
+        elif '.xml' in self.modelRec:
+            inputName = list(self.recognizer.requests[0].input_blobs.keys())[0]
+            self.recognizer.requests[0].input_blobs[inputName].buffer[:] = modelInput
+            self.recognizer.requests[0].infer()
+            outputNames = list(self.recognizer.requests[0].output_blobs.keys())
+            outputs = [self.recognizer.requests[0].output_blobs[o].buffer.flatten() for o in outputNames]
+            output = outputs[0]
         elif '.onnx' in self.modelRec:
             input_name = self.recognizer.get_inputs()[0].name
             outputs = self.recognizer.run([], {input_name: modelInput.astype(np.float32)})
@@ -181,6 +215,13 @@ class faceDemo:
             outputs = self.attributer.run([inputFlat])
             outputs = [o.astype(np.float32)/(1<<16) for o in outputs]
             outputs = np.concatenate((outputs[1],outputs[0]))
+        elif '.xml' in self.modelAtr:
+            inputName = list(self.attributer.requests[0].input_blobs.keys())[0]
+            self.attributer.requests[0].input_blobs[inputName].buffer[:] = modelInput
+            self.attributer.requests[0].infer()
+            outputNames = list(self.attributer.requests[0].output_blobs.keys())
+            outputs = [self.attributer.requests[0].output_blobs[o].buffer.flatten() for o in outputNames]
+            outputs = np.concatenate((outputs[0],outputs[1]))
         elif '.onnx' in self.modelAtr:
             input_name = self.attributer.get_inputs()[0].name
             #modelInput = (modelInput[:,::-1,:,:].astype(np.float32)-127.5)/128.0 # this is for the onnx export from pytorch
@@ -333,16 +374,26 @@ class faceDemo:
     def runScrfd(self, img):
         inputImg,meta = self.preProcess(img,self.detectorInputDims)
         self.meta = meta
+
         if '.vnnx' in self.modelDet:
             modelInput = inputImg.transpose(2,0,1).copy()
             outputs = self.detector.run([modelInput.flatten()])
             outputs = [o/(1<<16) for o in outputs]
-            outputs = [outputs[8],outputs[5],outputs[2],outputs[7],outputs[4],outputs[1],outputs[6],outputs[3],outputs[0]]
+            outputs = [outputs[2],outputs[5],outputs[8],outputs[1],outputs[4],outputs[7],outputs[0],outputs[3],outputs[6]]
+        elif '.xml' in self.modelDet:
+            modelInput = inputImg.transpose(2,0,1).copy()
+            inputName = list(self.detector.requests[0].input_blobs.keys())[0]
+            self.detector.requests[0].input_blobs[inputName].buffer[:] = modelInput
+            self.detector.requests[0].infer()
+            outputNames = list(self.detector.requests[0].output_blobs.keys())
+            outputs = [self.detector.requests[0].output_blobs[o].buffer.flatten() for o in outputNames]
+            outputs = [outputs[0],outputs[3],outputs[6],outputs[1],outputs[4],outputs[7],outputs[2],outputs[5],outputs[8]]
         elif '.onnx' in self.modelDet:            
             modelInput = inputImg.transpose(2,0,1).copy()
             modelInput = np.expand_dims(modelInput, axis=0)
             inputName = self.detector.get_inputs()[0].name
             outputs = self.detector.run([], {inputName: modelInput.astype(np.float32)})
+            outputs = [outputs[2],outputs[5],outputs[8],outputs[1],outputs[4],outputs[7],outputs[0],outputs[3],outputs[6]]
         else:
             assert(0)
 
@@ -459,14 +510,15 @@ class faceDemo:
         return imgFace
 
     def attributeFace(self, img, face):
-        imgFace = self.cropAtrFace(img, face)
+        if self.modelAtr:
+            imgFace = self.cropAtrFace(img, face)
 
-        attributes = self.runAttributeModel(imgFace)
-        face['gender'] = attributes[0]
-        face['age'] = 100 * attributes[2]
+            attributes = self.runAttributeModel(imgFace)
+            face['gender'] = attributes[0]
+            face['age'] = 100 * attributes[2]
 
-        if self.debugImages:
-            cv2.imwrite("faceAtrCrop.png",imgFace)
+            if self.debugImages:
+                cv2.imwrite("faceAtrCrop.png",imgFace)
 
         return face
 

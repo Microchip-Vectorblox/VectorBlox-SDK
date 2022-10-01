@@ -13,12 +13,16 @@ Before using code in this folder, make sure the Python virtual environment `vbx_
 The Python scripts in this folder require one model for face detection and another model for face recognition. The tutorials for these models should be run so that the files are available.
 
 ```
-cd $VBX_SDK/tutorials/pytorch/retinaface.mobilenet
-bash retinaface.mobilenet.sh
+cd $VBX_SDK/tutorials/onnx/scrfd_500m_bnkps
+bash scrfd_500m_bnkps.sh
 ```
 ```
 cd $VBX_SDK/tutorials/mxnet/mobilefacenet-arcface
 bash mobilefacenet-arcface.sh
+```
+```
+cd $VBX_SDK/tutorials/onnx/genderage
+bash genderage.sh
 ```
 
 ## Creating a new database
