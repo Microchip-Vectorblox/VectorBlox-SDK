@@ -1679,7 +1679,7 @@ def gen_softmax(vinode):
 
     batch_size_axis = 0
     for i,s in enumerate(idims):
-        if i==axis or i==batch_size_axis:
+        if i==(axis % len(idims)) or i==batch_size_axis:
             continue
         if s == 1:
             continue
@@ -1742,8 +1742,11 @@ def gen_transpose(vinode, vinodes):
     
     perm_node = vinodes[int(inputs[1].split(':')[0])]
     perm = perm_node.data['arr'].tolist()
+
     test_array = np.random.rand(*input_shape)
-    if np.array_equal(test_array.reshape(output_shape), test_array.transpose(perm)):
+    if tuple(perm) == (0,3,1,2) and input_shape[0] in [1,3]:
+        pass
+    elif np.array_equal(test_array.reshape(output_shape), test_array.transpose(perm)):
         #transpose is equivalent to reshape
         return gen_reshape(vinode)
 
@@ -2332,7 +2335,7 @@ def gen_softmax_graph():
 
 
 def convert_openvino_xml_to_onnx(vinodes, graph_name, version):
-    assert(version == '11')
+    assert(version == '11' or version == '10')
     nodes, inits, inputs, outputs = gen_onnx(vinodes)
     # inputs, outputs = gen_graph_io(vinodes, nodes)
 

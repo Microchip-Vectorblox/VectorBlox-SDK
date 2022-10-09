@@ -1340,6 +1340,10 @@ def conv_populate_attributes(node, json_node, conv_cvi, sp_size, vector_lanes, f
     conv.conv_rows = 0
     row_offset = (min_rows - inc_rows)
 
+    if node.sublayer_shape_0[0] > 0:
+        if row_offset <= min_rows - (node.sublayer_shape[0] - node.sublayer_shape_0[0])*conv.strides[0]:
+            min_rows += (node.sublayer_shape[0] - node.sublayer_shape_0[0])*conv.strides[0]
+
     min_cols = (1+(conv.kernel_shape[1]-1)*conv.dilations[1] +
                 node.sublayer_shape[1]*conv.strides[1])
     inc_cols = conv.strides[1] * node.sublayer_stride[1]

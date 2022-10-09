@@ -789,6 +789,41 @@ def onnx_optimize_remove_RGB2BGR(nodes, inits):
     return nodes, inits
 
 
+def onnx_optimize_nhw1_input(nodes, inputs, inits): # nhwc no longer handled by openvino 2022.1
+    for input in inputs:
+        if input.type.tensor_type.shape.dim[3].dim_value == 1:
+            inodes = get_node_inputs(nodes, input.name)
+            assert(len(inodes) == 1)
+            node = inodes[0]
+
+            scale_shift_nodes = []
+            while 1:
+                next_nodes = get_node_inputs(nodes, node.output[0])
+                if len(next_nodes) == 1:
+                    node = next_nodes[0]
+                    if node in ['Mul', 'Add']:
+                        scale_shift_nodes.append(node)
+                    else:
+                        break
+            if node.op_type == 'Reshape':
+                shape = get_tensor(inits, node.input[1])
+                if len(shape) == 2 and shape[0] == -1:
+                    # change input shape to transposed shape
+                    channels = input.type.tensor_type.shape.dim[3].dim_value
+                    height = input.type.tensor_type.shape.dim[1].dim_value
+                    width = input.type.tensor_type.shape.dim[2].dim_value
+
+                    input.type.tensor_type.shape.dim[1].dim_value = channels
+                    input.type.tensor_type.shape.dim[2].dim_value = height
+                    input.type.tensor_type.shape.dim[3].dim_value = width
+
+                    for snode in scale_shift_nodes:
+                        w = get_tensor(inits, snode.input[1])
+                        w_t = w.transpose((0,3,1,2))
+                        inits = set_tensor(inits, snode.input[1], w_t)
+    return nodes, inputs, inits
+
+
 def onnx_optimize_remove_nhwc_input_transpose(nodes, inputs):
 
     for input in inputs:
@@ -862,6 +897,7 @@ def onnx_optimize_graph(model_src, model_dst, verbose=False):
 
     
     nodes, inputs = onnx_optimize_remove_input_identity(nodes, inputs)
+    nodes, inputs, inits = onnx_optimize_nhw1_input(nodes, inputs, inits) # nhwc no longer handled by openvino 2022.1
     nodes, inputs = onnx_optimize_remove_nhwc_input_transpose(nodes, inputs)
     nodes, outputs = onnx_optimize_remove_nhwc_output_transpose(nodes, outputs)
 

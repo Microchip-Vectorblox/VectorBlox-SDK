@@ -317,7 +317,8 @@ def mxp_remove_nop_identity(network):
                 next_layer = network['layers'][n]
                 prev_layers = [p for p, prev in enumerate(network['layers']) if next_layer['input_id'] == prev['output_id']]
                 if len(prev_layers) == 1 and next_layer['op_type'] not in ['Gemm']:
-                    nop_pairs.append((l, n))
+                    if next_layer['op_type'] not in ['Conv'] or (next_layer['input_shape'][-2:] != (1,1)  and tuple(next_layer['kernel_shape'][-2:]) != (1,1)):
+                        nop_pairs.append((l, n))
 
     for l, n in nop_pairs:
         nop_layer = network['layers'][l]
