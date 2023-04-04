@@ -36,7 +36,7 @@ mo --input_model genderage.onnx \
 --output fullyconnected0,fullyconnected1
 
 echo "Generating VNNX for V1000 configuration..."
-generate_vnnx -x genderage.xml  -c V1000 -f ../../sample_attributes -o genderage.vnnx --bias-correction
+generate_vnnx -x genderage.xml  -c V1000 -f ../../sample_attributes -o genderage.vnnx --bias-correction --samples-count 48
 
 echo "Running Simulation..."
 python $VBX_SDK/example/python/genderage.py genderage.vnnx ../../test_images/John_faceAtr.jpg

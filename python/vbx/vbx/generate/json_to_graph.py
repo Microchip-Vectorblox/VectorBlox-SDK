@@ -1408,10 +1408,8 @@ def conv_populate_attributes(node, json_node, conv_cvi, sp_size, vector_lanes, f
                         node.scratchpad_bytes = layer_output_bytes*conv.maps*(conv.rows+m_extra)*((conv.n+conv.strides[1]-1)//conv.strides[1]+n_extra)
                     is_set = True
             else:
-                rows = max(4, min_rows)
+                rows = min_rows
                 irows = min_rows
-                while irows < 4:
-                    irows += conv.inc_rows
 
                 conv.acc_maps = 1
                 max_output_maps = parallel_output_maps

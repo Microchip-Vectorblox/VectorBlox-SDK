@@ -773,14 +773,11 @@ def generate_mxp_graph(model_name, activations, stats, first_node_name, last_nod
 
         elif node.op_type in ["MaxPool", "AveragePool"]:
             kernel_shape = np.asarray(get_attr(node, 'kernel_shape')).tolist()
-
-            if node.op_type == "AveragePool": #TODO quick fix for tf average pool quirk
-                if kernel_shape[0] * kernel_shape[1] == previous['m'] * previous['n']:
-                    kernel_shape = [previous['m'], previous['n']]
             strides = np.asarray(get_attr(node, 'strides')).tolist()
             if strides is None:
                 strides = [ 1 for _ in kernel_shape]
             pads = pads6(node)
+
             pool_sublayer = {
                     'op_type': node.op_type,
                     'name': node.name,
@@ -1114,7 +1111,6 @@ def generate_mxp_graph(model_name, activations, stats, first_node_name, last_nod
             }
             network['layers'].append(transpose_layer)
         elif node.op_type == "ReduceMean":
-            assert(get_attr(node, 'axes') == [1])
             shapes = input_shapes
             channels, m, n = shape3d(output_shape)
 

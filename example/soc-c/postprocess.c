@@ -1051,7 +1051,19 @@ fix16_t calcIou_LTRB(fix16_t* A, fix16_t* B){
         return 0;
     }
 }
-
+fix16_t calcIou_XYWH(fix16_t* A, fix16_t* B){
+    // pointers to elements (x, y, width, height)
+    fix16_t left = MAX(A[0] - (A[2]>>1), B[0] - (B[2]>>1));
+    fix16_t right = MIN(A[0] + (A[2]>>1), B[0] + (B[2]>>1));
+    fix16_t top = MAX(A[1] - (A[3]>>1), B[1] - (B[3]>>1));
+    fix16_t bottom = MIN(A[1] + (A[3]>>1), B[1] + (B[3]>>1));
+    fix16_t i = fix16_mul(MAX(0,right-left), MAX(0,bottom-top));    // intersection
+    fix16_t u = fix16_mul(A[2], A[3]) + fix16_mul(B[2], B[3]) - i;  // union
+    if(u>0)
+        return fix16_div(i, u);
+    else
+        return 0;
+}
 
 static fix16_t fix16_eight = F16(8);
 static fix16_t fix16_neight = F16(-8);
@@ -1181,7 +1193,7 @@ fix16_t fix16_exp_lut(fix16_t in){
 }
 
 #define fix16_exp fix16_exp_lut
-static inline fix16_t fix16_logistic_activate(fix16_t x){ return fix16_div(fix16_one, fix16_add(fix16_one, fix16_exp(-x)));} // 1 div, 1 exp
+fix16_t fix16_logistic_activate(fix16_t x){ return fix16_div(fix16_one, fix16_add(fix16_one, fix16_exp(-x)));} // 1 div, 1 exp
 
 void fix16_softmax(fix16_t *input, int n, fix16_t *output)
 {
@@ -1828,7 +1840,9 @@ int pprint_post_process(const char *name, const char *str, model_t *model, vbx_c
 		char **lpr = NULL;
 		int output_len, output_depth;
 		int merge_repeated = 1;
-		char *is_chinese = strstr(name, "barrier");
+		char *is_chinese = strstr(name, "arrier");
+		if (is_chinese == NULL) is_chinese = strstr(name, "ARRIER");
+
 		if (is_chinese) {
 			lpr = lpr_chinese_characters;
 			output_depth = 71;
@@ -1857,7 +1871,9 @@ int pprint_post_process(const char *name, const char *str, model_t *model, vbx_c
 		fix16_t thresh = F16(0.3);
 		fix16_t iou = F16(0.4);
 
-		char *is_tiny = strstr(name, "tiny");
+		char *is_tiny = strstr(name, "iny");
+		if (is_tiny == NULL) is_tiny = strstr(name, "INY");
+
 		if(!strcmp(str, "YOLOV2")){ //tiny yolo v2
 			int output_length = (int)(model_get_output_length(model, 0));
 			int num_outputs = 1;
@@ -1956,8 +1972,19 @@ int pprint_post_process(const char *name, const char *str, model_t *model, vbx_c
 				valid_boxes = post_process_yolo(outputs, num_outputs, cfg, thresh, iou, boxes, max_boxes);
 			} else {
 				int num_outputs = 3;
-				fix16_t *outputs[3];
 				int output_sizes[3] = {255*19*19, 255*38*38, 255*76*76};
+				int i = 608, o0 = 19, o1 = 38, o2 = 76;
+				int is_416 =  model_get_input_length(model,0) == 3*416*416;
+				if (is_416) {
+					output_sizes[0] = 255*13*13;
+					output_sizes[1] = 255*26*26;
+					output_sizes[2] = 255*52*52;
+					i = 416;
+					o0 = 13;
+					o1 = 26;
+					o2 = 52;
+				}
+				fix16_t *outputs[3];
 				for (int o = 0; o < num_outputs; o++) {
 				  for (int i = 0; i < num_outputs; i++) {
 				    if (model_get_output_length(model,i) == output_sizes[o]) {
@@ -1965,15 +1992,17 @@ int pprint_post_process(const char *name, const char *str, model_t *model, vbx_c
 				    }
 				  }
 				}
+
 				fix16_t anchors[] = {F16(10),F16(13),F16(16),F16(30),F16(33),F16(23),F16(30),F16(61),F16(62),F16(45),F16(59),F16(119),F16(116),F16(90),F16(156),F16(198),F16(373),F16(326)};
 				int mask_0[] = {6,7,8};
 				int mask_1[] = {3,4,5};
 				int mask_2[] = {0,1,2};
 
+
 				yolo_info_t cfg_0 = {
 					.version = 3,
-					.input_dims = {3, 608, 608},
-					.output_dims = {255, 19, 19},
+					.input_dims = {3, i, i},
+					.output_dims = {255, o0, o0},
 					.coords = 4,
 					.classes = 80,
 					.num = 9,
@@ -1985,8 +2014,8 @@ int pprint_post_process(const char *name, const char *str, model_t *model, vbx_c
 
 				yolo_info_t cfg_1 = {
 					.version = 3,
-					.input_dims = {3, 608, 608},
-					.output_dims = {255, 38, 38},
+					.input_dims = {3, i, i},
+					.output_dims = {255, o1, o1},
 					.coords = 4,
 					.classes = 80,
 					.num = 9,
@@ -1997,8 +2026,8 @@ int pprint_post_process(const char *name, const char *str, model_t *model, vbx_c
 				};
 				yolo_info_t cfg_2 = {
 					.version = 3,
-					.input_dims = {3, 608, 608},
-					.output_dims = {255, 76, 76},
+					.input_dims = {3, i, i},
+					.output_dims = {255, o2, o2},
 					.coords = 4,
 					.classes = 80,
 					.num = 9,
@@ -2076,7 +2105,9 @@ int pprint_post_process(const char *name, const char *str, model_t *model, vbx_c
 		}
 		else if (!strcmp(str, "SSDV2")){
 			fix16_t* output_buffers[12];
-			char *is_vehicle = strstr(name, "vehicle");
+			char *is_vehicle = strstr(name, "ehicle");
+			if (is_vehicle == NULL) is_vehicle = strstr(name, "EHICLE");
+
 			fix16_t confidence_threshold=F16(0.5);
 			fix16_t nms_threshold=F16(0.4);
 			if (is_vehicle) {

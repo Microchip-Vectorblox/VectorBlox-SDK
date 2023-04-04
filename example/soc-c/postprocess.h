@@ -19,6 +19,10 @@
 extern "C" {
 #endif
 
+//#define fix16_exp fix16_exp_lut
+fix16_t fix16_logistic_activate(fix16_t x);
+
+
 typedef struct {
     int xmin;
     int xmax;
@@ -55,17 +59,45 @@ extern char *voc_classes[20];
 extern char *coco_classes[80];
 extern char* coco91_classes[92];
 extern char* vehicle_classes[3];
+
+typedef unsigned char uchar;
+
+typedef struct
+{
+    uchar* data;
+    int rows;
+    int cols;
+    int channels;
+}cMat;
+
 typedef struct {
     fix16_t box[4]; // (left, top, right, bottom)
     fix16_t points[6][2]; // (left eye, right eye, nose, mouth)(x,y)
     fix16_t detectScore;
 } face_t;
+
+#define PLATE_LENGTH 12
+typedef struct {
+    fix16_t lpbox[4];
+    fix16_t keypoints[8];
+    fix16_t detect_Score;
+    int stride;
+    fix16_t recScore;
+    char name[PLATE_LENGTH];
+    short track_val;
+} plateT;
+
+
 fix16_t calcIou_LTRB(fix16_t* A, fix16_t* B);
+fix16_t calcIou_XYWH(fix16_t* A, fix16_t* B);
+
 int post_process_blazeface(face_t faces[],fix16_t* scores,fix16_t* points,int scoresLength,int max_faces, fix16_t anchorsScale);
 int post_process_retinaface(face_t faces[],int max_faces, fix16_t *network_outputs[9],int image_width,int image_height,
                             fix16_t confidence_threshold, fix16_t nms_threshold);
 int post_process_scrfd(face_t faces[], int max_faces, fix16_t *network_outputs[9], int image_width, int image_height, 
                             fix16_t confidence_threshold, fix16_t nms_threshold);
+int post_process_lpd(plateT plates[],int max_plates, fix16_t *detectOutputs[9], int image_width, int image_height,
+                            fix16_t confidence_threshold, fix16_t nms_threshold,int detectNumOutputs);
 
 int post_process_ssdv2(fix16_box *boxes, int max_boxes,
                        fix16_t *network_outputs[12], int num_classes,

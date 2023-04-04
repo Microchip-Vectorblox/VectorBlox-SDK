@@ -379,11 +379,16 @@ def onnx_breakout_pad(nodes,inits):
                 if get_attr(node, 'auto_pad') == b'SAME_UPPER' or get_attr(node, 'auto_pad') == b'SAME_LOWER':
                     kh_diff = get_attr(node, 'kernel_shape')[0] - get_attr(node, 'strides')[0]
                     kw_diff = get_attr(node, 'kernel_shape')[1] - get_attr(node, 'strides')[1]
+                    kh_, kh = (kh_diff+1) // 2, kh_diff // 2
+                    kw_, kw = (kw_diff+1) // 2, kw_diff // 2
+
                     if kh_diff > 0 or kw_diff > 0:
                         if get_attr(node, 'auto_pad') == b'SAME_UPPER':
-                            pads = [0, 0, kh_diff, kw_diff]
+                            pads = [kh, kw, kh_, kw_]
                         elif get_attr(node, 'auto_pad') == b'SAME_LOWER':
-                            pads = [kh_diff, kw_diff, 0, 0]
+                            pads = [kh_, kw_, kh, kw]
+                        attr = [_ for _ in node.attribute if _.name == "auto_pad"][0]
+                        node.attribute.remove(attr)
                         set_attr(node, 'auto_pad', b'VALID')
                         node.attribute.extend([onnx.helper.make_attribute("pads", pads)])
 
@@ -445,6 +450,23 @@ def onnx_breakout_pad(nodes,inits):
                 pad = onnx.helper.make_node('Pad', [node.input[0],"pads_"+buf,"value_"+buf], [buf], name=buf)
                 node.input[0] = buf
                 nodes_to_inject += [pad]
+        elif node.op_type == "AveragePool":
+            if has_attr(node, "auto_pad") and not has_attr(node, "pads"):
+                    kh_diff = get_attr(node, 'kernel_shape')[0] - get_attr(node, 'strides')[0]
+                    kw_diff = get_attr(node, 'kernel_shape')[1] - get_attr(node, 'strides')[1]
+                    kh_, kh = (kh_diff+1) // 2, kh_diff // 2
+                    kw_, kw = (kw_diff+1) // 2, kw_diff // 2
+
+                    if kh_diff > 0 or kw_diff > 0:
+                        if get_attr(node, 'auto_pad') == b'SAME_UPPER':
+                            pads = [kh, kw, kh_, kw_]
+                        elif get_attr(node, 'auto_pad') == b'SAME_LOWER':
+                            pads = [kh_, kw_, kh, kw]
+                        attr = [_ for _ in node.attribute if _.name == "auto_pad"][0]
+                        node.attribute.remove(attr)
+                        set_attr(node, 'auto_pad', b'VALID')
+                        node.attribute.extend([onnx.helper.make_attribute("pads", pads)])
+
     for node in nodes_to_inject:
         idx = get_node_source_index(nodes, node.input[0]) + 1
         nodes = nodes[:idx] + [node] + nodes[idx:]
@@ -905,7 +927,7 @@ def onnx_optimize_graph(model_src, model_dst, verbose=False):
     nodes, inits = onnx_optimize_replace_gemm_width_conv(nodes, inits)
     nodes = onnx_optimize_activations_up_reshape(nodes)
 
-    onnx_save_graph(nodes, inputs, outputs, inits, model_dst, model_dst, infer_shapes=True)
+    onnx_save_graph(nodes, inputs, outputs, inits, model_dst, model_dst)
     model = onnx.load(model_dst)
     graph = model.graph
     inputs, outputs = graph.input, graph.output

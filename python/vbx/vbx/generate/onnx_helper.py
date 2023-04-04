@@ -115,7 +115,7 @@ def change_input_dim(model, batch_dim=None):
             dim1.dim_param = sym_batch_dim
 
 
-def onnx_save_model(graph, fname, infer_shapes=False, producer=None):
+def onnx_save_model(graph, fname, infer_shapes=True, producer=None):
     checker.check_graph(graph)
     if producer:
         model_proto = helper.make_model(graph, producer=producer)
@@ -132,7 +132,7 @@ def onnx_save_model(graph, fname, infer_shapes=False, producer=None):
 
 
 
-def onnx_save_graph(nodes, inputs, outputs, inits, fname, graph_name, infer_shapes=False, producer=None):
+def onnx_save_graph(nodes, inputs, outputs, inits, fname, graph_name, infer_shapes=True, producer=None):
     graph = onnx.helper.make_graph(nodes, graph_name, inputs, outputs, inits)
     onnx_save_model(graph, fname, infer_shapes, producer)
 

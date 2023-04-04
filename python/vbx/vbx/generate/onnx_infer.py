@@ -157,16 +157,23 @@ def onnx_activations_batched(model_name, input_array, batch=2, stats_only=False,
                 stat = {"mean":np.mean(arr,axis=reduce_axis) / (input_array.shape[0]/arr.shape[0]),
                         "min":np.min(arr,axis=reduce_axis),
                         "max":np.max(arr,axis=reduce_axis)}
-                if out.name in histogram_dict.keys():
-                    stat["hist"] = collect_histogram_data(arr, None)
-                old_stat = stat
+                old_stat = None
                 if out.name in stats:
                     old_stat = stats[out.name]
-                stats[out.name] = {"mean":stat['mean'] + old_stat['mean'],
-                                   "min":np.minimum(stat['min'],old_stat['min']),
-                                   "max":np.maximum(stat['max'],old_stat['max'])}
+
+                if old_stat:
+                    stats[out.name] = {"mean":stat['mean'] + old_stat['mean'],
+                                       "min":np.minimum(stat['min'],old_stat['min']),
+                                       "max":np.maximum(stat['max'],old_stat['max'])}
+                else:
+                    stats[out.name] = {"mean":stat['mean'],
+                                       "min":stat['min'],
+                                       "max":stat['max']}
                 if out.name in histogram_dict.keys():
-                    stats[out.name]["hist"] = collect_histogram_data(arr, stat['hist'])
+                    if old_stat:
+                        stats[out.name]["hist"] = collect_histogram_data(arr, old_stat['hist'])
+                    else:
+                        stats[out.name]["hist"] = collect_histogram_data(arr, None)
             else:
                 if out.name in activations:
                     activations[out.name] = np.vstack((activations[out.name], arr))
@@ -324,8 +331,7 @@ def onnx_gather_stats(onnx_model, nodes, input, count, scale, kld_threshold=Fals
                 'min': stats[output]['min']}
         if 'hist' in stats[output]:
             (hist, hist_edges, min_val, max_val, th) = stats[output]['hist']
-            _, _, _, opt = get_optimal_threshold(stats[output]['hist'], valid_kld[output])
-
+            _min, _max, opt, min_div = get_optimal_threshold(stats[output]['hist'], 255)
             entry['kld'] = opt
 
         stats_list.append(entry)

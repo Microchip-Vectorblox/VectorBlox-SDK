@@ -223,6 +223,8 @@ def gen_conv(vinode):
 
 
     return nodes, inits
+
+
 def auto_pad_calc(auto_pad,input_shape,kernel_size,stride,dilations):
     pads=[0 for i in range(4)]
     if auto_pad in ("SAME_UPPER","SAME_LOWER"):
@@ -485,17 +487,30 @@ def gen_maxpool_10(vinode):
     if 'rounding_type' in vinode.data and vinode.data['rounding_type'] == 'ceil':
         ceil_mode = 1
 
-    node = onnx.helper.make_node(
-            'MaxPool',
-            inputs=inputs,
-            outputs=outputs,
-            strides = as_int(vinode.data['strides']),
-            kernel_shape = as_int(vinode.data['kernel']),
-            # auto_pad = "SAME_UPPER",
-            pads = pads,
-            ceil_mode = ceil_mode,
-            name = str(vinode.id),
-            )
+    use_pads = ('auto_pad' in vinode.data and vinode.data['auto_pad'] == 'explicit')
+
+    if use_pads:
+        node = onnx.helper.make_node(
+                'MaxPool',
+                inputs=inputs,
+                outputs=outputs,
+                strides = as_int(vinode.data['strides']),
+                kernel_shape = as_int(vinode.data['kernel']),
+                pads = pads,
+                ceil_mode = ceil_mode,
+                name = str(vinode.id),
+                )
+    else:
+        node = onnx.helper.make_node(
+                'MaxPool',
+                inputs=inputs,
+                outputs=outputs,
+                strides = as_int(vinode.data['strides']),
+                kernel_shape = as_int(vinode.data['kernel']),
+                auto_pad = vinode.data['auto_pad'].upper(),
+                ceil_mode = ceil_mode,
+                name = str(vinode.id),
+                )
     nodes.append(node)
 
     return nodes, inits
@@ -508,20 +523,41 @@ def gen_avgpool_10(vinode):
     pads = as_int(vinode.data['pads_begin']) + as_int(vinode.data['pads_end'])
 
     ceil_mode = 0
-    if 'rounding_type' in vinode.data and vinode.data['rounding_type'] == 'ceil':
+    if 'rounding_type' in vinode.data and (vinode.data['rounding_type'] == 'ceil'):
         ceil_mode = 1
 
-    node = onnx.helper.make_node(
-            'AveragePool',
-            inputs=inputs,
-            outputs=outputs,
-            strides = as_int(vinode.data['strides']),
-            kernel_shape = as_int(vinode.data['kernel']),
-            # auto_pad = "SAME_UPPER",
-            pads = pads,
-            ceil_mode = ceil_mode,
-            name = str(vinode.id),
-            )
+    use_pads = ('auto_pad' in vinode.data and vinode.data['auto_pad'] == 'explicit')
+
+    # exclude_pad = not ('auto_pad' in vinode.data and vinode.data['auto_pad'] == 'valid') and ('exclude-pad' in vinode.data and vinode.data['exclude-pad'])
+
+    count_include_pad = 0
+    if 'exclude-pad' in vinode.data and vinode.data['exclude-pad'].lower() == 'false':
+        count_include_pad = 1
+
+    if use_pads:
+        node = onnx.helper.make_node(
+                'AveragePool',
+                inputs=inputs,
+                outputs=outputs,
+                strides = as_int(vinode.data['strides']),
+                kernel_shape = as_int(vinode.data['kernel']),
+                pads = pads,
+                count_include_pad = count_include_pad,
+                ceil_mode = ceil_mode,
+                name = str(vinode.id),
+                )
+    else:
+        node = onnx.helper.make_node(
+                'AveragePool',
+                inputs=inputs,
+                outputs=outputs,
+                strides = as_int(vinode.data['strides']),
+                kernel_shape = as_int(vinode.data['kernel']),
+                auto_pad = vinode.data['auto_pad'].upper(),
+                count_include_pad = count_include_pad,
+                ceil_mode = ceil_mode,
+                name = str(vinode.id),
+                )
     nodes.append(node)
 
     return nodes, inits

@@ -18,6 +18,13 @@ weighted_nodes = ["Conv", "Gemm", "Mul"]
 memoized_weighted = {}
 
 
+def get_max(stat):
+    if 'kld' in stat:
+        return stat['kld']
+
+    return np.max(stat['abs'])
+
+
 def get_previous_weighted(nodes, node): #grabs previous node with weights
     global memoized_weighted
 
@@ -56,7 +63,7 @@ def get_previous_max(nodes, inits, statistics, node):
     if previous_weighted is None: # grabs input
         previous = get_previous_nodes(nodes, node)
         if len(previous) == 0:
-            return np.max(statistics[node.input[0]]['abs'])
+            return get_max(statistics[node.input[0]])
         else:
             assert(len(previous) == 1)
             return get_previous_max(nodes, inits, statistics, previous[0])
@@ -74,7 +81,7 @@ def get_previous_max(nodes, inits, statistics, node):
                     if next_nodes[0].op_type in ['Argmax']:
                         return np.asarray(1.)
                     if next_nodes[0].op_type in ['LRN']:
-                        return np.max(statistics[next_nodes[0].output[0]]['abs'])
+                        return get_max(statistics[next_nodes[0].output[0]])
 
             return get_previous_max(nodes, inits, statistics, previous_weighted[0])
     else:
@@ -105,13 +112,13 @@ def get_node_max(nodes,inits,statistics,node):
 
 
     if relu_after:
-        return np.max(statistics[relu_after.output[0]]['abs'])
+        return get_max(statistics[relu_after.output[0]])
         # return min(statistics[node.output[0]], statistics[relu_after.output[0]])
     elif clip_after:
-        return np.max(statistics[clip_after.output[0]]['abs'])
+        return get_max(statistics[clip_after.output[0]])
         # return min(statistics[node.output[0]], statistics[clip_after.output[0]])
     else:
-        return np.max(statistics[node.output[0]]['abs'])
+        return get_max(statistics[node.output[0]])
 
 
 def onnx_normalize_convolve(inits, arr, group, previous_max, next_max):
@@ -139,6 +146,8 @@ def onnx_normalize_graph(nodes, inits, outputs, statistics, verbose=False):
         clip_max = get_tensor(inits, node.input[2])
         current_max = statistics[one_elem(node.output)]['abs']
         statistics[one_elem(node.output)]['abs'] = np.ones(current_max.shape, dtype=current_max.dtype)* clip_max
+        if 'kld' in statistics[one_elem(node.output)]: #TODO
+            statistics[one_elem(node.output)]['kld'] = np.ones((1,), dtype=current_max.dtype)* clip_max
 
     for n, node in enumerate(nodes):
         inputs = get_node_inputs(nodes, node.output[0])

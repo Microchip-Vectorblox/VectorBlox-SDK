@@ -5,7 +5,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-x', '--xml', help='OpenVINO I8 model description (.xml)', required=True)
     parser.add_argument('-f', '--samples-folder', help='provide folder of sample images to gather layer statistics',required=True)
-    parser.add_argument('-sc', '--samples-count', type=int, help='provide max number of sample images to run')
+    parser.add_argument('-sc', '--samples-count', type=int, default=32, help='provide max number of sample images to run')
     parser.add_argument('-i', '--image', help='provide test input image for model, must be correct dimensions')
     parser.add_argument('-c', '--size-conf', help='size configuration to build model for',
                         choices = ['V250','V500','V1000'], required=True)
