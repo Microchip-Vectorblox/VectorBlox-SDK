@@ -116,6 +116,7 @@ static void* mmap_vbx_registers(int fd, int dev_num){
   return uio_mmap(fd, dev_num,0);
 
 }
+#if MSS_DDR
 #define DMA_DEV "udmabuf-ddr-nc0"
 static size_t uio_dma_size(){
   const char* filename="/sys/class/u-dma-buf/" DMA_DEV "/size";
@@ -141,14 +142,29 @@ static uintptr_t uio_dma_phys_addr(){
   uintptr_t addr=u64_from_attribute(filename);
   return addr;
 }
+#else
+static size_t uio_dma_size(){
+  return 512*1024*1024;
+}
+static void* mmap_vbx_dma(){
+  int fd = open("/dev/mem", O_RDWR);
+
+  size_t size = uio_dma_size();
+  void* _ptr = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0x3000000000 + 0x100000);
+  //memset(_ptr,0,size);
+  close(fd);
+
+  return _ptr;
+}
+static uintptr_t uio_dma_phys_addr(){
+  return 0x100000;
+}
+#endif
 static inline void* virt_to_phys(vbx_cnn_t* vbx_cnn,void* virt){
   return (char*)(virt) + vbx_cnn->dma_phys_trans_offset;
 }
-//static inline void* phys_to_virt(vbx_cnn_t* vbx_cnn,void* phys){
-//  return (char*)(phys) - vbx_cnn->dma_phys_trans_offset;
-//}
 #else
-static inline void* virt_to_phys(vbx_cnn_t* vbx_cnn,void* virt){
+void* virt_to_phys(vbx_cnn_t* vbx_cnn,void* virt){
 	return virt;
 }
 #endif //!VBX_SOC_DRIVER
@@ -181,6 +197,7 @@ vbx_cnn_t *vbx_cnn_init(void *ctrl_reg_addr,void *instruction_blob) {
   the_cnn->io_buffers = vbx_allocate_dma_buffer(the_cnn, MAX_IO_BUFFERS * sizeof(vbx_cnn_io_ptr_t), 3);
 #else
   void* dma_instr_blob = instruction_blob;
+  the_cnn->dma_phys_trans_offset = 0;
 #endif //VBX_SOC_DRIVER
   if (((uintptr_t)virt_to_phys(the_cnn,dma_instr_blob)) & (1024 * 1024 * 2 - 1)) {
     // instruction_blob must be aligned to a 2M boundary
@@ -202,6 +219,7 @@ vbx_cnn_t *vbx_cnn_init(void *ctrl_reg_addr,void *instruction_blob) {
   write_register(the_cnn->ctrl_reg,ELF_OFFSET,(uintptr_t)virt_to_phys(the_cnn,dma_instr_blob) & 0xFFFFFFFF);
   write_register(the_cnn->ctrl_reg,CTRL_OFFSET, 0);
   the_cnn->initialized = 1;
+  the_cnn->output_valid = 0;
   the_cnn->debug_print_ptr=0;
   return the_cnn;
 }
@@ -224,13 +242,19 @@ void* vbx_allocate_dma_buffer(vbx_cnn_t* vbx_cnn,size_t request_size,size_t phys
 void* vbx_get_dma_pointer(vbx_cnn_t* vbx_cnn){
   return (void*)(vbx_cnn->dma_buffer);
 }
+#else
+extern void* ddr_uncached_allocate(size_t size);
+void* vbx_allocate_dma_buffer(vbx_cnn_t* vbx_cnn,size_t request_size,size_t phys_alignment_bits){
+	return ddr_uncached_allocate(request_size);
+}
 #endif
-
 
 
 vbx_cnn_err_e vbx_cnn_get_error_val(vbx_cnn_t *vbx_cnn) {
   return read_register(vbx_cnn->ctrl_reg,ERR_OFFSET);
 }
+
+
 int vbx_cnn_model_start(vbx_cnn_t *vbx_cnn, model_t *model,
                         vbx_cnn_io_ptr_t io_buffers[]) {
 #if VBX_SOC_DRIVER
@@ -265,6 +289,7 @@ int vbx_cnn_model_start(vbx_cnn_t *vbx_cnn, model_t *model,
     return -1;
   }
 }
+
 
 vbx_cnn_state_e vbx_cnn_get_state(vbx_cnn_t *vbx_cnn) {
   uint32_t ctrl_reg = read_register(vbx_cnn->ctrl_reg,CTRL_OFFSET);
@@ -307,6 +332,7 @@ vbx_cnn_state_e vbx_cnn_get_state(vbx_cnn_t *vbx_cnn) {
   return state;
 }
 
+
 int vbx_cnn_model_poll(vbx_cnn_t *vbx_cnn) {
   int status = read_register(vbx_cnn->ctrl_reg,CTRL_OFFSET);
   if (status & CTRL_REG_SOFT_RESET) {
@@ -324,4 +350,53 @@ int vbx_cnn_model_poll(vbx_cnn_t *vbx_cnn) {
     return 1;
   }
   return -2;
+}
+
+
+int vbx_cnn_model_wfi(vbx_cnn_t *vbx_cnn) {
+#if VBX_SOC_DRIVER
+  uint32_t icount = 0U;
+  uint32_t pending = 0;
+  uint32_t reenable = 1;
+  ssize_t readSize = read(vbx_cnn->fd, &pending, sizeof(uint32_t));
+  if(readSize < 0) {
+    close(vbx_cnn->fd);
+    return -1;
+  }
+
+  while(icount < 1000) icount++;
+  icount = 0U;
+  
+  vbx_cnn_model_isr(vbx_cnn);
+
+  while(icount < 1000) icount++;
+  icount = 0U;
+
+  ssize_t writeSize = write(vbx_cnn->fd, &reenable, sizeof(uint32_t));
+  if(writeSize < 0) {
+    close(vbx_cnn->fd);
+    return -1;
+  }
+#else
+  while(1) {
+	if(vbx_cnn->output_valid) {
+		break;
+	}
+  }
+#endif
+  vbx_cnn->output_valid = 0;
+  int status = vbx_cnn_model_poll(vbx_cnn);
+  if (status == -2) return 0;
+  return status;
+}
+
+void vbx_cnn_model_isr(vbx_cnn_t *vbx_cnn) {
+	if(read_register(vbx_cnn->ctrl_reg,CTRL_OFFSET) & CTRL_REG_OUTPUT_VALID){
+		write_register(vbx_cnn->ctrl_reg,CTRL_OFFSET,CTRL_REG_OUTPUT_VALID);
+		vbx_cnn->output_valid = 1U;
+		while (read_register(vbx_cnn->ctrl_reg,CTRL_OFFSET) & CTRL_REG_OUTPUT_VALID) {
+			uint32_t icount = 0U;
+			while(icount < 1000) icount++;
+		}
+	}
 }

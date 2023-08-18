@@ -25,7 +25,7 @@ echo "Downloading lpr_eu_v3..."
 [ -f lpr_eu_v3.onnx ] || wget https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/Releases/ModelZoo/lpr_eu_v3.onnx
 
 echo "Running Model Optimizer..."
-# model details @ 
+# model details @ pytorch/lpr_eu_v3/README.md
 mo --input_model lpr_eu_v3.onnx \
 --scale_values [255.] \
 --reverse_input_channels \

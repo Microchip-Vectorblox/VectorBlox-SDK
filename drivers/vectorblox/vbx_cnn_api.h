@@ -62,20 +62,23 @@ typedef struct {
 	int32_t initialized;
 	uint32_t version;
 	uint32_t size;/*vbx_cnn_size_conf_e*/
+	volatile uint32_t output_valid;
 	void* instruction_blob;
 	volatile uint32_t* ctrl_reg;
-  int debug_print_ptr;
+  	int debug_print_ptr;
+  	size_t  dma_phys_trans_offset;
 #if defined(VBX_SOC_DRIVER) || defined(SPLASHKIT_PCIE)
-    int fd;
-    uint8_t* dma_buffer;
-    uint8_t* dma_buffer_end;
-  size_t  dma_phys_trans_offset;
-  vbx_cnn_io_ptr_t *io_buffers;
+    	int fd;
+    	uint8_t* dma_buffer;
+    	uint8_t* dma_buffer_end;
+  	vbx_cnn_io_ptr_t *io_buffers;
 #endif
 
 }vbx_cnn_t;
 
 #if VBX_SOC_DRIVER || SPLASHKIT_PCIE
+  void* vbx_allocate_dma_buffer(vbx_cnn_t* vbx_cnn,size_t request_size,size_t align);
+#else
   void* vbx_allocate_dma_buffer(vbx_cnn_t* vbx_cnn,size_t request_size,size_t align);
 #endif
 /**
@@ -155,6 +158,21 @@ vbx_cnn_state_e vbx_cnn_get_state(vbx_cnn_t* vbx_cnn);
  *         -2 No Network Running
  */
 int vbx_cnn_model_poll(vbx_cnn_t* vbx_cnn);
+
+/**
+ * Wait for output_valid interrupt
+ *
+ * @param vbx_cnn The vbx_cnn object to use
+ *
+ * @return 1 if network running
+ *         0 if network done
+ *         -1 if error processing network
+ *         -2 No Network Running
+ */
+int vbx_cnn_model_wfi(vbx_cnn_t* vbx_cnn);
+
+void vbx_cnn_model_isr(vbx_cnn_t *vbx_cnn);
+
 
 /**
  * Model Parsing Function

@@ -64,11 +64,12 @@ int main(int argc, char** argv){
 	void* firmware_blob = NULL;
 	vbx_cnn_t* vbx_cnn = vbx_cnn_init(ctrl_reg_addr,firmware_blob);
 
-	if(argc < 4){
+	if(argc < 3){
 		fprintf(stderr,
-		"Usage: %s MODEL_FILE IMAGE.jpg POST_PROCESS\n"
-		"   POST_PROCESS controls what post-processing routines to use\n"
-		"      must be one of CLASSIFY, YOLOV2, YOLOV3, YOLOV4, YOLOV5, BLAZEFACE, SCRFD, RETINAFACE, SSDV2, PLATE\n",
+		"Usage: %s FIRMWARE_FILE MODEL_FILE IMAGE.jpg [POST_PROCESS]\n"
+		"   if using POST_PROCESS to select post-processing, must be one of:\n"
+		"   CLASSIFY, YOLOV2, YOLOV3, YOLOV4, YOLOV5,\n"
+		"   BLAZEFACE, SCRFD, RETINAFACE, SSDV2, PLATE, LPD, LPR\n",
 				argv[0]);
 		return 1;
 	}
@@ -123,7 +124,7 @@ int main(int argc, char** argv){
 	// data should be available int the output buffers now.
 	
 	// users can modify this post-processing function in post_process.c
-	pprint_post_process(argv[1], argv[3], model, io_buffers);
+	if (argc > 3) pprint_post_process(argv[1], argv[3], model, io_buffers);
 
 
 	unsigned checksum = fletcher32((uint16_t*)(io_buffers[1]),model_get_output_length(model, 0)*sizeof(fix16_t)/sizeof(uint16_t));

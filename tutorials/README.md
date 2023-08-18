@@ -14,8 +14,8 @@ Below is a list of included tutorials. Frames per Second (FPS) assumes the cores
 |[ultralytics.yolov5n.relu](pytorch/ultralytics.yolov5n.relu/ultralytics.yolov5n.relu.sh)|pytorch|Object Detection|mAP(COCO)|32.43/32.1|46.42|32.42|16.48|[More Info](https://github.com/ultralytics/yolov5)|
 |[ultralytics.yolov5s.relu](pytorch/ultralytics.yolov5s.relu/ultralytics.yolov5s.relu.sh)|pytorch|Object Detection|mAP(COCO)|48.9/48.61|18.36|10.22|4.86|[More Info](https://github.com/ultralytics/yolov5)|
 |[ultralytics.yolov5m.relu](pytorch/ultralytics.yolov5m.relu/ultralytics.yolov5m.relu.sh)|pytorch|Object Detection|mAP(COCO)|54.6/54.38|6.68|3.56|1.85|[More Info](https://github.com/ultralytics/yolov5)|
-|[lpd_eu_v42](pytorch/lpd_eu_v42/lpd_eu_v42.sh)|pytorch|License Plate Detection||||||[More Info]()|
-|[lpr_eu_v3](pytorch/lpr_eu_v3/lpr_eu_v3.sh)|pytorch|License Plate Recognition||||||[More Info]()|
+|[lpd_eu_v42](pytorch/lpd_eu_v42/lpd_eu_v42.sh)|pytorch|License Plate Detection||||||[More Info](pytorch/lpd_eu_v42/README.md)|
+|[lpr_eu_v3](pytorch/lpr_eu_v3/lpr_eu_v3.sh)|pytorch|License Plate Recognition||||||[More Info](pytorch/lpr_eu_v3/README.md)|
 |[yolo-v3-tf](tensorflow/yolo-v3-tf/yolo-v3-tf.sh)|tensorflow|Object Detection|||2.35|1.22||[More Info](https://github.com/openvinotoolkit/open_model_zoo/tree/2021.4.2/models/public/yolo-v3-tf/)|
 |[yolov2-voc](darknet/yolov2-voc/yolov2-voc.sh)|darknet|Object Detection|mAP(VOC)|74.79/74.13|6.13|3.38|1.61|[More Info](https://pjreddie.com/darknet/yolo/)|
 |[scrfd_500m_bnkps](onnx/scrfd_500m_bnkps/scrfd_500m_bnkps.sh)|onnx|Face Detection|||79.37|63.25|33.25|[More Info](https://insightface.ai/scrfd)|

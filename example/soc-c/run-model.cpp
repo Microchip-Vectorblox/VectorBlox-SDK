@@ -125,11 +125,12 @@ int gettimediff_us(struct timeval start, struct timeval end) {
 
 int main(int argc, char **argv) {
 
-	if(argc < 5){
+	if(argc < 4){
 		fprintf(stderr,
-		"Usage: %s FIRMWARE_FILE MODEL_FILE IMAGE.jpg POST_PROCESS\n"
-		"   POST_PROCESS controls what post-processing routines to use\n"
-		"      must be one of CLASSIFY, YOLOV2, YOLOV3, YOLOV4, YOLOV5, BLAZEFACE, SCRFD, RETINAFACE, SSDV2, PLATE\n",
+		"Usage: %s FIRMWARE_FILE MODEL_FILE IMAGE.jpg [POST_PROCESS]\n"
+		"   if using POST_PROCESS to select post-processing, must be one of:\n"
+		"   CLASSIFY, YOLOV2, YOLOV3, YOLOV4, YOLOV5,\n"
+		"   BLAZEFACE, SCRFD, RETINAFACE, SSDV2, PLATE, LPD, LPR\n",
 				argv[0]);
 		return 1;
 	}
@@ -175,19 +176,13 @@ int main(int argc, char **argv) {
 				vbx_cnn, model_get_output_length(model, o) * sizeof(uint32_t), 0);
 	}
 
+	printf("Starting inference runs\n");
 	for(int run=0; run < 4; ++run){
-		printf("run %d\n",run);
 		struct timeval tv1, tv2;
 		gettimeofday(&tv1, NULL);
 		int status = vbx_cnn_model_start(vbx_cnn, model, io_buffers);
 
-		uint32_t icount = 0U;
-		while(1) {
-			while(icount < 1000) icount++;
-			icount = 0U;
-			status = vbx_cnn_model_poll(vbx_cnn);
-			if(status != 1) break;
-		}
+		status = vbx_cnn_model_wfi(vbx_cnn);
 
 		gettimeofday(&tv2, NULL);
 		if (status < 0) {
@@ -197,7 +192,7 @@ int main(int argc, char **argv) {
 	}
 
 	// users can modify this post-processing function in post_process.c
-	pprint_post_process(argv[2], argv[4], model, io_buffers);
+	if (argc > 4) pprint_post_process(argv[2], argv[4], model, io_buffers);
 
 	unsigned checksum = fletcher32((uint16_t*)(io_buffers[1]),model_get_output_length(model, 0)*sizeof(fix16_t)/sizeof(uint16_t));
 	for(unsigned o =1;o<model_get_num_outputs(model);++o){

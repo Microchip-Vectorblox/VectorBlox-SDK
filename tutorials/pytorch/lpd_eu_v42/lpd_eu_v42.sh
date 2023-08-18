@@ -25,7 +25,7 @@ echo "Downloading lpd_eu_v42..."
 [ -f lpd_eu_v42.onnx ] || wget https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/Releases/ModelZoo/lpd_eu_v42.onnx
 
 echo "Running Model Optimizer..."
-# model details @ 
+# model details @ pytorch/lpd_eu_v42/README.md
 mo --input_model lpd_eu_v42.onnx \
 --reverse_input_channels \
 --scale_values [255.] \

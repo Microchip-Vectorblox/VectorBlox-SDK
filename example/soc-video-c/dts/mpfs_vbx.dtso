@@ -1,0 +1,41 @@
+/dts-v1/;
+/plugin/;
+/ {
+        fragment@0 {
+                target-path="/";
+                __overlay__ {
+                        fabric@3000000000 {
+                                device_type = "memory";
+                                reg = <0x30 0x0 0x1 0x0>;
+                                status = "okay";
+                        };
+                        apb@40001000 {
+                                compatible = "generic-uio";
+                                reg = <0x0 0x40001000 0x0 0x1000>;
+                                status = "okay";
+                        };
+                        vbx@60030000 {
+                                compatible = "generic-uio";
+                                reg = <0x0 0x60030000 0x0 0x1000>;
+				interrupt-parent = <&plic>;
+				interrupts = <124>; 
+                                status = "okay";
+                        };
+                        scale@60040000 {
+                                compatible = "generic-uio";
+                                reg = <0x0 0x60040000 0x0 0x10000>;
+                                status = "okay";
+                        };
+                        warp@60050000 {
+                                compatible = "generic-uio";
+                                reg = <0x0 0x60050000 0x0 0x10000>;
+                                status = "okay";
+                        };
+                        draw@60060000 {
+                                compatible = "generic-uio";
+                                reg = <0x0 0x60060000 0x0 0x10000>;
+                                status = "okay";
+                        };
+                };
+        };
+};

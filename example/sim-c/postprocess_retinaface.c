@@ -13,7 +13,7 @@ static inline fix16_t softmaxRetinaface(fix16_t a,fix16_t b){
 
 
 
-int post_process_retinaface(face_t faces[],int max_faces, fix16_t *network_outputs[9],
+int post_process_retinaface(object_t faces[],int max_faces, fix16_t *network_outputs[9],
                             int image_width, int image_height,
                             fix16_t confidence_threshold, fix16_t nms_threshold){
 
@@ -91,7 +91,7 @@ int post_process_retinaface(face_t faces[],int max_faces, fix16_t *network_outpu
     int facesLength = 0;
     for(int n=0; n<orderLength; n++){
         int ind = order[n];
-        faces[facesLength].detectScore = scores[ind];
+        faces[facesLength].detect_score = scores[ind];
 
         // get map number from index
         int mapNum = 0;

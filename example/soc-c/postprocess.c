@@ -1584,7 +1584,7 @@ static fix16_t calcIou(fix16_t* A, fix16_t* B){
 		return 0;
 }
 
-int post_process_blazeface(face_t faces[],fix16_t* scores,fix16_t* points,int scoresLength,int max_faces, fix16_t anchorsScale) {
+int post_process_blazeface(object_t faces[],fix16_t* scores,fix16_t* points,int scoresLength,int max_faces, fix16_t anchorsScale) {
 
 	fix16_t min_suppression_threshold = F16(0.3);
 	fix16_t raw_thresh = F16(1.0986122886681098);    // 1.0986122886681098 == -log((1-thresh)/thresh),  thresh=0.75
@@ -1674,7 +1674,7 @@ int post_process_blazeface(face_t faces[],fix16_t* scores,fix16_t* points,int sc
 			faces[facesLength].points[p][0] = blendPoints[p*2+4];
 			faces[facesLength].points[p][1] = blendPoints[p*2+5];
 		}
-		faces[facesLength].detectScore = scores[ind[i1]];
+		faces[facesLength].detect_score = scores[ind[i1]];
 		facesLength++;
 		if(facesLength==max_faces)
 			break;
@@ -1687,7 +1687,7 @@ int pprint_post_process(const char *name, const char *str, model_t *model, vbx_c
 	
 	if (!strcmp(str, "BLAZEFACE")){
 		const int MAX_FACES=24;
-		face_t faces[MAX_FACES];
+		object_t faces[MAX_FACES];
 		// reverse
 		fix16_t* output_buffer0=(fix16_t*)(uintptr_t)io_buffers[2];
 		fix16_t* output_buffer1=(fix16_t*)(uintptr_t)io_buffers[1];
@@ -1703,7 +1703,7 @@ int pprint_post_process(const char *name, const char *str, model_t *model, vbx_c
 					MAX_FACES,fix16_from_int(1));
 		}
 		for(int f=0;f<facesLength;f++){
-			face_t* face = faces+f;
+			object_t* face = faces+f;
 			fix16_t x = face->box[0];
 			fix16_t y = face->box[1];
 			fix16_t w = face->box[2] - face->box[0];
@@ -1714,7 +1714,7 @@ int pprint_post_process(const char *name, const char *str, model_t *model, vbx_c
 		}
 	} else if (!strcmp(str,"RETINAFACE")){
 		const int MAX_FACES=24;
-		face_t faces[MAX_FACES];
+		object_t faces[MAX_FACES];
 		fix16_t confidence_threshold=F16(0.8);
 		fix16_t nms_threshold=F16(0.4);
 
@@ -1745,7 +1745,7 @@ int pprint_post_process(const char *name, const char *str, model_t *model, vbx_c
 				confidence_threshold,nms_threshold);
 
 		for(int f=0;f<facesLength;f++){
-			face_t* face = faces+f;
+			object_t* face = faces+f;
 			fix16_t x = face->box[0];
 			fix16_t y = face->box[1];
 			fix16_t w = face->box[2] - face->box[0];
@@ -1763,9 +1763,51 @@ int pprint_post_process(const char *name, const char *str, model_t *model, vbx_c
 
 
 		}
-	} else if (!strcmp(str,"SCRFD")){
+	} else if (!strcmp(str,"LPD")) {
+		const int MAX_PLATES=10;
+		object_t plates[MAX_PLATES];
+		fix16_t confidence_threshold=F16(0.55);
+		fix16_t nms_threshold=F16(0.2);
+
+		int num_outputs = model_get_num_outputs(model);
+		int image_h = 288;
+		int image_w = 1024;
+	
+		fix16_t* output_buffers[num_outputs];
+		for (int o = 0; o < num_outputs; o++) {
+			output_buffers[o]=(fix16_t*)(uintptr_t)io_buffers[1+o];
+		}
+		int platesLength = post_process_lpd(plates, MAX_PLATES, output_buffers, image_w, image_h,
+				confidence_threshold,nms_threshold, num_outputs);
+
+		for(int f=0;f<platesLength;f++){
+			object_t* plate = plates+f;
+			fix16_t x = plate->box[0];
+			fix16_t y = plate->box[1];
+			fix16_t w = plate->box[2];
+			fix16_t h = plate->box[3];
+			printf("plate %d found at (x,y,w,h) %3.1f %3.1f %3.1f %3.1f\n",f,
+					fix16_to_float(x), fix16_to_float(y),
+					fix16_to_float(w), fix16_to_float(h));
+			printf("landmarks: ");
+			for(int l =0;l<5;++l){
+				printf("%3.1f,%3.1f ",
+						fix16_to_float(plate->points[l][0]),
+						fix16_to_float(plate->points[l][1]));
+				fflush(stdout);
+			}printf("\n");
+
+
+		}
+	} else if (!strcmp(str, "LPR")){
+		char label[20];
+		fix16_t* output=(fix16_t*)(uintptr_t)io_buffers[1];
+		fix16_t conf = post_process_lpr(output, model_get_output_length(model, 0), label);
+		printf("Plate ID: %s Recognition Score: %3.4f\n", label, fix16_to_float(conf));
+
+	} else if (!strcmp(str,"SCRFD")) {
 		const int MAX_FACES=24;
-		face_t faces[MAX_FACES];
+		object_t faces[MAX_FACES];
 		fix16_t confidence_threshold=F16(0.8);
 		fix16_t nms_threshold=F16(0.4);
 
@@ -1797,7 +1839,7 @@ int pprint_post_process(const char *name, const char *str, model_t *model, vbx_c
 				confidence_threshold,nms_threshold);
 
 		for(int f=0;f<facesLength;f++){
-			face_t* face = faces+f;
+			object_t* face = faces+f;
 			fix16_t x = face->box[0];
 			fix16_t y = face->box[1];
 			fix16_t w = face->box[2] - face->box[0];
@@ -1938,8 +1980,6 @@ int pprint_post_process(const char *name, const char *str, model_t *model, vbx_c
 				fix16_t tiny_anchors[] = {F16(10),F16(14),F16(23),F16(27),F16(37),F16(58),F16(81),F16(82),F16(135),F16(169),F16(344),F16(319)}; // 2*num
 				int mask_0[] = {3,4,5};
 				int mask_1[] = {1,2,3};
-				int is_v4 = !strcmp(str, "YOLOV4");
-				int mask_1_v4[] = {0,1,2};
 
 				yolo_info_t cfg_0 = {
 					.version = 3,
@@ -1964,7 +2004,7 @@ int pprint_post_process(const char *name, const char *str, model_t *model, vbx_c
 					.anchors_length = 12,
 					.anchors = tiny_anchors,
 					.mask_length = 3,
-					.mask = is_v4 ? mask_1_v4 : mask_1,
+					.mask = mask_1,
 				};
 
 				yolo_info_t cfg[] = {cfg_0, cfg_1};
