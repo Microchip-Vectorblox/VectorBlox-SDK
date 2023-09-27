@@ -158,13 +158,19 @@ short recognitionDemoInit(vbx_cnn_t* the_vbx_cnn, struct model_descr_t* models, 
 
 	// Allocate Memory needed for the Detect Model buffers
 	detect_model->model_io_buffers  = vbx_allocate_dma_buffer(the_vbx_cnn, (1+model_get_num_outputs(detect_model->model))*sizeof(detect_model->model_io_buffers[0]), 0);
-
+	if(!detect_model->model_io_buffers){
+		printf("Memory allocation issue for model io buffers.\n");
+		return -1;
+	}
 	for (unsigned o = 0; o < model_get_num_outputs(detect_model->model); ++o) {
 		detect_model->model_output_length[o] = model_get_output_length(detect_model->model, o);
 		detect_model->pipelined_output_buffers[0][o] = vbx_allocate_dma_buffer(the_vbx_cnn, model_get_output_length(detect_model->model, o)*sizeof(fix16_t), 0);
 		detect_model->pipelined_output_buffers[1][o] = vbx_allocate_dma_buffer(the_vbx_cnn, model_get_output_length(detect_model->model, o)*sizeof(fix16_t), 0);
 		detect_model->model_io_buffers[o+1] = (uintptr_t)detect_model->pipelined_output_buffers[0][o];
-
+		if(!detect_model->pipelined_output_buffers[0][o] ||!detect_model->pipelined_output_buffers[1][o] ){
+			printf("Memory allocation issue for model output buffers.\n");
+			return -1;	
+		}
 	}
 
 
@@ -172,7 +178,10 @@ short recognitionDemoInit(vbx_cnn_t* the_vbx_cnn, struct model_descr_t* models, 
 	detect_model->pipelined_input_buffer[0] = vbx_allocate_dma_buffer(the_vbx_cnn, model_get_input_length(detect_model->model, 0)*sizeof(uint8_t), 0);
 	detect_model->pipelined_input_buffer[1] = vbx_allocate_dma_buffer(the_vbx_cnn, model_get_input_length(detect_model->model, 0)*sizeof(uint8_t), 0);
 	detect_model->model_io_buffers[0] = (uintptr_t)detect_model->pipelined_input_buffer[0];
-
+	if(!detect_model->pipelined_input_buffer[0] ||!detect_model->pipelined_input_buffer[1]){
+		printf("Memory allocation issue for model input buffers.\n");
+		return -1;	
+	}
 	detect_model->buf_idx = 0;
 	detect_model->is_running = 0;
 
@@ -213,13 +222,24 @@ short recognitionDemoInit(vbx_cnn_t* the_vbx_cnn, struct model_descr_t* models, 
 	}
 	// Allocate the buffer for input for Recognition Model
 	recognition_model->model_input_buffer = vbx_allocate_dma_buffer(the_vbx_cnn, model_get_input_length(recognition_model->model, 0)*sizeof(uint8_t), 0);
+	if(!recognition_model->model_input_buffer){
+		printf("Memory allocation issue with recognition input buffer.\n");
+		return -1;
+	}
 	// Specify the output size for Recognition Model
 	recognition_model->model_output_length[0] = model_get_output_length(recognition_model->model, 0);
 	// Allocate the buffer for output for Recognition Model
 	recognition_model->model_output_buffer[0] = vbx_allocate_dma_buffer(the_vbx_cnn, recognition_model->model_output_length[0]*sizeof(fix16_t), 0);
-
+	if(!recognition_model->model_output_buffer[0]){
+		printf("Memory allocation issue with recognition output buffer.\n");
+		return -1;
+	}
 	// Allocate Memory needed for the Recognition Model buffers
 	recognition_model->model_io_buffers  = vbx_allocate_dma_buffer(the_vbx_cnn, (1+model_get_num_outputs(recognition_model->model))*sizeof(recognition_model->model_io_buffers[0]), 0);
+	if(!recognition_model->model_io_buffers){
+		printf("Memory allocation issue with recognition io buffers.\n");
+		return -1;
+	}
 	recognition_model->model_io_buffers[0] = (uintptr_t)recognition_model->model_input_buffer;
 	recognition_model->model_io_buffers[1] = (uintptr_t)recognition_model->model_output_buffer[0];
 
@@ -233,20 +253,30 @@ short recognitionDemoInit(vbx_cnn_t* the_vbx_cnn, struct model_descr_t* models, 
 		struct model_descr_t *attribute_model = models + modelIdx + 2;
 		// Allocate the buffer for input for Attribute Model
 		attribute_model->model_input_buffer = vbx_allocate_dma_buffer(the_vbx_cnn, model_get_input_length(attribute_model->model, 0)*sizeof(uint8_t), 0);
+		if(!attribute_model->model_input_buffer){
+			printf("Memory allocation issue with attribute input buffer.\n");
+			return -1;
+		}
 		// Specify the output size for Attribute Model
 		attribute_model->model_output_length[0] = model_get_output_length(attribute_model->model, 0); // age output, expecting length 1
 		attribute_model->model_output_length[1] = model_get_output_length(attribute_model->model, 1); // gender output, expecting length 2
 		// Allocate the buffer for output for Attribute Model
 		attribute_model->model_output_buffer[0] = vbx_allocate_dma_buffer(the_vbx_cnn, attribute_model->model_output_length[0]*sizeof(fix16_t), 0);
 		attribute_model->model_output_buffer[1] = vbx_allocate_dma_buffer(the_vbx_cnn, attribute_model->model_output_length[1]*sizeof(fix16_t), 0);
-
+		if(!attribute_model->model_output_buffer[0] ||!attribute_model->model_output_buffer[1]){
+			printf("Memory allocation issue with attribute output buffers.\n");
+			return -1;
+		}
 		// Allocate Memory needed for the Attribute Model buffers
 		attribute_model->model_io_buffers  = vbx_allocate_dma_buffer(the_vbx_cnn, (1+model_get_num_outputs(attribute_model->model))*sizeof(attribute_model->model_io_buffers[0]), 0);
+		if(!attribute_model->model_io_buffers ){
+			printf("Memory allocation issue with attribute io buffers.\n");
+			return -1;
+		}
 		// I/Os of the attribute model
 		attribute_model->model_io_buffers[0] = (uintptr_t)attribute_model->model_input_buffer;
 		attribute_model->model_io_buffers[1] = (uintptr_t)attribute_model->model_output_buffer[0];
 		attribute_model->model_io_buffers[2] = (uintptr_t)attribute_model->model_output_buffer[1];
-
 	}
 
 	return 1;
@@ -287,6 +317,7 @@ int runRecognitionDemo(struct model_descr_t* models, vbx_cnn_t* the_vbx_cnn, uin
 		err = vbx_cnn_model_poll(the_vbx_cnn);
 		// Poll for next detection to be done
 		while(err > 0) {
+			for(int i =0;i<1000;i++);
 			err = vbx_cnn_model_poll(the_vbx_cnn);
 		}
 	}
@@ -421,6 +452,7 @@ int runRecognitionDemo(struct model_descr_t* models, vbx_cnn_t* the_vbx_cnn, uin
 				// Poll for next detection to be done
 				err = vbx_cnn_model_poll(the_vbx_cnn);
 				while(err > 0) {
+					for(int i =0;i<1000;i++);
 					err = vbx_cnn_model_poll(the_vbx_cnn);
 				}
 				if(err != 0) return err;
@@ -433,6 +465,7 @@ int runRecognitionDemo(struct model_descr_t* models, vbx_cnn_t* the_vbx_cnn, uin
 
 				err = vbx_cnn_model_poll(the_vbx_cnn); // Wait for the Recognition model
 				while(err > 0) {
+					for(int i =0;i<1000;i++);
 					err = vbx_cnn_model_poll(the_vbx_cnn);
 				}
 				if(err < 0) return err;
@@ -492,6 +525,7 @@ int runRecognitionDemo(struct model_descr_t* models, vbx_cnn_t* the_vbx_cnn, uin
 				err = vbx_cnn_model_poll(the_vbx_cnn);
 				// Poll for next detection to be done
 				while(err > 0) {
+					for(int i =0;i<1000;i++);
 					err = vbx_cnn_model_poll(the_vbx_cnn);
 				}
 				detect_model->is_running = 1;
@@ -539,6 +573,7 @@ int runRecognitionDemo(struct model_descr_t* models, vbx_cnn_t* the_vbx_cnn, uin
 			err = vbx_cnn_model_poll(the_vbx_cnn);
 			// Poll for next detection to be done
 			while(err > 0) {
+				for(int i =0;i<1000;i++);
 				err = vbx_cnn_model_poll(the_vbx_cnn);
 			}
 
@@ -553,6 +588,7 @@ int runRecognitionDemo(struct model_descr_t* models, vbx_cnn_t* the_vbx_cnn, uin
 
 			err = vbx_cnn_model_poll(the_vbx_cnn); // Wait for the Recognition model
 			while(err > 0) {
+				for(int i =0;i<1000;i++);
 				err = vbx_cnn_model_poll(the_vbx_cnn);
 			}
 			if(err < 0) return err;
@@ -593,6 +629,7 @@ int runRecognitionDemo(struct model_descr_t* models, vbx_cnn_t* the_vbx_cnn, uin
 
 				err = vbx_cnn_model_poll(the_vbx_cnn); // Wait for the attribute model
 				while(err > 0) {
+					for(int i =0;i<1000;i++);
 					err = vbx_cnn_model_poll(the_vbx_cnn);
 				}
 				if(err < 0) return err;
@@ -677,6 +714,7 @@ int runRecognitionDemo(struct model_descr_t* models, vbx_cnn_t* the_vbx_cnn, uin
 			err = vbx_cnn_model_poll(the_vbx_cnn);
 			// Poll for next detection to be done
 			while(err > 0) {
+				for(int i =0;i<1000;i++);
 				err = vbx_cnn_model_poll(the_vbx_cnn);
 			}
 

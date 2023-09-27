@@ -66,7 +66,7 @@ int main(int argc, char** argv){
 
 	if(argc < 3){
 		fprintf(stderr,
-		"Usage: %s FIRMWARE_FILE MODEL_FILE IMAGE.jpg [POST_PROCESS]\n"
+		"Usage: %s  MODEL_FILE IMAGE.jpg [POST_PROCESS]\n"
 		"   if using POST_PROCESS to select post-processing, must be one of:\n"
 		"   CLASSIFY, YOLOV2, YOLOV3, YOLOV4, YOLOV5,\n"
 		"   BLAZEFACE, SCRFD, RETINAFACE, SSDV2, PLATE, LPD, LPR\n",

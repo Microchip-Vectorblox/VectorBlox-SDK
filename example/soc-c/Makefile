@@ -1,6 +1,14 @@
 CC ?= gcc
 CXX ?= g++
 
+kit = videokit
+ifeq ($(kit),icicle)
+	C_FLAGS+= -DUSE_INTERRUPTS=0 -DMSS_DDR
+else
+	C_FLAGS+= -DUSE_INTERRUPTS=1
+endif
+
+
 all:run-model
 
 
@@ -12,7 +20,7 @@ C_SRCS+=../../drivers/vectorblox/vbx_cnn_api.c ../../drivers/vectorblox/vbx_cnn_
 CXX_SRCS=run-model.cpp
 C_OBJS=$(addsuffix .o,$(addprefix obj/,$(abspath $(C_SRCS))))
 CXX_OBJS=$(addsuffix .o,$(addprefix obj/,$(abspath $(CXX_SRCS))))
-C_FLAGS=-Wall -I../../drivers/vectorblox/ -Ilibfixmath/ -MD -DVBX_SOC_DRIVER
+C_FLAGS+=-Wall -I../../drivers/vectorblox/ -Ilibfixmath/ -MD -DVBX_SOC_DRIVER
 
 $(CXX_OBJS) $(C_OBJS):
 $(C_OBJS) $(CXX_OBJS):obj/%.o:%

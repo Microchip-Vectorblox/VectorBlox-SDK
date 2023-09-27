@@ -4,12 +4,30 @@
 #include <string.h>
 #include <string>
 #include <sys/time.h>
-
+#include <unistd.h>
+#include <fcntl.h>
 
 extern "C" int read_JPEG_file (const char * filename, int* width, int* height,
 		unsigned char **image, const int grayscale);
 extern "C" int resize_image(uint8_t *image_in, int in_w, int in_h,
 		uint8_t *image_out, int out_w, int out_h);
+
+
+
+#ifndef USE_INTERRUPTS
+#define USE_INTERRUPTS 1
+#endif
+
+
+#if USE_INTERRUPTS
+void enable_interrupt(vbx_cnn_t *vbx_cnn){
+	uint32_t reenable = 1;
+	ssize_t writeSize = write(vbx_cnn->fd, &reenable, sizeof(uint32_t));
+	if(writeSize < 0) {
+			close(vbx_cnn->fd);
+		}
+};
+#endif
 
 
 void* read_image(const char* filename, const int channels, const int height, const int width, int data_type){
@@ -157,6 +175,10 @@ int main(int argc, char **argv) {
 	int input_length = model_get_input_length(model, 0);
 	uint8_t *input_buffer = (uint8_t *)vbx_allocate_dma_buffer(
 			vbx_cnn, input_length * sizeof(uint8_t), 1);
+	if(!input_buffer){
+		fprintf(stderr, "Input_buffer requested exceeds buffer length.\n");
+		exit(1);
+	}
 	void *read_buffer = NULL;
 	if(std::string(argv[3]) != "TEST_DATA"){
 		printf("Reading %s\n", argv[3]);
@@ -174,21 +196,30 @@ int main(int argc, char **argv) {
 	for (unsigned o = 0; o < model_get_num_outputs(model); ++o) {
 		io_buffers[1 + o] = (vbx_cnn_io_ptr_t)vbx_allocate_dma_buffer(
 				vbx_cnn, model_get_output_length(model, o) * sizeof(uint32_t), 0);
+		if(!io_buffers[1 + o]){
+			fprintf(stderr,"Model io_buffer requested exceeds buffer length.\n");
+			exit(1);
+		}
 	}
-
+#if USE_INTERRUPTS
+	enable_interrupt(vbx_cnn);
+#endif
 	printf("Starting inference runs\n");
 	for(int run=0; run < 4; ++run){
 		struct timeval tv1, tv2;
 		gettimeofday(&tv1, NULL);
 		int status = vbx_cnn_model_start(vbx_cnn, model, io_buffers);
-
+#if USE_INTERRUPTS
 		status = vbx_cnn_model_wfi(vbx_cnn);
-
+#else
+		while(vbx_cnn_model_poll(vbx_cnn) > 0);
+#endif
 		gettimeofday(&tv2, NULL);
 		if (status < 0) {
 			printf("Model failed with error %d\n", vbx_cnn_get_error_val(vbx_cnn));
-		}
+		}	
 		printf("network took %d ms\n", gettimediff_us(tv1, tv2) / 1000);
+
 	}
 
 	// users can modify this post-processing function in post_process.c

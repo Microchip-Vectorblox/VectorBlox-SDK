@@ -432,6 +432,10 @@ short detectionDemoInit(vbx_cnn_t* the_vbx_cnn, struct model_descr_t* models, ui
 	object_model->buf_idx = 0;
 	object_model->is_running = 0;
 	object_model->model_io_buffers  = vbx_allocate_dma_buffer(the_vbx_cnn, (1+model_get_num_outputs(object_model->model))*sizeof(object_model->model_io_buffers), 0);
+	if(!object_model->model_io_buffers){
+		printf("Memory allocation issue for model io buffers.\n");
+		return -1;
+	}
 
 	// Determine the input and output lengths of the Object Model, and re-order output buffers if applicable
 	int num_outputs = model_get_num_outputs(object_model->model);
@@ -440,7 +444,10 @@ short detectionDemoInit(vbx_cnn_t* the_vbx_cnn, struct model_descr_t* models, ui
 		object_model->pipelined_output_buffers[0][output] = vbx_allocate_dma_buffer(the_vbx_cnn, output_length, 0);
 		object_model->pipelined_output_buffers[1][output] = vbx_allocate_dma_buffer(the_vbx_cnn, output_length, 0);
 		object_model->model_io_buffers[output+1] = (uintptr_t)object_model->pipelined_output_buffers[0][output];
-
+		if(!object_model->pipelined_output_buffers[0][output] || !object_model->pipelined_output_buffers[1][output]){
+			printf("Memory allocation issue for model output buffers.\n");
+			return -1;	
+		}
 	}
 
 
@@ -449,7 +456,10 @@ short detectionDemoInit(vbx_cnn_t* the_vbx_cnn, struct model_descr_t* models, ui
 	object_model->pipelined_input_buffer[0] = vbx_allocate_dma_buffer(the_vbx_cnn, input_length, 0);
 	object_model->pipelined_input_buffer[1] = vbx_allocate_dma_buffer(the_vbx_cnn, input_length, 0);
 	object_model->model_io_buffers[0] =(uintptr_t)object_model->pipelined_input_buffer[0];
-
+	if(!object_model->pipelined_input_buffer[0] ||!object_model->pipelined_input_buffer[1]){
+			printf("Memory allocation issue for model input buffers.\n");
+			return -1;	
+	}
 	return 1;
 }
 

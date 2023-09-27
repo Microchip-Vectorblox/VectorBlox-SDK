@@ -1,26 +1,9 @@
 # Examples
-This directory contains 3 examples of running networks using the Vectorblox API.
 
-1. A C executable for running networks on the simulator
-2. A Python script for running networks on the simulator
-3. A C executable for running networks on PFSoC (BETA)
+This directory contains examples that run `.vnnx` networks using the VectorBlox API. The Python scripts and `sim-c` use the simulator on the user's host PC, while the latter examples build and run on a PFSoC FPGA, running Yocto Linux.
 
-
-## Simulator C
-
-The exectuable can be built by running `build.sh`. The command takes 3 arguments. The first argument is the network to run.
-The second is the jpeg file to use as the input to the network. The third is the type of post processing 
-(CLASSIFY,YOLOV2,TINYYOLOV2,TINYYOLOV3)
-
-## SoC C
-
-Undocumented, in beta
-
-
-## Python scripts
-
-The python scripts located in examples/python/ can be run after the vbx python module is installed. Run with the --help
-argument to discover the correct usage of the scripts.
-
-
-```
+- Python scripts are used to verify networks and are called in the various tutorials. The `VBX_SDK` Python environment must be installed before running. 
+ > Run a script with `--help` argument to display usage.
+- `sim-c` runs a '.vnnx' network using the simulator. Additional information [here](./sim-c)
+- `soc-c` runs a `.vnnx` network on the PFSoC Video Kit (or Icicle Kit). Additional information [here](./soc-c)
+- `soc-video-c` runs a video demo on the PFSoC Video Kit. Additional information [here](./soc-video-c)
