@@ -1,5 +1,6 @@
 import numpy as np
 
+kws_classes = ['no', 'yes', 'down', 'go', 'left', 'up', 'right', 'stop']
 
 mnist_classes = [
     "0",

@@ -17,9 +17,10 @@ Finally, the tracker sends bounding boxes and identifying names to the output di
 The database of known faces and names contains 4 entries labeled `John`, `Nancy`, `Tina`, and `Bob`. The database embeddings were created from a different video.
 
 The demo uses the following models:  
-- [RetinaFace Mobilenet](https://github.com/Microchip-Vectorblox/VectorBlox-SDK/blob/master/tutorials/pytorch/retinaface.mobilenet/retinaface.mobilenet.sh), which detects faces.  
+- [SCRFD](https://github.com/Microchip-Vectorblox/VectorBlox-SDK/blob/master/tutorials/onnx/scrfd_500m_bnkps/scrfd_500m_bnkps.sh), which detects faces.  
 - [ArcFace Mobile](https://github.com/Microchip-Vectorblox/VectorBlox-SDK/blob/master/tutorials/mxnet/mobilefacenet-arcface/mobilefacenet-arcface.sh), which recognizes a face.  
 
+<!-- Update once updated tutorials are released, tested, and measured
 ## Performance
 
 | Core Vectorblox Configuration | V1000 | V500 | V250 |
@@ -39,5 +40,5 @@ The demo uses the following models:
 | Model | Task | Input Resolution | MParams | GOPs |
 | --- | --- | --- | --- | -- |
 | RetinaFace Mobilenet  | Detection | 3x512x288 | 0.423 | 0.717 |
-| Arcface Mobile | Recognition | 3x112x112 | 0.993 | 0.448 |
+| Arcface Mobile | Recognition | 3x112x112 | 0.993 | 0.448 | -->
 

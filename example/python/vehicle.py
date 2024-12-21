@@ -6,71 +6,94 @@ import vbx.postprocess.dataset as dataset
 import vbx.sim
 import os
 import math
+from vbx.generate.utils import load_input
 
-from vbx.generate.onnx_infer import onnx_infer, load_input
-
-
-def convert_to_fixedpoint(data, dtype):
-    # this should go away eventually, and always input uint8 rather than fixedpoint Q1.7
-    if dtype == np.int16:
-        shift_amt = 13
-    elif dtype == np.int8:
-        shift_amt = 7
-    clip_max, clip_min = (1 << shift_amt)-1, -(1 << shift_amt)
-    float_img = flattened.astype(np.float32)/255 * (1 << shift_amt) + 0.5
-
-    fixedpoint_img = np.clip(float_img, clip_min, clip_max).astype(dtype)
-    return fixedpoint_img
-
-
-def get_vnnx_io_shapes(vnxx):
-    with open(vnxx, 'rb') as mf:
-        model = vbx.sim.Model(mf.read())
-    return model.input_dims[0], model.output_dims
-
-
-def vnnx_infer(vnxx, input_array):
-    with open(vnxx, 'rb') as mf:
-        model = vbx.sim.Model(mf.read())
-    flattened = input_array.flatten().astype('uint8')
-    outputs = model.run([flattened])
-
-    bw = model.get_bandwidth_per_run()
-    print("Bandwidth per run = {} Bytes ({:.3} MB/s at 100MHz)".format(bw,bw/100E6))
-    print("Estimated {} seconds at 100MHz".format(model.get_estimated_runtime(100E6)))
-    print("If running at another frequency, scale these numbers appropriately")
-
-    return [o.astype('float32') * sf for o,sf in zip(outputs, model.output_scale_factor)]
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('model')
     parser.add_argument('image')
+    parser.add_argument('-b', '--bgr', action='store_true')
     parser.add_argument('-p', '--priors', default='vehicle_priors.npy')
     parser.add_argument('-o', '--output', default="output.png")
     args = parser.parse_args()
 
-    input_shape, _ = get_vnnx_io_shapes(args.model)
-    input_array = load_input(args.image, 1., input_shape)
-    outputs = vnnx_infer(args.model, input_array)
+    img = cv2.imread(args.image)
+    if args.model.endswith('.vnnx'):
+        with open(args.model, 'rb') as mf:
+            model = vbx.sim.Model(mf.read())
+        input_shape = model.input_shape[0]
+        img_w, img_h = input_shape[-1], input_shape[-2]
+        img = cv2.resize(img, (img_w, img_h))
+        if not args.bgr:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-    reshaped_outputs = []
-    reshaped_outputs.append(outputs[11].reshape((1,8,16,16)))
-    reshaped_outputs.append(outputs[10].reshape((1,6,16,16)))
-    reshaped_outputs.append(outputs[9].reshape((1,12,8,8)))
-    reshaped_outputs.append(outputs[8].reshape((1,9,8,8)))
-    reshaped_outputs.append(outputs[7].reshape((1,12,4,4)))
-    reshaped_outputs.append(outputs[6].reshape((1,9,4,4)))
-    reshaped_outputs.append(outputs[5].reshape((1,4,2,2)))
-    reshaped_outputs.append(outputs[4].reshape((1,3,2,2)))
-    reshaped_outputs.append(outputs[3].reshape((1,4,1,1)))
-    reshaped_outputs.append(outputs[2].reshape((1,3,1,1)))
-    reshaped_outputs.append(outputs[1].reshape((1,12,1,1)))
-    reshaped_outputs.append(outputs[0].reshape((1,9,1,1)))
+        img = img.astype(np.float32)
+        img_scaled = (img / model.input_scale_factor[0]) + model.input_zeropoint[0]
+        flattened = img_scaled.swapaxes(1, 2).swapaxes(0, 1).flatten().astype(model.input_dtypes[0])
+
+        outputs = model.run([flattened])
+        for o,output in enumerate(outputs):
+            outputs[o] = model.output_scale_factor[o] * (outputs[o].astype(np.float32) - model.output_zeropoint[o])
+            outputs[o] = outputs[o].reshape(model.output_shape[o])
+
+    elif args.model.endswith('.tflite'):
+        import tensorflow as tf
+        interpreter= tf.lite.Interpreter(model_path=args.model)
+        interpreter.allocate_tensors()
+
+        input_details = interpreter.get_input_details()
+        output_details = interpreter.get_output_details()
+        input_shape = input_details[0]['shape']
+        img_w, img_h = input_shape[-2], input_shape[-3]
+        img = cv2.resize(img, (img_w, img_h))
+        if not args.bgr:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+        img = img.astype(np.float32)
+        img = np.expand_dims(img, axis=0)
+        input_scale, input_zero_point = input_details[0].get('quantization', (0.0, 0))
+        if  input_scale != 0.0:
+            img = (img / input_scale) + input_zero_point
+        img = img.astype(input_details[0]['dtype'])
+        print(img[0,:8])
+        interpreter.set_tensor(input_details[0]['index'], img)
+        interpreter.invoke()
+
+        outputs = []
+        for o in range(len(output_details)):
+            output_scale, output_zero_point = output_details[o].get('quantization', (0.0, 0))
+            output = interpreter.get_tensor(output_details[o]['index']).squeeze()
+            if  output_scale != 0.0:
+                output = output_scale * (output.astype(np.float32) - output_zero_point)
+            while len(output.shape) < 4:
+                output = np.expand_dims(output, axis=0)
+            outputs.append(output.transpose((0,3,1,2)))
 
     priors = np.load(args.priors).reshape((2,-1,4))
+
+    target_shapes = [(1,8,16,16),
+                    (1,6,16,16),
+                    (1,12,8,8),
+                    (1,9,8,8),
+                    (1,12,4,4),
+                    (1,9,4,4),
+                    (1,4,2,2),
+                    (1,3,2,2),
+                    (1,4,1,1),
+                    (1,3,1,1),
+                    (1,12,1,1),
+                    (1,9,1,1)]
+
+    reshaped_outputs = []
+    for shape in target_shapes:
+        for o, output in enumerate(outputs):
+            if output.shape == shape:
+                reshaped_outputs.append(outputs[o])
+
     predictions = ssd.predictions(reshaped_outputs, priors, 256, confidence_threshold=0.4, nms_threshold=0.3, top_k=3, num_classes=3)
+
     
     img = cv2.imread(args.image)
     output_img = cv2.resize(img, (1024, 1024), interpolation=cv2.INTER_NEAREST)

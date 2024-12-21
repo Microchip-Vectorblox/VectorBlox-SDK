@@ -1,25 +1,9 @@
 [
     {
         "type": "net",
-        "batch": 1,
-        "subdivisions": 1,
         "width": 416,
         "height": 416,
-        "channels": 3,
-        "momentum": 0.9,
-        "decay": 0.0005,
-        "angle": 0,
-        "saturation": 1.5,
-        "exposure": 1.5,
-        "hue": 0.1,
-        "learning_rate": 0.001,
-        "burn_in": 1000,
-        "max_batches": 500200,
-        "policy": "steps",
-        "steps": "400000,450000",
-        "scales": ".1,.1",
-        "inputs": 519168,
-        "layerNum": -1
+        "channels": 3
     },
     {
         "type": "yolo",
@@ -27,17 +11,10 @@
         "anchors": "10,14,  23,27,  37,58,  81,82,  135,169,  344,319",
         "classes": 80,
         "num": 6,
-        "jitter": 0.3,
-        "ignore_thresh": 0.7,
-        "truth_thresh": 1,
-        "random": 1,
-        "max": 90,
-        "map": 0,
         "h": 13,
         "w": 13,
         "c": 255,
-        "outputName": "Y15",
-        "layerNum": 16
+        "outputName": "Y15"
     },
     {
         "type": "yolo",
@@ -45,16 +22,9 @@
         "anchors": "10,14,  23,27,  37,58,  81,82,  135,169,  344,319",
         "classes": 80,
         "num": 6,
-        "jitter": 0.3,
-        "ignore_thresh": 0.7,
-        "truth_thresh": 1,
-        "random": 1,
-        "max": 90,
-        "map": 0,
         "h": 26,
         "w": 26,
         "c": 255,
-        "outputName": "Y22",
-        "layerNum": 23
+        "outputName": "Y22"
     }
 ]

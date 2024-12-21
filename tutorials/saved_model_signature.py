@@ -1,6 +1,10 @@
 import tensorflow as tf
 import argparse
 
+'''
+This script is used to add signatures/signature definitions to tensorflow graphs,if it doesn't already exist.
+These are essential to converting to TFLite as they define the input and outputs of the graph
+'''
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('model_dir')

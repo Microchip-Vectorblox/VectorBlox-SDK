@@ -1,41 +1,54 @@
 
-#######################################
-#                                     #
-#  ____    ____  ______   ___   ___   #
-#  \   \  /   / |   _  \  \  \ /  /   #
-#   \   \/   /  |  |_)  |  \  V  /    #
-#    \      /   |   _  <    >   <     #
-#     \    /    |  |_)  |  /  ^  \    #
-#      \__/     |______/  /__/ \__\   #
-#                                     #
-# Refer to Programmer's Guide         #
-# for full details                    #
-#                                     #
-#                                     #
-#######################################
+##########################################################
+#  _    __          __             ____  __              #
+# | |  / /__  _____/ /_____  _____/ __ )/ /___  _  __    #
+# | | / / _ \/ ___/ __/ __ \/ ___/ __  / / __ \| |/_/    #
+# | |/ /  __/ /__/ /_/ /_/ / /  / /_/ / / /_/ />  <      #
+# |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
+#                                                        #
+# https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
+# v2.0                                                   #
+#                                                        #
+##########################################################
 
 set -e
-echo "Checking and Activating VBX Python Environment..."
+echo "Checking and activating VBX Python Environment..."
 if [ -z $VBX_SDK ]; then
     echo "\$VBX_SDK not set. Please run 'source setup_vars.sh' from the SDK's root folder" && exit 1
 fi
 source $VBX_SDK/vbx_env/bin/activate
 
+echo "Checking for Numpy calibration data file..."
+if [ ! -f $VBX_SDK/tutorials/imagenetv2_rgb_norm_20x224x224x3.npy ]; then
+    wget -P $VBX_SDK/tutorials/ https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/EAP/calib_npy/imagenetv2_rgb_norm_20x224x224x3.npy
+fi
+
 echo "Downloading torchvision_wide_resnet50_2..."
-python ../../torchvision_to_onnx.py wide_resnet50_2
-
-echo "Running Model Optimizer..."
 # model details @ https://pytorch.org/vision/0.9/models.html#torchvision.models.wide_resnet50_2
-mo --input_model wide_resnet50_2.onnx \
---reverse_input_channels \
---mean_values [123.675,116.28,103.53] \
---scale_values [58.395,57.12,57.375] \
---static_shape
+python $VBX_SDK/tutorials/torchvision_to_onnx.py wide_resnet50_2
+if [ ! -f calibration_image_sample_data_20x128x128x3_float32.npy ]; then
+    wget https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/EAP/calib_npy/calibration_image_sample_data_20x128x128x3_float32.npy
+fi
 
-echo "Generating VNNX for V1000 configuration..."
-generate_vnnx -x wide_resnet50_2.xml  -c V1000 -f ../../sample_images -o torchvision_wide_resnet50_2.vnnx
+echo "Running ONNX2TF..."
+onnx2tf -cind input.1 $VBX_SDK/tutorials/imagenetv2_rgb_norm_20x224x224x3.npy [[[[0.485,0.456,0.406]]]] [[[[0.229,0.224,0.225]]]] \
+-i wide_resnet50_2.onnx \
+--output_signaturedefs \
+--output_integer_quantized_tflite
+cp saved_model/wide_resnet50_2_full_integer_quant.tflite torchvision_wide_resnet50_2.tflite
 
-echo "Running Simulation..."
-python $VBX_SDK/example/python/classifier.py torchvision_wide_resnet50_2.vnnx ../../test_images/oreo.jpg
+if [ -f torchvision_wide_resnet50_2.tflite ]; then
+   tflite_preprocess torchvision_wide_resnet50_2.tflite  --mean 123.675 116.28 103.53 --scale 58.4 57.1 57.38
+fi
+
+if [ -f torchvision_wide_resnet50_2.pre.tflite ]; then
+    echo "Generating VNNX for V1000 configuration..."
+    vnnx_compile -c V1000 -t torchvision_wide_resnet50_2.pre.tflite -o torchvision_wide_resnet50_2.vnnx
+fi
+
+if [ -f torchvision_wide_resnet50_2.vnnx ]; then
+    echo "Running Simulation..."
+    python $VBX_SDK/example/python/classifier.py torchvision_wide_resnet50_2.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg 
+fi
 
 deactivate

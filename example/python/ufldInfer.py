@@ -8,7 +8,7 @@ import os
 import math
 import scipy.special
 
-from vbx.generate.openvino_infer import openvino_infer, get_model_input_shape as get_xml_input_shape
+from vbx.generate.utils import openvino_infer, openvino_input_shape
 from vbx.generate.onnx_infer import onnx_infer, load_input
 from vbx.generate.onnx_helper import get_model_input_shape as get_onnx_input_shape
 
@@ -18,7 +18,7 @@ colors = np.array([[0,0,0,0.3],[0,255,0,0.5],[0,0,255,0.5],[0,255,255,0.7]])#,dt
 def get_vnnx_io_shapes(vnxx):
     with open(vnxx, 'rb') as mf:
         model = vbx.sim.Model(mf.read())
-    return model.input_dims[0], model.output_dims
+    return model.input_shape[0], model.output_shape
 
 
 def vnnx_infer(vnxx, input_array):
@@ -38,6 +38,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('model')
     parser.add_argument('image')
+    parser.add_argument('-b', '--bgr', action='store_true')
     parser.add_argument('--output', '-o', default="output", help='output image to write labels to')
     args = parser.parse_args()
 
@@ -47,18 +48,18 @@ if __name__ == "__main__":
 
     if args.model.endswith('.vnnx'):
         input_shape, _ = get_vnnx_io_shapes(args.model)
-        input_array = load_input(args.image, 1., input_shape)
+        input_array = load_input(args.image, 1., input_shape, (not args.bgr))
         outputs = vnnx_infer(args.model, input_array)
         output = outputs[0].reshape((1, 201, 18, 4))
     elif args.model.endswith('.xml'):
         weights=args.model.replace('.xml', '.bin')
-        input_shape = get_xml_input_shape(args.model, weights)
-        input_array = load_input(args.image, 1., input_shape)
+        input_shape = openvino_input_shape(args.model, weights)[0]
+        input_array = load_input(args.image, 1., input_shape, (not args.bgr))
         outputs = openvino_infer(args.model, input_array)
         output = outputs[0]
     elif args.model.endswith('.onnx'):
         input_shape = get_onnx_input_shape(args.model)
-        input_array = load_input(args.image, 1., input_shape)  
+        input_array = load_input(args.image, 1., input_shape, (not args.bgr))  
         outputs = onnx_infer(args.model, input_array)[0]
 
     img = cv2.imread(args.image)
@@ -84,14 +85,11 @@ if __name__ == "__main__":
     loc[out_j == cfg_griding_num] = 0
     out_j = loc
 
-    num_lanes_detected = 0
     for i in range(out_j.shape[1]):
         if np.sum(out_j[:, i] != 0) > 2:
-            num_lanes_detected += 1
             for k in range(out_j.shape[0]):
                 if out_j[k, i] > 0:
                     ppp = (int(out_j[k, i] * col_sample_w * img_w / 800) - 1, int(img_h * (row_anchor[cls_num_per_lane-1-k]/288)) - 1 )
                     cv2.circle(img,ppp,5,(0,255,0),-1)
 
     cv2.imwrite(args.output+'_output.png', img)
-    print("Found {} lanes".format(num_lanes_detected))

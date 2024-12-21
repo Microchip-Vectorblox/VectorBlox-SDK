@@ -1,5 +1,7 @@
 import numpy as np
+import tensorflow as tf
 import math
+import cv2
 
 
 coco91 = [
@@ -142,6 +144,51 @@ prior5 = {
        'variance': [0.1,0.1,0.2,0.2]
        }
 
+prior0_torch = {
+       'shape': [1,24,20,20],
+       'height': [64.0, 84.66403, 45.25482, 90.50964, 36.95041, 110.85123],
+       'width': [64.0, 84.66403, 90.50964, 45.25482, 110.85123, 36.95041],
+       'offset' : 0.5,
+       'variance': [0.1,0.1,0.2,0.2]
+       }
+
+
+prior1_torch = {
+       'shape': [1,24,10,10],
+       'height': [112.0, 133.86562, 79.195984, 158.3919, 64.66324, 193.98969],
+       'width': [112.0, 133.86562, 158.3919, 79.195984, 193.98969, 64.66324],
+       'offset' : 0.5,
+       'variance': [0.1,0.1,0.2,0.2]
+       }
+prior2_torch = {
+       'shape': [1,24,5,5],
+       'height': [160.0, 182.42805, 113.13707, 226.27419, 92.37601, 277.1281],
+       'width': [160.0, 182.42805, 226.27419, 113.13707, 277.1281, 92.37601],
+       'offset' : 0.5,
+       'variance': [0.1,0.1,0.2,0.2]
+       }
+prior3_torch = {
+       'shape': [1,24,3,3],
+       'height': [208.0, 230.7553, 147.07819, 294.15643, 120.08885, 319.99997],
+       'width' : [208.0, 230.7553, 294.15643, 147.07819, 319.99997, 120.08885],
+       'offset' : 0.5,
+       'variance': [0.1,0.1,0.2,0.2]
+       }
+prior4_torch = {
+       'shape': [1,24,2,2],
+       'height': [256.0, 278.96957, 181.01935, 320.0, 147.80165, 320.0],
+       'width' : [256.0, 278.96957, 320.0, 181.01935, 320.0, 147.80165],
+       'offset' : 0.5,
+       'variance': [0.1,0.1,0.2,0.2]
+       }
+prior5_torch = {
+       'shape': [1,24,1,1],
+       'height' : [304.0, 311.89743, 214.96045, 320.0, 175.5145, 320.0],
+       'width': [304.0, 311.89743, 320.0, 214.96045, 320.0, 175.5145],
+       'offset' : 0.5,
+       'variance': [0.1,0.1,0.2,0.2]
+       }
+
 
 def convert_to_fixedpoint(data, dtype):
     # this should go away eventually, and always input uint8 rather than fixedpoint Q1.7
@@ -193,7 +240,7 @@ def jaccard_overlap(bbox0, bbox1):
 
 
 
-def detections(boxes, classes, priors, num_classes, size, confidence_threshold=0.3, nms_threshold=0.6, top_k=100):
+def detections(boxes, classes, priors, num_classes, size, confidence_threshold=0.3, nms_threshold=0.6, top_k=100, torch=False):
     '''
     https://github.com/openvinotoolkit/openvino/blob/d18073260bc742d7bf14d262d6919a1b660e2b61/ngraph/core/reference/include/ngraph/runtime/reference/detection_output.hpp
     clip_after_nms=True
@@ -244,32 +291,61 @@ def detections(boxes, classes, priors, num_classes, size, confidence_threshold=0
     decoded = np.asarray(decoded)
 
     valid = []
-    for c in range(1, num_classes):
-        scores = get_scores(classes[:,c], confidence_threshold, top_k)
-        if len(scores):
-            kept = []
-            for idx, score in scores:
-                keep = True
-                for kept_idx, kept_score in kept:
-                    overlap = jaccard_overlap(decoded[idx], decoded[kept_idx])
-                    if overlap > nms_threshold:
-                        keep = False
-                        break
-                if keep:
-                    kept.append((idx, score))
+    boxes = []
+    scores = []
+    nms_valid = []
 
-            for idx, score in kept:
-                valid.append({
-                    'index': idx,
-                    'class_id': c,
-                    'confidence': score,
-                    'xmin': min(1, max(0, decoded[idx][0])) * size,
-                    'ymin': min(1, max(0, decoded[idx][1])) * size,
-                    'xmax': min(1, max(0, decoded[idx][2])) * size,
-                    'ymax': min(1, max(0, decoded[idx][3])) * size,
-                    })
+    if torch:
+        for s,score in enumerate(classes):
+            if np.argmax(score) != 0:
+                    xmin = min(1, max(0, decoded[s][0])) * size
+                    ymin = min(1, max(0, decoded[s][1])) * size
+                    xmax = min(1, max(0, decoded[s][2])) * size
+                    ymax = min(1, max(0, decoded[s][3])) * size
 
-    return valid
+                    valid.append({
+                        'index': s,
+                        'class_id': np.argmax(score),
+                        'confidence': np.max(score),
+                        'xmin': xmin,
+                        'ymin': ymin,
+                        'xmax': xmax,
+                        'ymax': ymax,
+                        })
+                    boxes.append([(xmin+xmax)/2, (ymin+ymax)/2, xmax-xmin, ymax-ymin])
+                    scores.append(np.max(score))
+
+        indices = cv2.dnn.NMSBoxes(boxes, scores, 0.5, 0.4)
+        for i in indices:
+            nms_valid.append(valid[i])
+        return nms_valid
+    else:
+        for c in range(1, num_classes):
+            scores = get_scores(classes[:,c], confidence_threshold, top_k)
+            if len(scores):
+                kept = []
+                for idx, score in scores:
+                    keep = True
+                    for kept_idx, kept_score in kept:
+                        overlap = jaccard_overlap(decoded[idx], decoded[kept_idx])
+                        if overlap > nms_threshold:
+                            keep = False
+                            break
+                    if keep:
+                        kept.append((idx, score))
+
+                for idx, score in kept:
+                    valid.append({
+                        'index': idx,
+                        'class_id': c,
+                        'confidence': score,
+                        'xmin': min(1, max(0, decoded[idx][0])) * size,
+                        'ymin': min(1, max(0, decoded[idx][1])) * size,
+                        'xmax': min(1, max(0, decoded[idx][2])) * size,
+                        'ymax': min(1, max(0, decoded[idx][3])) * size,
+                        })
+
+        return valid
 
 
 def reverse_prior(prior, shape, repeat, img_size):
@@ -390,7 +466,6 @@ def ssdv2_predictions(outputs, output_scale_factor, confidence_threshold=0.3, nm
     for i in range(12):
         outputs[i] = outputs[i] * output_scale_factor[i]
 
-
     priors = get_priors(prior0)
     priors = np.concatenate((priors,get_priors(prior1)), axis=1)
     priors = np.concatenate((priors,get_priors(prior2)), axis=1)
@@ -401,7 +476,38 @@ def ssdv2_predictions(outputs, output_scale_factor, confidence_threshold=0.3, nm
     return predictions(outputs, priors, 300, confidence_threshold, nms_threshold, top_k, num_classes)
 
 
-def predictions(outputs, priors, size, confidence_threshold=0.3, nms_threshold=0.3, top_k=100, num_classes=91):
+def ssd_torch_predictions(outputs, output_scale_factor, confidence_threshold=0.3, nms_threshold=0.3, top_k=100, num_classes=91):
+    # reshape to original
+    try:
+        elem = int(math.sqrt(outputs[0].size/(12*2)))
+        outputs[0] = np.reshape(outputs[0], (1,(12*2),elem,elem))
+    except:
+        outputs.reverse()
+        elem = int(math.sqrt(outputs[0].size/(12*2)))
+        outputs[0] = np.reshape(outputs[0], (1,(12*2),elem,elem))
+    elem = int(math.sqrt(outputs[1].size/(273*2)))
+    outputs[1] = np.reshape(outputs[1], (1,(273*2),elem,elem))
+    for i in range(1,6):
+        elem = int(math.sqrt(outputs[2*i].size/24))
+        outputs[2*i] = np.reshape(outputs[2*i], (1,24,elem,elem))
+        elem = int(math.sqrt(outputs[2*i+1].size/546))
+        outputs[2*i+1] = np.reshape(outputs[2*i+1], (1,546,elem,elem))
+
+    # scale factor 
+    for i in range(12):
+        outputs[i] = outputs[i] * output_scale_factor[i]
+
+    priors = get_priors(prior0_torch)
+    priors = np.concatenate((priors,get_priors(prior1_torch)), axis=1)
+    priors = np.concatenate((priors,get_priors(prior2_torch)), axis=1)
+    priors = np.concatenate((priors,get_priors(prior3_torch)), axis=1)
+    priors = np.concatenate((priors,get_priors(prior4_torch)), axis=1)
+    priors = np.concatenate((priors,get_priors(prior5_torch)), axis=1)
+
+    return predictions(outputs, priors, 320, confidence_threshold, nms_threshold, top_k, num_classes, torch=True)
+
+
+def predictions(outputs, priors, size, confidence_threshold=0.3, nms_threshold=0.3, top_k=100, num_classes=91, torch=False):
 
     # transpose 
     for i in range(12):
@@ -426,6 +532,9 @@ def predictions(outputs, priors, size, confidence_threshold=0.3, nms_threshold=0
 
     concat_boxes = np.concatenate(boxes, axis=1)
     concat_classes = np.concatenate(classes, axis=1)
-    sig_classes = logistic(concat_classes)
+    if torch:
+        sig_classes = tf.nn.softmax(concat_classes)
+    else:
+        sig_classes = logistic(concat_classes)
 
-    return detections(concat_boxes, sig_classes, priors, num_classes, size, confidence_threshold, nms_threshold, top_k)
+    return detections(concat_boxes, sig_classes, priors, num_classes, size, confidence_threshold, nms_threshold, top_k, torch)

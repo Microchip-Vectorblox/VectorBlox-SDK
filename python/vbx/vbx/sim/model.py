@@ -3,9 +3,12 @@ import numpy as np
 from enum import  IntEnum
 import time
 import os
-def Fletcher32(data):
 
+
+def Fletcher32(data):
     data_bytes = data.tobytes()
+    if len(data_bytes) % 2:
+        data_bytes = data_bytes[:-1]
     data = np.frombuffer(data_bytes,dtype=np.uint16)
     datalen = len(data)
     c0 = 0
@@ -38,7 +41,8 @@ class Model:
         if c_shim.model_check_sanity(model_bytes) != 0:
             raise ValueError("Does not appear to be a valid model")
         allocate_bytes = c_shim.model_get_allocate_bytes(model_bytes)
-        model_bytes = model_bytes + bytes(allocate_bytes - len(model_bytes))
+        if allocate_bytes > len(model_bytes): #TODO should be >
+            model_bytes = model_bytes + bytes(allocate_bytes - len(model_bytes))
 
 
         self.model_bytes = model_bytes
@@ -61,12 +65,29 @@ class Model:
         self.input_dims = [
             c_shim.model_get_input_dims(self.model_bytes,i)
             for i in range(self.num_inputs)]
+        self.output_shape = [
+            c_shim.model_get_output_shape(self.model_bytes,i)
+            for i in range(self.num_outputs)]
+        self.input_shape = [
+            c_shim.model_get_input_shape(self.model_bytes,i)
+            for i in range(self.num_inputs)]
         self.output_dtypes = [
             c_shim.model_get_output_datatype(self.model_bytes,i)
             for i in range(self.num_outputs)]
+        self.input_scale_factor = [
+            c_shim.model_get_input_scale_value(self.model_bytes,i)
+            for i in range(self.num_inputs)]
         self.output_scale_factor = [
             c_shim.model_get_output_scale_value(self.model_bytes,i)
             for i in range(self.num_outputs)]
+        
+        self.output_zeropoint = [
+            c_shim.model_get_output_zeropoint(self.model_bytes,i)
+            for i in range(self.num_outputs)]
+
+        self.input_zeropoint = [
+            c_shim.model_get_input_zeropoint(self.model_bytes,i)
+            for i in range(self.num_inputs)]
 
         self.input_dtypes = [
             c_shim.model_get_input_datatype(self.model_bytes,i)
@@ -75,6 +96,10 @@ class Model:
         self.test_input = [
             c_shim.model_get_test_input(self.model_bytes,i)
             for i in range(self.num_inputs)]
+
+        self.test_output = [
+            c_shim.model_get_test_output(self.model_bytes,i)
+            for i in range(self.num_outputs)]
 
     def run(self,inputs):
         outputs = [ np.zeros(l,dtype=t) for l,t in
@@ -116,9 +141,9 @@ def main(model_bytes,expected_checksum,verbose=True):
     for od in odata[1:]:
         checksum = checksum ^ Fletcher32(od)
     if verbose:
-        print("dma_bytes = {}".format(m.get_bandwidth_per_run()))
-        print("instr_cycles = {}".format(m.get_estimated_runtime()))
-        print("checksum = {:x}".format(checksum))
+        print("DMA_BYTES = {}".format(m.get_bandwidth_per_run()))
+        print("INSTR_CYCLES = {}".format(m.get_estimated_runtime()))
+        print("CHECKSUM = {:08x}".format(checksum))
 
     if expected_checksum is not None:
         if checksum != expected_checksum:

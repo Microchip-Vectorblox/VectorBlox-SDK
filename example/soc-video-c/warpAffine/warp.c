@@ -146,7 +146,6 @@ void warp_image_with_points(volatile uint32_t* scale_base_addr,
 
         getAffineTransform(&MM,dest_points,new_src_points);
 
-	resize_image_hls_wait(scale_base_addr);
         resize_image_hls(scale_base_addr,
                                         image_in,
                                         scale_in_width,scale_in_height,src_stride,fix16_to_int(x1),fix16_to_int(y1),
@@ -159,7 +158,7 @@ void warp_image_with_points(volatile uint32_t* scale_base_addr,
 
                 warp_affine_image(warp_base_addr,
                       temp_buffer+c*PRESCALE_OUT_HEIGHT*PRESCALE_OUT_WIDTH,
-                      image_out+c*dst_width*dst_height,
+                      image_out+(2-c)*dst_width*dst_height,
                       dst_width,dst_height,transform_2x3);
         }
  }

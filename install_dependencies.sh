@@ -3,7 +3,7 @@
 
 
 # install dependencies
-if grep -iEq "ubuntu (16|18|20).04" /etc/issue
+if grep -iEq "ubuntu 20.04" /etc/issue
 then
     # Ubuntu
     sudo apt update
@@ -16,15 +16,15 @@ then
          wget \
          unzip \
          python3-enchant \
-         python3-venv \
-         python3-dev \
+         python3.9-venv \
+         python3.9-dev \
          libjpeg-dev \
          build-essential   
-    if grep -iEq "ubuntu 20.04" /etc/issue
-    then
-        #on 20.04 a few more packages are needed to build some pip wheels
-        sudo apt-get install -y cmake protobuf-compiler libenchant-dev libjpeg-dev
-    fi
+    sudo apt-get install -y cmake protobuf-compiler libenchant-dev libjpeg-dev
+    wget https://github.com/PINTO0309/onnx2tf/releases/download/1.16.31/flatc.tar.gz \
+        && tar -zxvf flatc.tar.gz \
+        && sudo chmod +x flatc \
+        && sudo mv flatc /usr/bin/
 else
-    echo "Unknown OS, please install dependencies manually" && exit 1
+    echo "Unsupported OS, please install dependencies manually" && exit 1
 fi

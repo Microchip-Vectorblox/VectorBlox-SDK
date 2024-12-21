@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <assert.h>
+#include <sys/time.h>
 
 
 char *lpr_chinese_characters[71] = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
@@ -1031,9 +1032,60 @@ char *imagenet_classes[1000] = {
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 
+#define TIMING 0
+#if TIMING
+static int gettimediff_us2(struct timeval start, struct timeval end) {
+	int sec = end.tv_sec - start.tv_sec;
+	int usec = end.tv_usec - start.tv_usec;
+	return sec * 1000000 + usec;
+}
+#endif
 char *coco_classes[80] = {"person","bicycle","car","motorcycle","airplane","bus","train","truck","boat","traffic light","fire hydrant","stop sign","parking meter","bench","bird","cat","dog","horse","sheep","cow","elephant","bear","zebra","giraffe","backpack","umbrella","handbag","tie","suitcase","frisbee","skis","snowboard","sports ball","kite","baseball bat","baseball glove","skateboard","surfboard","tennis racket","bottle","wine glass","cup","fork","knife","spoon","bowl","banana","apple","sandwich","orange","broccoli","carrot","hot dog","pizza","donut","cake","chair","couch","potted plant","bed","dining table","toilet","tv","laptop","mouse","remote","keyboard","cell phone","microwave","oven","toaster","sink","refrigerator","book","clock","vase","scissors","teddy bear","hair drier","toothbrush"};
 
 char *voc_classes[20] = { "aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat", "chair", "cow", "diningtable", "dog", "horse", "motorbike", "person", "pottedplant","sheep","sofa", "train", "tv/monitor"};
+
+
+void preprocess_inputs(uint8_t* input, fix16_t scale, int32_t zero_point, int input_length, int int8_flag){
+	fix16_t adjusted_scale = fix16_mul(scale,F16(255.0));
+	fix16_t inv_adj_scale = fix16_div(F16(1.0),adjusted_scale);
+	for(int c=0; c<input_length;c++){
+		if (scale == 256){
+			if(int8_flag)
+				input[c] = (int8_t)((int32_t)input[c] - zero_point);
+			else
+				input[c] = (uint8_t)((int32_t)input[c] - zero_point);
+
+		}
+		else{
+			if (int8_flag)
+				input[c] = (int8_t)(fix16_mul((int32_t)input[c],inv_adj_scale) - zero_point);
+			else
+				input[c] = (uint8_t)(fix16_mul((int32_t)input[c],inv_adj_scale) - zero_point);
+	
+		}
+	}
+}
+uint32_t fletcher32(const uint16_t *data, size_t len)
+{
+	uint32_t c0, c1;
+	unsigned int i;
+
+	for (c0 = c1 = 0; len >= 360; len -= 360) {
+		for (i = 0; i < 360; ++i) {
+			c0 = c0 + *data++;
+			c1 = c1 + c0;
+		}
+		c0 = c0 % 65535;
+		c1 = c1 % 65535;
+	}
+	for (i = 0; i < len; ++i) {
+		c0 = c0 + *data++;
+		c1 = c1 + c0;
+	}
+	c0 = c0 % 65535;
+	c1 = c1 % 65535;
+	return (c1 << 16 | c0);
+}
 
 fix16_t calcIou_LTRB(fix16_t* A, fix16_t* B){
     // pointers to elements (left, top, right, bottom)
@@ -1069,7 +1121,107 @@ static fix16_t fix16_eight = F16(8);
 static fix16_t fix16_neight = F16(-8);
 static fix16_t fix16_two = F16(2);
 static fix16_t fix16_nhalf = F16(-0.5);
+static fix16_t fix16_half = F16(0.5);
 
+int partition_int8(int8_t* arr, int16_t *index, const int lo, const int hi)
+{
+	int8_t temp, pivot = arr[hi];
+	int itemp;
+	int j, i = lo - 1;
+
+	for (j = lo; j < hi; j++) {
+		//since many elements are the same as pivot, "randomly" put them on either side of pivot
+		//otherwise very slow
+		int cmp = arr[j] == pivot ? j&1: arr[j] < pivot;
+		if (cmp) {
+			i++;
+			temp = arr[j];
+			arr[j] = arr[i];
+			arr[i] = temp;
+
+			itemp = index[j];
+			index[j] = index[i];
+			index[i] = itemp;
+		}
+	}
+
+	if (arr[hi] < arr[i+1]) {
+		temp = arr[hi];
+		arr[hi] = arr[i+1];
+		arr[i+1] = temp;
+
+		itemp = index[hi];
+		index[hi] = index[i+1];
+		index[i+1] = itemp;
+	}
+
+	return i + 1;
+}
+int partition_uint8(uint8_t* arr, int16_t *index, const int lo, const int hi)
+{
+	uint8_t temp, pivot = arr[hi];
+	int itemp;
+	int j, i = lo - 1;
+
+	for (j = lo; j < hi; j++) {
+		//since many elements are the same as pivot, "randomly" put them on either side of pivot
+		//otherwise very slow
+		int cmp = arr[j] == pivot ? j&1: arr[j] < pivot;
+		if (cmp) {
+			i++;
+			temp = arr[j];
+			arr[j] = arr[i];
+			arr[i] = temp;
+
+			itemp = index[j];
+			index[j] = index[i];
+			index[i] = itemp;
+		}
+	}
+
+	if (arr[hi] < arr[i+1]) {
+		temp = arr[hi];
+		arr[hi] = arr[i+1];
+		arr[i+1] = temp;
+
+		itemp = index[hi];
+		index[hi] = index[i+1];
+		index[i+1] = itemp;
+	}
+
+	return i + 1;
+}
+void _quicksort_uint8(uint8_t *arr, int16_t *index, const int lo, const int hi)
+{
+	int split;
+	if (lo < hi) {
+		split = partition_uint8(arr, index, lo, hi);
+		_quicksort_uint8(arr, index, lo, split-1);
+		_quicksort_uint8(arr, index, split+1, hi);
+	}
+}
+
+void quicksort_uint8(uint8_t *arr, int16_t *index, const int length)
+{
+	_quicksort_uint8(arr, index, 0, length-1);
+}
+
+
+
+void _quicksort_int8(int8_t *arr, int16_t *index, const int lo, const int hi)
+{
+	int split;
+	if (lo < hi) {
+		split = partition_int8(arr, index, lo, hi);
+		_quicksort_int8(arr, index, lo, split-1);
+		_quicksort_int8(arr, index, split+1, hi);
+	}
+}
+
+void quicksort_int8(int8_t *arr, int16_t *index, const int length)
+{
+	_quicksort_int8(arr, index, 0, length-1);
+}
 
 int partition(fix16_t* arr, int16_t *index, const int lo, const int hi)
 {
@@ -1130,6 +1282,20 @@ void reverse(fix16_t* output_buffer[], int len){
 	}
 }
 
+void int8_to_fix16(fix16_t* output, int8_t* input, int size, fix16_t f16_scale, int32_t zero_point){
+	for (int i = 0; i < size; i++) {
+		output[i] = fix16_mul(fix16_from_int((int32_t)(input[i]) - zero_point),f16_scale);
+	}
+}
+
+fix16_t int8_to_fix16_single(int8_t input,fix16_t scale, int32_t zero_point){
+	return fix16_mul(fix16_from_int((int32_t)(input) - zero_point),scale);
+}
+
+int8_t fix16_to_int8(fix16_t input, fix16_t f16_scale, int32_t zero_point){
+	return (int8_t)(fix16_to_int(fix16_div(input,f16_scale)) +zero_point);
+}
+
 void post_classifier(fix16_t *outputs, const int out_sz, int16_t* output_index, int topk)
 {
 	int i;
@@ -1142,7 +1308,32 @@ void post_classifier(fix16_t *outputs, const int out_sz, int16_t* output_index, 
 	}
 	free(idx);
 }
+void post_classifier_uint8(uint8_t *outputs, const int out_sz, int16_t* output_index, int topk)
+{
+	int i;
+	int16_t *idx = (int16_t*)malloc(out_sz*sizeof(int16_t));
+	for (i = 0; i < out_sz; i++) idx[i] = i;
+	quicksort_uint8(outputs, idx, out_sz);
+	
 
+	for(int i=0;i<topk;++i){
+		output_index[i] = idx[out_sz-1 -i];
+	}
+	free(idx);
+}
+void post_classifier_int8(int8_t *outputs, const int out_sz, int16_t* output_index, int topk)
+{
+	int i;
+	int16_t *idx = (int16_t*)malloc(out_sz*sizeof(int16_t));
+	for (i = 0; i < out_sz; i++) idx[i] = i;
+	quicksort_int8(outputs, idx, out_sz);
+	//quicksort_uint8((uint8_t*) outputs, idx, out_sz);
+
+	for(int i=0;i<topk;++i){
+		output_index[i] = idx[out_sz-1 -i];
+	}
+	free(idx);
+}
 
 int close(float a, float b, float threshold) {
 	float diff = a - b;
@@ -1297,8 +1488,147 @@ int fix16_clean_boxes(fix16_box *boxes, int total, int width, int height)
 	return b;
 }
 
+//////////
+int fix16_get_region_boxes_int8(int8_t *predictions, int zero_point, fix16_t scale_out, fix16_t *biases, const int w, const int h, const int ln, 
+		const int classes, fix16_t w_ratio, fix16_t h_ratio, fix16_t thresh, fix16_t log_odds, fix16_box *boxes,
+		int max_boxes, const int do_logistic, const int do_softmax, const int version)
+{
+	int box_count = 0;
 
+	int num_size=(classes+5) *w*h;
+	fix16_t box[classes+4];
+	for(int r=0;r<h;r++){
+		for(int c=0;c<w;c++){
+			fix16_t row = fix16_from_int(r);
+			fix16_t col = fix16_from_int(c);
+			for(int n = 0; n < ln; ++n){
+				int p_index = n*num_size+4*w*h+r*w+c;
+				fix16_t scale = fix16_smul(fix16_from_int((int8_t)predictions[p_index] - zero_point), scale_out);
+				if (do_logistic) {
+					if (scale < log_odds) continue;
+					scale = fix16_logistic_activate(scale);
+				}
+				if (scale < thresh) continue;
 
+				const int class_offset = 4;
+				for(int j=0; j < class_offset;++j){
+					box[j] = fix16_smul(fix16_from_int((int8_t)predictions[n*num_size+j*w*h+r*w+c] - zero_point), scale_out);
+				}
+				for(int j=0;j<classes;++j){
+					box[j+class_offset] = fix16_smul(fix16_from_int((int8_t)predictions[n*num_size+(j+class_offset+1)*w*h+r*w+c] - zero_point), scale_out);
+				}
+
+				fix16_t bx, by, bw, bh;
+				if (version > 3) {
+					// (col+logisitic(box)*2-0.5) * ratio
+					bx = fix16_mul(fix16_add(fix16_add(col, fix16_mul(fix16_logistic_activate(box[0]), fix16_two)), fix16_nhalf), w_ratio);
+					by = fix16_mul(fix16_add(fix16_add(row, fix16_mul(fix16_logistic_activate(box[1]), fix16_two)), fix16_nhalf), h_ratio);
+
+					bh = fix16_mul(fix16_logistic_activate(box[3]), fix16_two);
+					bh = fix16_mul(fix16_mul(bh, bh), biases[2*n+1]);
+
+					// (logisitic(box)*2)**2 * anchor
+					bw = fix16_mul(fix16_logistic_activate(box[2]), fix16_two);
+					bw = fix16_mul(fix16_mul(bw, bw), biases[2*n]);
+				} else {
+					bx = fix16_mul(fix16_add(col, fix16_logistic_activate(box[ 0])), w_ratio);
+					by = fix16_mul(fix16_add(row, fix16_logistic_activate(box[ 1])), h_ratio);
+					bw = fix16_mul(fix16_exp(box[2]), biases[2*n]);
+					bh = fix16_mul(fix16_exp(box[3]), biases[2*n+1]);
+				}
+
+				if (do_softmax) {
+					if (version < 3) {
+						fix16_softmax(box + class_offset, classes, box + class_offset);
+					} else {
+						for(int j=0;j<classes;++j){
+							box[j+class_offset] = fix16_logistic_activate(box[j+class_offset]);
+						}
+					}
+				}
+
+				for(int j = 0; j < classes; j++){
+					fix16_t prob = fix16_mul(scale, box[class_offset+j]);
+					if (prob > thresh) {
+						fix16_t xmin = fix16_sub(bx, bw >> 1);
+						fix16_t ymin = fix16_sub(by, bh >> 1);
+						fix16_t xmax = fix16_add(xmin, bw);
+						fix16_t ymax = fix16_add(ymin, bh);
+
+						boxes[box_count].xmin = fix16_to_int(xmin);
+						boxes[box_count].ymin = fix16_to_int(ymin);
+						boxes[box_count].xmax = fix16_to_int(xmax);
+						boxes[box_count].ymax = fix16_to_int(ymax);
+						boxes[box_count].confidence = prob;
+						boxes[box_count].class_id = j;
+						box_count++;
+						if(box_count == max_boxes){
+							return box_count;
+						}
+					}
+				}
+			}
+		}
+	}
+	return box_count;
+}
+
+int post_process_yolo_int8(int8_t **outputs, const int num_outputs, int zero_points[], fix16_t scale_outs[], 
+	 yolo_info_t *cfg, fix16_t thresh, fix16_t overlap, fix16_box fix16_boxes[], int max_boxes)
+{
+	int total_box_count = 0;
+	int input_h  = cfg[0].input_dims[1];
+	int input_w  = cfg[0].input_dims[2];
+	fix16_t *anchors = cfg[0].anchors;
+
+	fix16_t fix16_log_odds = fix16_log(fix16_div(thresh, fix16_sub(fix16_one, thresh)));
+	for (int o = 0; o < num_outputs; o++) {
+		int8_t *out8 = outputs[o];
+		//uint32_t *indice = indices[o];
+		
+		int num_per_output = cfg[o].num;
+		if (num_outputs > 1) num_per_output = cfg[o].mask_length;
+
+		fix16_t fix16_biases[2*num_per_output];
+
+		int h  = cfg[o].output_dims[1];
+		int w  = cfg[o].output_dims[2];
+		fix16_t h_ratio = fix16_from_int(input_h/h);
+		fix16_t w_ratio = fix16_from_int(input_w/w);
+
+		for (int i = 0; i < num_per_output; i++) {
+			int mask = i;
+			if (num_outputs > 1) mask = cfg[o].mask[i];
+
+			if (cfg[o].version == 2) {
+				fix16_biases[2*i] = fix16_mul(anchors[2*mask], w_ratio);
+				fix16_biases[2*i+1] = fix16_mul(anchors[2*mask+1], h_ratio);
+			} else {
+				fix16_biases[2*i] = anchors[2*mask];
+				fix16_biases[2*i+1] = anchors[2*mask+1];
+			}
+		}
+
+		int fix16_box_count = fix16_get_region_boxes_int8(out8, zero_points[o], scale_outs[o], fix16_biases, w, h, num_per_output, cfg[o].classes, w_ratio,
+				h_ratio, thresh, fix16_log_odds,
+				fix16_boxes + total_box_count,max_boxes-total_box_count, 1, 1, cfg[o].version);
+		fflush(stdout);
+
+		// copy boxes
+		total_box_count += fix16_box_count;
+		if(total_box_count == max_boxes){
+			break;
+		}
+	}
+
+	fix16_sort_boxes(fix16_boxes, total_box_count);
+	fix16_do_nms(fix16_boxes, total_box_count, overlap);
+
+	int clean_box_count = fix16_clean_boxes(fix16_boxes, total_box_count, input_w, input_h);
+
+	return clean_box_count;
+}
+//////
 
 int fix16_get_region_boxes(fix16_t *predictions, fix16_t *biases, const int w, const int h, const int ln, const int classes, fix16_t w_ratio, fix16_t h_ratio, fix16_t thresh, fix16_t log_odds, fix16_box *boxes,int max_boxes, const int do_logistic, const int do_softmax, const int version)
 {
@@ -1382,6 +1712,313 @@ int fix16_get_region_boxes(fix16_t *predictions, fix16_t *biases, const int w, c
 	return box_count;
 }
 
+int post_process_ultra_nms_uint8(uint8_t *output, int input_h, int input_w,fix16_t f16_scale, int32_t zero_point, fix16_t thresh, fix16_t overlap, fix16_box fix16_boxes[], int max_boxes)
+{
+		int total_box_count = 0;
+		int8_t thresh0 = fix16_to_int8(thresh,f16_scale,zero_point);
+		for(int i =0; i< 8400; i++){
+			if(total_box_count<max_boxes){
+				//fix16_t max_score = F16(-1.0);
+				int8_t max_score = -128;
+				int max_score_ind = 0;
+				for(int c = 4; c <84;c++){
+					if(output[i*84 +c]>  max_score){
+						max_score=output[i*84 + c];
+						max_score_ind = c-4;
+					}
+				}
+				if(max_score > thresh0){
+					fix16_boxes[total_box_count].confidence = int8_to_fix16_single(max_score,f16_scale,zero_point);
+					fix16_boxes[total_box_count].class_id = max_score_ind;
+
+					fix16_t x = int8_to_fix16_single(output[i*84+0],f16_scale, zero_point);
+					fix16_t y = int8_to_fix16_single(output[i*84+1],f16_scale, zero_point);
+					fix16_t w = int8_to_fix16_single(output[i*84+2],f16_scale, zero_point);
+					fix16_t h = int8_to_fix16_single(output[i*84+3],f16_scale, zero_point);
+
+					fix16_boxes[total_box_count].xmin = fix16_to_int((x - fix16_mul(w,fix16_half))*input_w);
+					fix16_boxes[total_box_count].xmax = fix16_to_int((x + fix16_mul(w,fix16_half))*input_w);
+					fix16_boxes[total_box_count].ymin = fix16_to_int((y - fix16_mul(h,fix16_half))*input_h);
+					fix16_boxes[total_box_count].ymax = fix16_to_int((y + fix16_mul(h,fix16_half))*input_h);
+					total_box_count++;
+
+				}
+			}
+		}
+		fix16_sort_boxes(fix16_boxes, total_box_count);
+		fix16_do_nms(fix16_boxes, total_box_count, overlap);
+		int clean_box_count = fix16_clean_boxes(fix16_boxes, total_box_count, input_w, input_h);
+
+		return clean_box_count;
+
+
+}
+
+int post_process_ultra_nms_int8(int8_t *output, int output_boxes, int input_h, int input_w,fix16_t f16_scale, int32_t zero_point, fix16_t thresh, fix16_t overlap, fix16_box fix16_boxes[], int boxes_len)
+{
+#if TIMING	
+static struct timeval tv1, tv2,tv0;
+gettimeofday(&tv0, NULL); 	
+#endif
+
+		int8_t* cached_output=malloc(8400*84*sizeof(*cached_output));
+		memcpy(cached_output,output,8400*84*sizeof(*cached_output));
+		
+#if TIMING
+gettimeofday(&tv1, NULL); 
+printf("copy over outputs: %d ms\n",(gettimediff_us2(tv0, tv1) / 1000));	
+#endif
+		int total_box_count = 0;
+		int8_t thresh0 = fix16_to_int8(thresh,f16_scale,zero_point);
+		for(int i =0; i< output_boxes; i++){		
+			//fix16_t max_score = F16(-1.0);
+			int8_t max_score = -128;
+			int max_score_ind = 0;
+					
+			for(int c = 4; c <84;c++){
+				if(cached_output[i*84 +c]>  max_score){
+					max_score=cached_output[i*84 + c];
+					max_score_ind = c-4;
+				}
+			}
+
+			if(max_score > thresh0){
+			//if(0){
+				fix16_boxes[total_box_count].confidence = int8_to_fix16_single(max_score,f16_scale,zero_point);
+				fix16_boxes[total_box_count].class_id = max_score_ind;
+
+				fix16_t x = int8_to_fix16_single(cached_output[i*84+0],f16_scale, zero_point);
+				fix16_t y = int8_to_fix16_single(cached_output[i*84+1],f16_scale, zero_point);
+				fix16_t w = int8_to_fix16_single(cached_output[i*84+2],f16_scale, zero_point);
+				fix16_t h = int8_to_fix16_single(cached_output[i*84+3],f16_scale, zero_point);
+
+				fix16_boxes[total_box_count].xmin = fix16_to_int((x - fix16_mul(w,fix16_half))*input_w);
+				fix16_boxes[total_box_count].xmax = fix16_to_int((x + fix16_mul(w,fix16_half))*input_w);
+				fix16_boxes[total_box_count].ymin = fix16_to_int((y - fix16_mul(h,fix16_half))*input_h);
+				fix16_boxes[total_box_count].ymax = fix16_to_int((y + fix16_mul(h,fix16_half))*input_h);
+				total_box_count++;
+
+			}
+			if(total_box_count>=boxes_len)
+				break;
+		}
+
+		fix16_sort_boxes(fix16_boxes, total_box_count);
+
+		fix16_do_nms(fix16_boxes, total_box_count, overlap);
+		int clean_box_count = fix16_clean_boxes(fix16_boxes, total_box_count, input_w, input_h);
+#if TIMING
+gettimeofday(&tv2, NULL); 	
+	
+printf("total time: %d ms\n",(gettimediff_us2(tv0, tv2) / 1000));		
+printf("memcpy: %d ms\n",(gettimediff_us2(tv0, tv1) / 1000));		
+printf("processing: %d ms\n",(gettimediff_us2(tv1, tv2) / 1000));		
+#endif
+		free(cached_output);
+		return clean_box_count;
+
+
+}
+
+int ultralytics_process_box(fix16_t *xywh, fix16_t* arr, const int j, const int i, const int size)
+{
+	fix16_t soft[16];
+	fix16_t in[16];
+	fix16_t v[4];
+	fix16_t scale = fix16_div(fix16_one, fix16_from_int(size));
+
+	fix16_t anchor[] ={F16(0),F16(1),F16(2),F16(3),F16(4),F16(5),F16(6),F16(7),
+		F16(8),F16(9),F16(10),F16(11),F16(12),F16(13),F16(14),F16(15)};
+	for (int c = 0; c < 4; c++) {
+		fix16_t sum = 0;
+		for (int s = 0; s < 16; s++) {
+			in[s] = arr[(c*16+s)*size*size+j*size+i];
+		}
+		fix16_softmax(in, 16, soft);
+		for (int s = 0; s < 16; s++) {
+			sum = fix16_add(sum, fix16_mul(anchor[s], soft[s]));
+		}
+		v[c] = fix16_mul(sum, scale);
+	}
+
+	fix16_t cx = fix16_add(fix16_mul(scale, F16(0.5)), fix16_mul(fix16_from_int(i),scale));//cx = 1/bh/2 + y/bh
+	fix16_t cy = fix16_add(fix16_mul(scale, F16(0.5)), fix16_mul(fix16_from_int(j),scale));//cy = 1/bw/2 + x/bw
+	fix16_t r = fix16_sub(cx, v[0]); // r = (cx - v[0])
+	fix16_t lo = fix16_sub(cy, v[1]); // lo = (cy - v[1])
+	fix16_t l = fix16_add(cx, v[2]); // l = (cx + v[2])
+	fix16_t u = fix16_add(cy, v[3]); // u = (cy + v[3])
+	xywh[0] = fix16_mul(fix16_add(l, r), F16(0.5)); // x = (l + r) / 2
+	xywh[1] = fix16_mul(fix16_add(lo, u), F16(0.5)); // y = (lo + u) / 2
+	xywh[2] = fix16_sub(l, r); //w = (l - r)
+	xywh[3] = fix16_sub(u, lo); // h = (u - lo)
+
+	return 0;
+}
+
+int ultralytics_process_box_int8(fix16_t *xywh, int8_t* arr, const int h, const int w, const int H, const int W, int zero_point, fix16_t scale_output)
+{
+	fix16_t soft[16];
+	fix16_t v[4];
+	fix16_t anchor[] ={F16(0),F16(1),F16(2),F16(3),F16(4),F16(5),F16(6),F16(7),
+		F16(8),F16(9),F16(10),F16(11),F16(12),F16(13),F16(14),F16(15)};
+	fix16_t inv_H = fix16_div(fix16_one, fix16_from_int(H));
+	fix16_t inv_W = fix16_div(fix16_one, fix16_from_int(W));
+
+	for (int c = 0; c < 4; c++) {
+		fix16_t sum = 0;
+		for (int s = 0; s < 16; s++) {
+			soft[s] = int8_to_fix16_single(arr[(c*16+s)*H*W+h*W+w],scale_output,zero_point);
+		}
+		fix16_softmax(soft, 16, soft);
+		for (int s = 0; s < 16; s++) {
+			sum = fix16_add(sum, fix16_mul(anchor[s], soft[s]));
+		}
+		if(c%2==0){
+			v[c] = fix16_mul(sum,inv_W);
+		}
+		else{
+			v[c] = fix16_mul(sum,inv_H);
+		}
+	}
+
+	fix16_t cx = fix16_add(fix16_mul(inv_W, F16(0.5)), fix16_mul(fix16_from_int(w),inv_W));//cx = 1/bw/2 + y/bw
+	fix16_t cy = fix16_add(fix16_mul(inv_H, F16(0.5)), fix16_mul(fix16_from_int(h),inv_H));//cy = 1/bh/2 + x/bh
+	fix16_t r = fix16_sub(cx, v[0]); // r = (cx - v[0])
+	fix16_t lo = fix16_sub(cy, v[1]); // lo = (cy - v[1])
+	fix16_t l = fix16_add(cx, v[2]); // l = (cx + v[2])
+	fix16_t u = fix16_add(cy, v[3]); // u = (cy + v[3])
+	xywh[0] = fix16_mul(fix16_add(l, r), F16(0.5)); // x = (l + r) / 2
+	xywh[1] = fix16_mul(fix16_add(lo, u), F16(0.5)); // y = (lo + u) / 2
+	xywh[2] = fix16_sub(l, r); //w = (l - r)
+	xywh[3] = fix16_sub(u, lo); // h = (u - lo)
+
+	return 0;
+}
+
+
+int post_process_ultra_int8(int8_t **outputs, int* outputs_shape[], fix16_t *post, fix16_t thresh, int zero_points[], fix16_t scale_outs[], const int max_boxes)
+{
+	int total_count = 0;
+	int C = outputs_shape[0][1];	// number of classes (80 for COCO)
+	fix16_t fix16_log_odds = fix16_log(fix16_div(thresh, fix16_sub(fix16_one, thresh)));
+	for(int o=0; o<6; o+=2){
+		int H = outputs_shape[o][2];
+		int W = outputs_shape[o][3];
+		int8_t *out8 = outputs[o];
+		int temp_zero = zero_points[o];
+		fix16_t temp_scale = scale_outs[o];
+		int8_t i8_log_odds = fix16_to_int8(fix16_log_odds,temp_scale,temp_zero);
+
+		int valid_locations[H][W];
+		for(int h=0; h<H; h++)
+			for(int w=0; w<W; w++)
+				valid_locations[h][w] = 0;
+		int8_t* outPtr = out8;
+		for(int c=0; c<C; c++){
+			for(int h=0; h<H; h++){
+				for(int w=0; w<W; w++){
+					if(*outPtr++>i8_log_odds){	// only process likely scores
+						valid_locations[h][w] = 1;
+					}
+				}
+			}
+		}
+		for(int h=0; h<H; h++){
+			for(int w=0; w<W; w++){
+				if(valid_locations[h][w] && total_count<max_boxes){
+					fix16_t *xywh = post + total_count*(C+4);
+					ultralytics_process_box_int8(xywh, outputs[o+1], h, w, H, W, zero_points[o+1], scale_outs[o+1]);
+
+					for(int c=0; c<C; c++){
+						int8_t val = out8[c*H*W + h*W + w];
+						if(val > i8_log_odds){
+							post[total_count*(C+4)+4+c] = fix16_logistic_activate(int8_to_fix16_single(val,temp_scale,temp_zero));
+						} else {
+							post[total_count*(C+4)+4+c] = 0;
+						}
+					}
+					total_count++;
+				}
+			}
+		}
+	}
+	return total_count;
+
+}
+
+/*int post_process_ultra(fix16_t **outputs, fix16_t *post, fix16_t thresh)
+{
+	int valid_count = 0;
+	int num_classes = 80;
+	int num_outputs = 3;
+	fix16_t fix16_log_odds = fix16_log(fix16_div(thresh, fix16_sub(fix16_one, thresh)));
+	for (int o = 0; o < num_outputs; o++) {
+		fix16_t *out32 = outputs[o*2];
+		int size;
+		if (o == 0) size = 80;
+		if (o == 1) size = 40;
+		if (o == 2) size = 20;
+
+		for (int j = 0; j < size; j++) {
+			for (int i = 0; i <  size; i++) {
+				int is_valid = 0;
+				for (int c = 0; c < num_classes; c++) {
+					if (out32[j*size+i+c*size*size] > fix16_log_odds) {
+						is_valid = 1;
+						break;
+					}
+				}
+				if (is_valid) {
+					fix16_t xywh[4];
+					ultralytics_process_box(xywh, outputs[o*2+1], j, i, size);
+
+					post[valid_count*84+0] = xywh[0];
+					post[valid_count*84+1] = xywh[1];
+					post[valid_count*84+2] = xywh[2];
+					post[valid_count*84+3] = xywh[3];
+
+					for (int c = 0; c < num_classes; c++) {
+						post[valid_count*84+4+c] = fix16_logistic_activate(out32[j*size+i+c*size*size]);
+					}
+					valid_count++;
+				}
+			}
+		}
+	}
+	return valid_count;
+}*/
+
+int post_process_ultra_nms(fix16_t *output, int output_boxes, int input_h, int input_w, fix16_t thresh, fix16_t overlap, fix16_box fix16_boxes[], int boxes_len)
+{
+		int total_box_count = 0;
+		for(int i=0; i<output_boxes; i++){
+			fix16_t max_score = F16(-1.0);
+			int max_score_ind = 0;
+			for(int c = 4; c <84;c++){
+				if(output[i*84 +c]>  max_score){
+					max_score=output[i*84 + c];
+					max_score_ind = c-4;
+				}
+			}
+			if(max_score > thresh){
+				fix16_boxes[total_box_count].confidence = max_score;
+				fix16_boxes[total_box_count].class_id = max_score_ind;
+				fix16_boxes[total_box_count].xmin = fix16_to_int((output[i*84+0] - fix16_mul(output[i*84+2],fix16_half))*input_w);
+				fix16_boxes[total_box_count].xmax = fix16_to_int((output[i*84+0] + fix16_mul(output[i*84+2],fix16_half))*input_w);
+				fix16_boxes[total_box_count].ymin = fix16_to_int((output[i*84+1] - fix16_mul(output[i*84+3],fix16_half))*input_h);
+				fix16_boxes[total_box_count].ymax = fix16_to_int((output[i*84+1] + fix16_mul(output[i*84+3],fix16_half))*input_h);
+				total_box_count++;
+
+			}
+			if(total_box_count>=boxes_len)
+				break;
+		}
+		fix16_sort_boxes(fix16_boxes, total_box_count);
+		fix16_do_nms(fix16_boxes, total_box_count, overlap);
+		int clean_box_count = fix16_clean_boxes(fix16_boxes, total_box_count, input_w, input_h);
+		return clean_box_count;
+}
+
 int post_process_yolo(fix16_t **outputs, const int num_outputs, yolo_info_t *cfg,
 		fix16_t thresh, fix16_t overlap, fix16_box fix16_boxes[], int max_boxes)
 {
@@ -1393,11 +2030,10 @@ int post_process_yolo(fix16_t **outputs, const int num_outputs, yolo_info_t *cfg
 	fix16_t fix16_log_odds = fix16_log(fix16_div(thresh, fix16_sub(fix16_one, thresh)));
 	for (int o = 0; o < num_outputs; o++) {
 		fix16_t *out32 = outputs[o];
-
 		int num_per_output = cfg[o].num;
 		if (num_outputs > 1) num_per_output = cfg[o].mask_length;
 
-
+		
 		fix16_t fix16_biases[2*num_per_output];
 
 		int h  = cfg[o].output_dims[1];
@@ -1417,7 +2053,6 @@ int post_process_yolo(fix16_t **outputs, const int num_outputs, yolo_info_t *cfg
 				fix16_biases[2*i+1] = anchors[2*mask+1];
 			}
 		}
-
 		int fix16_box_count = fix16_get_region_boxes(out32, fix16_biases, w, h, num_per_output, cfg[o].classes, w_ratio,
 				h_ratio, thresh, fix16_log_odds,
 				fix16_boxes + total_box_count,max_boxes-total_box_count, 1, 1, cfg[o].version);
@@ -1449,6 +2084,15 @@ void post_process_classifier(fix16_t *outputs, const int out_sz, int16_t* output
 	free(cached_output);
 }
 
+void post_process_classifier_int8(int8_t *outputs, const int out_sz, int16_t* output_index, int topk)
+{
+	int8_t* cached_output=malloc(out_sz*sizeof(*cached_output));
+	for(int i=0;i<out_sz;++i){
+		cached_output[i] = outputs[i];
+	}
+	post_classifier_int8(cached_output, out_sz, output_index, topk);
+	free(cached_output);
+}
 
 void ctc_raw_indices(int *indices, fix16_t *output, const int output_len, const int output_depth)
 {
@@ -1682,9 +2326,12 @@ int post_process_blazeface(object_t faces[],fix16_t* scores,fix16_t* points,int 
 	return facesLength;
 }
 
-int pprint_post_process(const char *name, const char *str, model_t *model, vbx_cnn_io_ptr_t *io_buffers)
+int pprint_post_process(const char *name, const char *str, model_t *model, vbx_cnn_io_ptr_t *io_buffers,int int8_flag)
 {
-	
+	int *in_dims = model_get_input_shape(model,0);
+	int total_dims = model_get_input_dims(model,0);
+	int image_h = in_dims[total_dims-2];
+	int image_w = in_dims[total_dims-1];
 	if (!strcmp(str, "BLAZEFACE")){
 		const int MAX_FACES=24;
 		object_t faces[MAX_FACES];
@@ -1730,16 +2377,16 @@ int pprint_post_process(const char *name, const char *str, model_t *model, vbx_c
 		output_buffers[7]=(fix16_t*)(uintptr_t)io_buffers[1+1];
 		output_buffers[8]=(fix16_t*)(uintptr_t)io_buffers[1+0];
 
-		int input_length = model_get_input_length(model,0);
-		int image_h = 288;
-		int image_w = 512;
-		if (input_length == (3*320*320)) {
-			image_h = 320;
-			image_w = 320;
-		} else if (input_length == (3*640*640)) {
-			image_h = 640;
-			image_w = 640;
-		}
+		//int input_length = model_get_input_length(model,0);
+		// int image_h = 288;
+		// int image_w = 512;
+		// if (input_length == (3*320*320)) {
+		// 	image_h = 320;
+		// 	image_w = 320;
+		// } else if (input_length == (3*640*640)) {
+		// 	image_h = 640;
+		// 	image_w = 640;
+		// }
 
 		int facesLength = post_process_retinaface(faces,MAX_FACES,output_buffers, image_w, image_h,
 				confidence_threshold,nms_threshold);
@@ -1764,22 +2411,37 @@ int pprint_post_process(const char *name, const char *str, model_t *model, vbx_c
 
 		}
 	} else if (!strcmp(str,"LPD")) {
+		int platesLength = 0;
 		const int MAX_PLATES=10;
 		object_t plates[MAX_PLATES];
 		fix16_t confidence_threshold=F16(0.55);
 		fix16_t nms_threshold=F16(0.2);
-
 		int num_outputs = model_get_num_outputs(model);
-		int image_h = 288;
-		int image_w = 1024;
-	
-		fix16_t* output_buffers[num_outputs];
-		for (int o = 0; o < num_outputs; o++) {
-			output_buffers[o]=(fix16_t*)(uintptr_t)io_buffers[1+o];
-		}
-		int platesLength = post_process_lpd(plates, MAX_PLATES, output_buffers, image_w, image_h,
-				confidence_threshold,nms_threshold, num_outputs);
+		// int image_h = 288;
+		// int image_w = 1024;
 
+		fix16_t* fix16_buffers[9];
+		int8_t* output_buffer_int8[9];
+		int zero_points[9];
+		fix16_t scale_outs[9];
+
+
+		for (int o = 0; o < num_outputs; o++) {				
+			int *output_shape = model_get_output_shape(model,o);
+			int ind = 2*(output_shape[2]/18) + (output_shape[1]/6); 
+			fix16_buffers[ind]=(fix16_t*)(uintptr_t)io_buffers[1+o]; //assigns output buffers by first dim ascending, second descending
+			output_buffer_int8[ind]= (int8_t*)(uintptr_t)io_buffers[1+o];
+			zero_points[ind]=model_get_output_zeropoint(model,o);
+			scale_outs[ind]=model_get_output_scale_fix16_value(model,o);
+		}
+		if(int8_flag){
+			platesLength = post_process_lpd_int8(plates, MAX_PLATES, output_buffer_int8, image_w, image_h,
+				confidence_threshold,nms_threshold, num_outputs,zero_points,scale_outs);
+		}
+		else{
+			platesLength = post_process_lpd(plates, MAX_PLATES, fix16_buffers, image_w, image_h,
+				confidence_threshold,nms_threshold, num_outputs);
+		}
 		for(int f=0;f<platesLength;f++){
 			object_t* plate = plates+f;
 			fix16_t x = plate->box[0];
@@ -1789,64 +2451,59 @@ int pprint_post_process(const char *name, const char *str, model_t *model, vbx_c
 			printf("plate %d found at (x,y,w,h) %3.1f %3.1f %3.1f %3.1f\n",f,
 					fix16_to_float(x), fix16_to_float(y),
 					fix16_to_float(w), fix16_to_float(h));
-			printf("landmarks: ");
-			for(int l =0;l<5;++l){
-				printf("%3.1f,%3.1f ",
-						fix16_to_float(plate->points[l][0]),
-						fix16_to_float(plate->points[l][1]));
-				fflush(stdout);
-			}printf("\n");
 
 
 		}
 	} else if (!strcmp(str, "LPR")){
 		char label[20];
-		fix16_t* output=(fix16_t*)(uintptr_t)io_buffers[1];
-		fix16_t conf = post_process_lpr(output, model_get_output_length(model, 0), label);
+		fix16_t conf = 0;
+		fix16_t* fix16_buffers = (fix16_t*)(uintptr_t)io_buffers[1];
+		int8_t* output_buffer_int8 = (int8_t*)(uintptr_t)io_buffers[1];
+		if(int8_flag){
+			conf = post_process_lpr_int8(output_buffer_int8, model, label);
+		}
+		else{
+			conf = post_process_lpr(fix16_buffers, model_get_output_length(model, 0), label);
+		}
 		printf("Plate ID: %s Recognition Score: %3.4f\n", label, fix16_to_float(conf));
 
 	} else if (!strcmp(str,"SCRFD")) {
+		int facesLength = 0;
 		const int MAX_FACES=24;
 		object_t faces[MAX_FACES];
 		fix16_t confidence_threshold=F16(0.8);
 		fix16_t nms_threshold=F16(0.4);
-
-		fix16_t* output_buffers[9];
-		//( 0 1 2 3 4 5 6 7 8)->(2 5 8 1 4 7 0 3 6)
-		output_buffers[0]=(fix16_t*)(uintptr_t)io_buffers[1+2];
-		output_buffers[1]=(fix16_t*)(uintptr_t)io_buffers[1+5];
-		output_buffers[2]=(fix16_t*)(uintptr_t)io_buffers[1+8];
-		output_buffers[3]=(fix16_t*)(uintptr_t)io_buffers[1+1];
-		output_buffers[4]=(fix16_t*)(uintptr_t)io_buffers[1+4];
-		output_buffers[5]=(fix16_t*)(uintptr_t)io_buffers[1+7];
-		output_buffers[6]=(fix16_t*)(uintptr_t)io_buffers[1+0];
-		output_buffers[7]=(fix16_t*)(uintptr_t)io_buffers[1+3];
-		output_buffers[8]=(fix16_t*)(uintptr_t)io_buffers[1+6];
+		fix16_t* fix16_buffers[9];
+		int8_t* output_buffer_int8[9];
+		int zero_points[9];
+		fix16_t scale_outs[9];
 		
-
-		int input_length = model_get_input_length(model,0);
-		int image_h = 288;
-		int image_w = 512;
-		if (input_length == (3*320*320)) {
-			image_h = 320;
-			image_w = 320;
-		} else if (input_length == (3*640*640)) {
-			image_h = 640;
-			image_w = 640;
+		for(int o=0; o<model_get_num_outputs(model); o++){
+			int *output_shape = model_get_output_shape(model,o);
+			int ind = (output_shape[1]/8)*3 + (2-(output_shape[2]/18)); //first dim should be {2,8,20} second dim should be {9,18,36}
+			fix16_buffers[ind]=(fix16_t*)(uintptr_t)io_buffers[1+o]; //assigns output buffers by first dim ascending, second descending
+			output_buffer_int8[ind]= (int8_t*)(uintptr_t)io_buffers[1+o];
+			zero_points[ind]=model_get_output_zeropoint(model,o);
+			scale_outs[ind]=model_get_output_scale_fix16_value(model,o);
 		}
-	
-		int facesLength = post_process_scrfd(faces,MAX_FACES,output_buffers, image_w, image_h,
-				confidence_threshold,nms_threshold);
+		if(int8_flag){
+			facesLength = post_process_scrfd_int8(faces,MAX_FACES,output_buffer_int8, zero_points, scale_outs, image_w, image_h,
+				confidence_threshold,nms_threshold,model);
+		}	
 
+		else{			
+			facesLength = post_process_scrfd(faces, MAX_FACES, fix16_buffers, image_w, image_h,
+				confidence_threshold,nms_threshold);
+		}
 		for(int f=0;f<facesLength;f++){
 			object_t* face = faces+f;
 			fix16_t x = face->box[0];
 			fix16_t y = face->box[1];
 			fix16_t w = face->box[2] - face->box[0];
 			fix16_t h = face->box[3] - face->box[1];
-			printf("face %d found at (x,y,w,h) %3.1f %3.1f %3.1f %3.1f\n",f,
+			printf("face %d found at (x,y,w,h) %3.1f %3.1f %3.1f %3.1f w/ conf: %3.1f\n",f,
 					fix16_to_float(x), fix16_to_float(y),
-					fix16_to_float(w), fix16_to_float(h));
+					fix16_to_float(w), fix16_to_float(h),fix16_to_float(face->detect_score));
 			printf("landmarks: ");
 			for(int l =0;l<5;++l){
 				printf("%3.1f,%3.1f ",
@@ -1858,14 +2515,26 @@ int pprint_post_process(const char *name, const char *str, model_t *model, vbx_c
 
 		}
 	} else if (!strcmp(str, "CLASSIFY")){
-		const int topk=10;
+		const int topk=5;
 		int16_t indices[topk];
 		int output_length = model_get_output_length(model, 0);
 		fix16_t* output_buffer0=(fix16_t*)(uintptr_t)io_buffers[1];
-		post_process_classifier(output_buffer0,output_length,indices,topk);
+		int8_t* output_buffer_int8_0=(int8_t*)(uintptr_t)io_buffers[1];
+		fix16_t f16_scale = (fix16_t)model_get_output_scale_fix16_value(model,0); // get output scale
+		int32_t zero_point = model_get_output_zeropoint(model,0); // get output zero
+		if(int8_flag){
+			post_process_classifier_int8(output_buffer_int8_0,output_length,indices,topk);
+		}
+		else{
+			post_process_classifier(output_buffer0,output_length,indices,topk);
+		}
+	
 		for(int i = 0;i < topk; ++i){
 			int idx = indices[i];
 			int score = output_buffer0[idx];
+			if(int8_flag){
+				score = fix16_mul(fix16_from_int((int32_t)(output_buffer_int8_0[idx])-zero_point),f16_scale);
+			}
 			if(output_length == 1001 || output_length == 1000){ // imagenet
 				char* class_name = imagenet_classes[idx];
 				if(output_length==1001){
@@ -1905,11 +2574,12 @@ int pprint_post_process(const char *name, const char *str, model_t *model, vbx_c
 		printf("\n");
 
 
-	} else if (!strcmp(str, "YOLOV2") || !strcmp(str, "YOLOV3") || !strcmp(str, "YOLOV4") || !strcmp(str, "YOLOV5") || !strcmp(str, "SSDV2")) {
+	} else if (!strcmp(str, "YOLOV2") || !strcmp(str, "YOLOV3") || !strcmp(str, "YOLOV4") || !strcmp(str, "YOLOV5") || !strcmp(str, "SSDV2") || !strcmp(str, "SSDTORCH") || !strcmp(str, "ULTRALYTICS_CUT") || !strcmp(str, "ULTRALYTICS")) {
 		char **class_names = NULL;
 		int valid_boxes = 0;
-		fix16_box boxes[1024];
 		int max_boxes = 100;
+		const int boxes_len = 1024;
+		fix16_box boxes[boxes_len];
 		fix16_t thresh = F16(0.3);
 		fix16_t iou = F16(0.4);
 
@@ -1963,6 +2633,60 @@ int pprint_post_process(const char *name, const char *str, model_t *model, vbx_c
 				return -1;
 			}
 
+
+		} else if (!strcmp(str, "ULTRALYTICS")){
+			class_names = coco_classes;
+			fix16_t* output=(fix16_t*)(uintptr_t)io_buffers[1];
+			int8_t* output_int8 =(int8_t*)(uintptr_t)io_buffers[1];
+			fix16_t f16_scale = (fix16_t)model_get_output_scale_fix16_value(model,0); // get output scale
+			int32_t zero_point = model_get_output_zeropoint(model,0); // get output zero
+			if(int8_flag){
+				int total_len=0;
+				for(int o=0; o<model_get_num_outputs(model);o++){
+					total_len += model_get_output_length(model,o);
+					printf("%d: %d\n",o,(int)model_get_output_length(model,o));
+				}
+				printf("total len: %d\n",total_len);
+				
+				valid_boxes = post_process_ultra_nms_int8(output_int8, 8400, image_h, image_w,f16_scale,zero_point, thresh, iou, boxes, max_boxes);
+			} else{
+				valid_boxes = post_process_ultra_nms(output, 8400, image_h, image_w, thresh, iou, boxes, max_boxes);
+			}
+
+		} else if (!strcmp(str, "ULTRALYTICS_CUT")){
+			class_names = coco_classes;
+			int* outputs_shape[6];
+			int8_t *outputs_int8[6];
+			int zero_points[6];
+			fix16_t scale_outs[6];
+
+			// put outputs in this order
+			// type:  {class_stride8, box_stride8,   class_stride16,  box_stride16,    class_stride32,  box_stride32}
+			// shape: {[1,80,H/8,W/8],[1,64,H/8,W/8],[1,80,H/16,W/16],[1,64,H/16,W/16],[1,80,H/32,W/32],[1,64,H/32,W/32]}
+			int32_t w_min = 0x7FFFFFFF;	// minimum width must be stride32
+			int32_t w_max = 0;			// maximum width must be stride8
+			int* shapes[6];
+			for(int n=0; n<6; n++){
+				shapes[n] = model_get_output_shape(model,n);
+				w_min = MIN(shapes[n][3], w_min);
+				w_max = MAX(shapes[n][3], w_max);
+			}
+			for(int i=0; i<6; i++){
+				int o;	// proper order
+				if(shapes[i][3]==w_min) o=4;		// stride 8
+				else if(shapes[i][3]==w_max) o=0;	// stride 32
+				else o=2;							// stride 16
+				if(shapes[i][1]==64) o+=1;			// box (otherwise class)
+				outputs_shape[o] = shapes[i];
+				outputs_int8[o] = (int8_t*)(uintptr_t)io_buffers[1+i];
+				zero_points[o]=model_get_output_zeropoint(model,i);
+				scale_outs[o]=model_get_output_scale_fix16_value(model,i);
+			}
+			const int max_detections = 200;
+			fix16_t post_buffer[max_detections*84];
+			int post_len;
+			post_len = post_process_ultra_int8(outputs_int8, outputs_shape, post_buffer, thresh, zero_points, scale_outs, max_detections);
+			valid_boxes = post_process_ultra_nms(post_buffer, post_len, image_h, image_w, thresh, iou, boxes, boxes_len);
 
 		} else if (!strcmp(str, "YOLOV3") || !strcmp(str, "YOLOV4")){ //tiny yolo v3/v4 COCO
 			class_names = coco_classes;
@@ -2084,17 +2808,23 @@ int pprint_post_process(const char *name, const char *str, model_t *model, vbx_c
 		} else if (!strcmp(str, "YOLOV5")){ //ultralytics
 			class_names = coco_classes;
 			int num_outputs = 3;
-
+			thresh =F16(.25);
 			fix16_t *outputs[3];
+			int8_t *outputs_int8[3];
+			int zero_points[3];
+			fix16_t scale_outs[3];
+
 			int output_sizes[3] = {255*13*13, 255*26*26, 255*52*52};
 			for (int o = 0; o < num_outputs; o++) {
 			  for (int i = 0; i < num_outputs; i++) {
 			    if (model_get_output_length(model,i) == output_sizes[o]) {
 				outputs[o] = (fix16_t*)(uintptr_t)io_buffers[i+1];
+				outputs_int8[o] = (int8_t*)(uintptr_t)io_buffers[i+1];
+				zero_points[o] = model_get_output_zeropoint(model,i);
+				scale_outs[o]=model_get_output_scale_fix16_value(model,i);
 			    }
 			  }
 			}
-
 			fix16_t anchors[] = {F16(10),F16(13),F16(16),F16(30),F16(33),F16(23),F16(30),F16(61),F16(62),F16(45),F16(59),F16(119),F16(116),F16(90),F16(156),F16(198),F16(373),F16(326)};
 			int mask_0[] = {6,7,8};
 			int mask_1[] = {3,4,5};
@@ -2139,18 +2869,57 @@ int pprint_post_process(const char *name, const char *str, model_t *model, vbx_c
 			};
 
 			yolo_info_t cfg[] = {cfg_0, cfg_1, cfg_2};
+			if (int8_flag) {
+				valid_boxes = post_process_yolo_int8(outputs_int8, num_outputs, zero_points, scale_outs, cfg, thresh, iou, boxes, max_boxes);
+			} else {
+				valid_boxes = post_process_yolo(outputs, num_outputs, cfg, thresh, iou, boxes, max_boxes);
+			}
+			
 
-			valid_boxes = post_process_yolo(outputs, num_outputs, cfg, thresh, iou, boxes, max_boxes);
-
-		}
-		else if (!strcmp(str, "SSDV2")){
+		} else if (!strcmp(str, "SSDV2")){
 			fix16_t* output_buffers[12];
 			char *is_vehicle = strstr(name, "ehicle");
+			char *is_torch = strstr(name, "torch");
 			if (is_vehicle == NULL) is_vehicle = strstr(name, "EHICLE");
 
 			fix16_t confidence_threshold=F16(0.5);
 			fix16_t nms_threshold=F16(0.4);
-			if (is_vehicle) {
+			int8_t* output_buffers_int8[12];
+			fix16_t f16_scale[12];// = (fix16_t)model_get_output_scale_fix16_value(model,0); // get output scale
+			int32_t zero_point[12];// = model_get_output_zeropoint(model,0); // get output zero
+			if (is_torch) {
+				for(int o=0;o<12;++o){
+				    int* oshape = model_get_output_shape(model,o);
+				    int idx;
+				    if (oshape[2] == 1) {
+					    idx = 5*2;
+				    } else if (oshape[2] == 2) {
+					    idx = 4*2;
+				    } else if (oshape[2] == 3) {
+					    idx = 3*2;
+				    } else if (oshape[2] == 5) {
+					    idx = 2*2;
+				    } else if (oshape[2] == 10) {
+					    idx = 1*2;
+				    } else {
+					    idx = 0*2;
+				    }
+				    if (oshape[1] != 24) {
+					    idx += 1;
+				    }
+				    output_buffers[idx]=(fix16_t*)(uintptr_t)io_buffers[1+o];
+				    output_buffers_int8[idx] = (int8_t*)(uintptr_t)io_buffers[1+o];
+				    f16_scale[idx] = model_get_output_scale_fix16_value(model,o);
+				    zero_point[idx] = model_get_output_zeropoint(model,o);
+				}
+				if(int8_flag){
+				
+					valid_boxes = post_process_ssd_torch_int8(boxes,max_boxes,output_buffers_int8,f16_scale,zero_point, 91,confidence_threshold,nms_threshold);
+				} else{
+					valid_boxes = post_process_ssd_torch(boxes,max_boxes,output_buffers,91,confidence_threshold,nms_threshold);
+				}
+				class_names = coco91_classes;
+			} else if (is_vehicle) {
 				for(int o=0;o<6;++o){
 					output_buffers[2*o]=(fix16_t*)(uintptr_t)io_buffers[1+(6-1-o)*2];
 					output_buffers[2*o+1]=(fix16_t*)(uintptr_t)io_buffers[1+(6-1-o)*2+1];
@@ -2184,6 +2953,78 @@ int pprint_post_process(const char *name, const char *str, model_t *model, vbx_c
 					fix16_to_float(boxes[i].confidence),
 					boxes[i].xmin,boxes[i].xmax,
 					boxes[i].ymin,boxes[i].ymax);
+		}
+	} else if (!strcmp(str, "POSENET")){
+		const int MAX_TOTALPOSE=5;
+		const int NUM_KEYPOINTS=17;
+		poses_t r_poses[MAX_TOTALPOSE];
+		
+		int *output_dims = model_get_output_shape(model,1);
+		int poseScoresH = output_dims[2]; 
+		int poseScoresW = output_dims[3]; 	
+		
+	
+		int outputStride = 16;
+		int nmsRadius = 20;
+		int pose_count = 0;
+		fix16_t minPoseScore = F16(0.25);
+		fix16_t scoreThreshold = F16(0.5);
+		fix16_t score;
+		if (int8_flag) {
+			int zero_points[4];
+			fix16_t scale_outs[4];
+			int8_t* scores_8, *offsets_8, *displacementsFwd_8, *displacementsBwd_8;
+			scores_8 = (int8_t*)(uintptr_t)io_buffers[1+1];
+			offsets_8 = (int8_t*)(uintptr_t)io_buffers[0+1];
+			displacementsFwd_8 = (int8_t*)(uintptr_t)io_buffers[2+1];
+			displacementsBwd_8 = (int8_t*)(uintptr_t)io_buffers[3+1];
+			for(int o=0; o<model_get_num_outputs(model); o++){
+				zero_points[o] = model_get_output_zeropoint(model,o);
+				scale_outs[o]=model_get_output_scale_fix16_value(model,o);
+			}
+			pose_count = decodeMultiplePoses_int8(r_poses,scores_8,offsets_8,displacementsFwd_8,displacementsBwd_8, outputStride, MAX_TOTALPOSE, scoreThreshold, nmsRadius, minPoseScore,poseScoresH,poseScoresW,zero_points,scale_outs); //actualpostprocess code
+		}
+		else{
+			fix16_t* scores, *offsets, *displacementsFwd, *displacementsBwd;
+			scores = (fix16_t*)(uintptr_t)io_buffers[1+1];
+			offsets = (fix16_t*)(uintptr_t)io_buffers[0+1];
+			displacementsFwd = (fix16_t*)(uintptr_t)io_buffers[2+1];
+			displacementsBwd = (fix16_t*)(uintptr_t)io_buffers[3+1];
+			pose_count = decodeMultiplePoses(r_poses,scores,offsets,displacementsFwd,displacementsBwd, outputStride, MAX_TOTALPOSE, scoreThreshold, nmsRadius, minPoseScore,poseScoresH,poseScoresW); //actualpostprocess code
+		}
+		
+		
+		
+		int imageH, imageW;
+		imageH = 273; //default img input dims
+		imageW = 481; //default img input dims
+		
+		int *model_dims = model_get_input_shape(model,0);
+		int modelInputH = model_dims[2];
+		int modelInputW = model_dims[3];
+		fix16_t scale_Y = fix16_div(fix16_from_int(imageH),fix16_from_int(modelInputH));
+		fix16_t scale_X = fix16_div(fix16_from_int(imageW),fix16_from_int(modelInputW));
+
+		
+		//below scales up the image
+
+		for(int i =0; i < pose_count; i++){
+			for(int j=0;j <NUM_KEYPOINTS; j++){
+				r_poses[i].keypoints[j][0] = fix16_mul(r_poses[i].keypoints[j][0],scale_Y);
+				r_poses[i].keypoints[j][1] = fix16_mul(r_poses[i].keypoints[j][1],scale_X);
+			}       
+
+		}
+		
+		//print out points
+		for(int i =0; i < pose_count; i++){
+			printf("\nPose: %d\n",i);
+			for(int j=0;j <NUM_KEYPOINTS; j++){
+				int y = fix16_to_int(r_poses[i].keypoints[j][0]);
+				int x = fix16_to_int(r_poses[i].keypoints[j][1]);
+				score = r_poses[i].scores[j];
+				printf("[%d , %d] %d \n",y,x, fix16_to_int(fix16_mul(score,F16(10))));	
+			}
 		}
 	} else {
 		printf("Unknown post processing type %s, skipping post process\n", str);

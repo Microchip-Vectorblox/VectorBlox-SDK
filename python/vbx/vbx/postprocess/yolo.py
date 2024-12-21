@@ -3,6 +3,7 @@ modified from
 """
 from math import exp
 import numpy as np
+import cv2
 
 
 class Parser:
@@ -148,6 +149,157 @@ class Parser:
                                                         h_scale=(orig_im_h/net_h),
                                                         w_scale=(orig_im_w/net_w)))
 
+
+def nms_post_process(output, confidence_thres=0.5, iou_thres=0.5, input_width=416, input_height=416, do_nms=True, num_classes=80):
+    # Transpose and squeeze the output to match the expected shape
+    outputs = np.squeeze(output)
+    # if (outputs.shape[0] < outputs.shape[1]): # should be #box, box (8400,84)
+    if (outputs.shape[1] != num_classes + 4 and outputs.shape[0] == num_classes + 4): # should be #box, box (8400,84)
+        outputs = np.transpose(outputs)
+
+    # Get the number of rows in the outputs array
+    rows = outputs.shape[0]
+
+    # Lists to store the bounding boxes, scores, and class IDs of the detections
+    boxes = []
+    scores = []
+    class_ids = []
+
+    # Calculate the scaling factors for the bounding box coordinates
+    x_factor = input_width
+    y_factor = input_height
+
+    # Iterate over each row in the outputs array
+    for i in range(rows):
+        # Extract the class scores from the current row
+        classes_scores = outputs[i][4:]
+
+        # Find the maximum score among the class scores
+        max_score = np.amax(classes_scores)
+
+        # If the maximum score is above the confidence threshold
+        if max_score >= confidence_thres:
+            # Get the class ID with the highest score
+            class_id = np.argmax(classes_scores)
+
+            # Extract the bounding box coordinates from the current row
+            x, y, w, h = outputs[i][0], outputs[i][1], outputs[i][2], outputs[i][3]
+
+            # Calculate the scaled coordinates of the bounding box
+            left = int((x - w / 2) * x_factor)
+            top = int((y - h / 2) * y_factor)
+            width = int(w * x_factor)
+            height = int(h * y_factor)
+
+            # Add the class ID, score, and box coordinates to the respective lists
+            class_ids.append(class_id)
+            scores.append(max_score)
+            boxes.append([left, top, width, height])
+
+    # Apply non-maximum suppression to filter out overlapping bounding boxes
+    if do_nms:
+        indices = cv2.dnn.NMSBoxes(boxes, scores, confidence_thres, iou_thres)
+    else:
+        indices = range(len(boxes)) #TODO verify
+
+    results = []
+    for i in indices:
+        confidence = scores[i]
+        label = class_ids[i]
+        box = boxes[i]
+        xmin = box[0]
+        xmax = box[0] + box[2]
+        ymin = box[1]
+        ymax = box[1] + box[3]
+
+        # Enforcing extra checks for bounding box coordinates
+        xmin = max(0,xmin)
+        ymin = max(0,ymin)
+        xmax = min(xmax,input_width)
+        ymax = min(ymax,input_height)
+
+        results.append(dict(xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax, class_id=label, confidence=confidence))
+    return results
+
+
+def ultralytics_process_box(arr, x, y):
+    _,bw,bh = arr.shape
+
+    t = arr[:,x,y].reshape(4,16)
+    v = np.zeros(4)
+
+    softmax = lambda x : np.exp(x - np.max(x)) / np.exp(x - np.max(x)).sum(axis=0)
+    v[0] = np.sum(softmax(t[0]) * np.asarray(range(16)))
+    v[1] = np.sum(softmax(t[1]) * np.asarray(range(16)))
+    v[2] = np.sum(softmax(t[2]) * np.asarray(range(16)))
+    v[3] = np.sum(softmax(t[3]) * np.asarray(range(16)))
+
+    v /= [bh,bw,bh,bw] #v *= 1 / np.sqrt(bh*bw)
+
+    cx = 1/bh/2 + y/bh
+    cy = 1/bw/2 + x/bw
+
+    r = (cx - v[0])
+    lo = (cy - v[1])
+    l = (cx + v[2])
+    u = (cy + v[3])
+
+    x = (l + r) / 2
+    y = (lo + u) / 2
+
+    w = (l - r)
+    h = (u - lo)
+
+    return [x,y,w,h]
+
+
+def ultralytics_post_process(conv_outputs, threshold=0.5, num_classes=80):
+
+    conv_outputs = [o.squeeze() for o in conv_outputs]
+    # order outputs in classes and boxes of descending size
+    classes = []
+    boxes = []
+    for o,output in enumerate(conv_outputs):
+        if output.shape[0] == num_classes:
+            if len(classes) == 0 or output.shape[1]*output.shape[2] < classes[-1].shape[1]*classes[-1].shape[2]:
+                classes += [output]
+            else:
+                classes = [output] + classes
+        elif output.shape[0] == 4*16:
+            if len(boxes) == 0 or output.shape[1]*output.shape[2] < boxes[-1].shape[1]*boxes[-1].shape[2]:
+                boxes += [output]
+            else:
+                boxes = [output] + boxes
+
+
+    processed_boxes = []
+    processed_classes = []
+
+    valid_count = 0
+    valid_coords = []
+    logistic = lambda x: 1 / (1 + np.exp(-x))
+    for c,cls in enumerate(classes):
+        classes[c] = logistic(classes[c])
+        for j in range(classes[c].shape[1]):
+            for i in range(classes[c].shape[2]):
+                valid = False
+                for x in range(num_classes):
+                    if classes[c][x,j,i] > threshold:
+                        valid = True
+                        valid_count += 1
+                        break
+                if valid:
+                    processed_boxes.append(ultralytics_process_box(boxes[c], j, i))
+                    processed_classes.append(classes[c][:,j,i].flatten())
+                else:
+                    classes[c][:,j,i] = np.zeros(num_classes)
+    # print('valid', valid_count)
+
+    processed_classes = np.asarray(processed_classes)
+    processed_boxes = np.asarray(processed_boxes)
+    processed = np.concatenate((processed_boxes, processed_classes), axis=1)
+
+    return processed
 
 def yolo_post_process(blobs, params, height, width, threshold, iou, version=2, do_nms=False, do_activations=False):
 

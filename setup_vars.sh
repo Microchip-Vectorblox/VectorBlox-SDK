@@ -4,15 +4,52 @@ function install_venv() {
     $PYTHON_EXE -m venv  $SCRIPTDIR/vbx_env
     source $SCRIPTDIR/vbx_env/bin/activate
 
-	python -m pip install --upgrade "pip==21.3.1" "setuptools==50.3.2"
+    python -m pip install --upgrade pip
+    python -m pip install --upgrade setuptools
     python -m pip install wheel 
-    python -m pip install -r $SCRIPTDIR/requirements.txt
+    python -m pip install psutil==5.9.5
+    python -m pip install onnx==1.16.1
+
+    # tensorflow 2.16.1, 2.16.2, and 2.17.0 fail for the following tutorials:
+    # - tensorflow/yolo-v3-tiny-tf, yolo-v3-tf, yolo-v4-tf
+    # when using keras-YOLOv3-model-set
+    python -m pip install tensorflow==2.15.1
+
+    python -m pip install tensorflow_datasets==4.9.3
+    python -m pip install nvidia-pyindex
+    python -m pip install onnx-graphsurgeon
+    python -m pip install protobuf==3.20.3
+    python -m pip install onnxsim==0.4.36
+    python -m pip install sor4onnx
+    python -m pip install sne4onnx
+    python -m pip install sng4onnx==1.0.1
+    python -m pip install onnxruntime==1.18.1
+    python -m pip install ml_dtypes==0.3.1
+    python -m pip install onnx2tf==1.26.0
+    python -m pip install opencv-python==4.7.0.72
+
+    # openvino 2024 fails for the openvino tutorials when using openvino2tensorflow.
+    # They fail for tensorflow 2.15, 2.16 and 2.17.
+    python -m pip install openvino==2023.0.1
+    python -m pip install openvino-dev==2023.0.1
+    python -m pip install openvino-telemetry==2023.2.1
+
+    python -m pip install openvino2tensorflow==1.34.0
+    python -m pip install torch==1.13.1
+    python -m pip install torchvision==0.14.1
+    python -m pip install matplotlib
+    python -m pip install silence_tensorflow
+    python -m pip install natsort
+    python -m pip install ultralytics==8.2.60
+    python -m pip install tf_keras==2.15.1
+    python -m pip install tflite_support==0.4.4
+    python -m pip install onnxslim==0.1.32
     python -m pip install -e $SCRIPTDIR/python/vbx
     deactivate
 }
 
 function has_python() {
-    for v in 3.8 3.6 3.5
+    for v in 3.10 3.9
     do
         if [ -n "$(which python$v)" ]
         then
@@ -20,7 +57,7 @@ function has_python() {
             return 0
         fi
     done
-	echo "Error Unable to find compatible version of python. Allowed Versions: Python3.5, Python3.6 or Python3.8" >&2
+	echo "Error Unable to find compatible version of python. Allowed Versions: Python3.9 or Python3.10" >&2
 	return 1
 }
 
@@ -30,7 +67,7 @@ function has_installed() {
 		install_venv
 	fi
 	source $SCRIPTDIR/vbx_env/bin/activate
-	python -c 'import mxnet; import vbx' && command -v mo &> /dev/null && command -v omz_downloader &> /dev/null
+	python -c 'import vbx' && command -v mo &> /dev/null && command -v omz_downloader &> /dev/null
 	VALID=$?
 	deactivate
 	if [ $VALID -gt 0 ]; then

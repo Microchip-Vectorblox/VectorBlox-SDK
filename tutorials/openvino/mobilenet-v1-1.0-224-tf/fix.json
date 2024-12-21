@@ -1,0 +1,26 @@
+{
+    "format_version": 2,
+    "layers": [
+        {
+            "layer_id": "1",
+            "type": "Const",
+            "replace_mode": "direct",
+            "values": [
+                0,
+                3,
+                1,
+                2
+            ]
+        },
+        {
+            "layer_id": "147",
+            "type": "Const",
+            "replace_mode": "direct",
+            "values": [
+                1,
+                2
+            ]
+        }
+    ]
+  }
+  

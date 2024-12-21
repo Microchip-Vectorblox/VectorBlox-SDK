@@ -1,0 +1,688 @@
+{
+  "ABS": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "ADD": {
+    "type": [ 
+      "INT8",
+      "UINT8"
+    ],
+    "fused_activation_function": [
+      0,
+      "NONE",
+      "RELU",
+      "RELU6"
+    ],
+    "vectorized": [2]
+  },
+  "ARG_MAX": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "axis": [
+      -1
+    ],
+    "vectorized": [2]
+  },
+  "ARG_MIN": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "axis": [
+      -1
+    ],
+    "vectorized": [2]
+  },
+  "AVERAGE_POOL_2D": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "padding": ["SAME", "VALID"],
+    "fused_activation_function": [
+      0,
+      "NONE",
+      "RELU",
+      "RELU6"
+    ],
+    "vectorized": [2]
+  },
+  "BATCH_TO_SPACE_ND": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [0]
+  },
+  "CONCATENATION": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "axis": [
+      -4,
+      -3,
+      -2,
+      -1
+    ],
+    "fused_activation_function": [
+      0,
+      "NONE",
+      "RELU",
+      "RELU6"
+    ],
+    "vectorized": [2]
+  },
+  "CONV_2D": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "padding": ["SAME", "VALID"],
+    "fused_activation_function": [
+      0,
+      "NONE",
+      "RELU",
+      "RELU6"
+    ],
+    "vectorized": [2]
+  },
+  "DEPTHWISE_CONV_2D": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "padding": ["SAME", "VALID"],
+    "fused_activation_function": [
+      0,
+      "NONE",
+      "RELU",
+      "RELU6"
+    ],
+    "vectorized": [2]
+  },
+  "DEPTH_TO_SPACE": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [0]
+  },
+  "DEQUANTIZE": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "DIV": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "fused_activation_function": [
+      0,
+      "NONE",
+      "RELU",
+      "RELU6"
+    ],
+    "vectorized": [2],
+    "others": ["Input 2 must be a constant"]
+  },
+  "ELU": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "EQUAL": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "EXP": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "EXPAND_DIMS": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "axis": [
+      -4,
+      -3,
+      -2,
+      -1
+    ],
+    "vectorized": [2]
+  },
+  "FULLY_CONNECTED": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "fused_activation_function": [
+      0,
+      "NONE",
+      "RELU",
+      "RELU6"
+    ],
+    "vectorized": [2]
+  },
+  "GATHER": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "axis": [
+      -4,
+      -3,
+      -2,
+      -1
+    ],
+    "vectorized": [1]
+  },
+  "GELU": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "GREATER": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "axis": [
+      -4,
+      -3,
+      -2,
+      -1
+    ],
+    "vectorized": [2]
+  },
+  "GREATER_EQUAL": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "HARD_SWISH": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "L2_NORMALIZATION": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "dim": [
+      -3,
+      -2,
+      -1
+    ],
+    "fused_activation_function": [
+      0,
+      "NONE",
+      "RELU",
+      "RELU6"
+    ],
+    "vectorized": [0]
+  },
+  "LEAKY_RELU": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "LESS": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "LESS_EQUAL": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "LOG": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "LOGISTIC": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "LOG_SOFTMAX": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "dim": [
+      -3,
+      -2,
+      -1
+    ],
+    "vectorized": [0]
+  },
+  "MAXIMUM": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "MAX_POOL_2D": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "padding": ["SAME", "VALID"],
+    "fused_activation_function": [
+      0,
+      "NONE",
+      "RELU",
+      "RELU6"
+    ],
+    "vectorized": [2]
+  },
+  "MEAN": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "MINIMUM": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "MIRROR_PAD": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "mode": [
+      "REFLECT", 
+      "SYMMETRIC"
+    ],
+    "vectorized": [0]
+  },
+  "MUL": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "fused_activation_function": [
+      0,
+      "NONE",
+      "RELU",
+      "RELU6"
+    ],
+    "vectorized": [2]
+  },
+  "NEG": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "NOT_EQUAL": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "PACK": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "axis": [
+      -4,
+      -3,
+      -2,
+      -1
+    ],
+    "vectorized": [2]
+  },
+  "PAD": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "PADV2": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "POW": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "PRELU": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "QUANTIZE": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "REDUCE_MAX": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "axis": [
+      -4,
+      -3,
+      -2,
+      -1
+    ],
+    "vectorized": [2]
+  },
+  "REDUCE_MIN": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "axis": [
+      -4,
+      -3,
+      -2,
+      -1
+    ],
+    "vectorized": [2]
+  },
+  "REDUCE_PROD": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    
+    "axis": [
+      -4,
+      -3,
+      -2,
+      -1
+    ],
+    "vectorized": [2]
+  },
+  "RELU": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "RELU6": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "RELU_0_TO_1": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "RELU_N1_TO_1": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "RESHAPE": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [1]
+  },
+  "RESIZE_BILINEAR": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "RESIZE_NEAREST_NEIGHBOR": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "RSQRT": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "SILU": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "SLICE": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "SOFTMAX": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "dim": [
+      -3,
+      -2,
+      -1
+    ],
+    "vectorized": [2]
+  },
+  "SPACE_TO_BATCH_ND": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [0]
+  },
+  "SPACE_TO_DEPTH": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [0]
+  },
+  "SPLIT": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "axis": [
+      -4,
+      -3,
+      -2,
+      -1
+    ],
+    "vectorized": [2]
+  },
+  "SPLIT_V": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "axis": [
+      -4,
+      -3,
+      -2,
+      -1
+    ],
+    "vectorized": [2]
+  },
+  "SQUARED_DIFFERENCE": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [-1]
+  },
+  "SQUEEZE": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "axis": [
+      -4,
+      -3,
+      -2,
+      -1
+    ],
+    "vectorized": [2]
+  },
+  "STRIDED_SLICE": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "SUB": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "fused_activation_function": [
+      0,
+      "NONE",
+      "RELU"
+    ],
+    "vectorized": [2]
+  },
+  "SUM": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "axis": [
+      -4,
+      -3,
+      -2,
+      -1
+    ],
+    "vectorized": [2]
+  },
+  "TANH": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "TILE": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2]
+  },
+  "TRANSPOSE": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [1]
+  },
+  "TRANSPOSE_CONV": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "padding": ["SAME", "VALID"],
+    "fused_activation_function": [
+      0,
+      "NONE",
+      "RELU",
+      "RELU6"
+    ],
+    "vectorized": [0]
+  },
+
+  "UNIDIRECTIONAL_SEQUENCE_LSTM": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [-1]
+  },
+  "UNPACK": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "axis": [
+      -4,
+      -3,
+      -2,
+      -1
+    ],
+    "vectorized": [2]
+  }
+}

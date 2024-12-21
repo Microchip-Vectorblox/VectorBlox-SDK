@@ -7,6 +7,11 @@
 #define VNNX_TYPES_H
 #include <stdlib.h>
 #include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef uint64_t obj_off_t;
 #if defined(__GNUC__)
 #define STRUCT_PACKED struct __attribute__((packed,aligned(4)))
@@ -16,6 +21,8 @@ typedef uint64_t obj_off_t;
 #pragma warning(disable : 4200)
 #endif
 
+#define SHAPE_DIMS 6
+
 typedef enum {
 	CALC_TYPE_UINT8,
 	CALC_TYPE_INT8,
@@ -23,96 +30,239 @@ typedef enum {
 	CALC_TYPE_INT32,
 	CALC_TYPE_UNKNOWN
 } calc_type_e;
+
 typedef enum{
-	CONV_SUBGRAPH,
-	GEMM_SUBGRAPH,
-	SUM_SUBGRAPH,
-	IDENTITY_SUBGRAPH,
-	LRN_SUBGRAPH,
-	TRANSPOSE_SUBGRAPH,
-	ACTIVATION_SUBGRAPH,
-	RESIZE_SUBGRAPH,
-	REORG_SUBGRAPH,
-	ARGMAX_SUBGRAPH,
-	REDUCEMEAN_SUBGRAPH,
-	TILE_SUBGRAPH,
-	MAX_SUBGRAPH,
-	MIN_SUBGRAPH,
-	UNKNOWN_SUBGRAPH
-} subgraph_type_e;
+	IDENTITY=200,
+	ELTWISE=201,
+	PREFETCH=202,
+	LUT=203,
+	UNKNOWN_SUBGRAPH=204
+} VNNXOperator;
 
 typedef enum{
     RESIZE_NEAREST,
     RESIZE_LINEAR
 } resize_mode_e;
 
+
 typedef enum{
-    SOFTMAX,
-    SIGMOID,
-    TANH,
-    MISH,
-    ELU,
-    SELU,
-    SWISH,
-    HTANH,
-    HSWISH
-} activation_mode_e;
+	ELTWISE_ADD,
+	ELTWISE_MUL,
+	ELTWISE_SUB,
+	ELTWISE_DIV,
+	ELTWISE_GREATER,
+	ELTWISE_GREATER_EQUAL,
+	ELTWISE_LESS,
+	ELTWISE_LESS_EQUAL,
+	ELTWISE_EQUAL,
+	ELTWISE_NOT_EQUAL,
+	ELTWISE_MINIMUM,
+	ELTWISE_MAXIMUM,
+	ELTWISE_SQUARED_DIFFERENCE,
+} eltwise_type_e;
+
 
 typedef enum {
-	GLOBAL_AVGPOOL_I8 =0,  ///< GLOBAL_AVERAGE with bytes
-	GLOBAL_AVGPOOL_I16 =1,  ///< GLOBAL_AVERAGE with halfs
-	ABS_I8 =2,
-	ABS_I16=3,
-	CLIP_I8=4,
-	CLIP_I16=5,
-	AVGPOOL_U8=6,  ///< AVERAGE POOL with unsigned bytes
-	AVGPOOL_I8=7,  ///< AVERAGE POOL with bytes
-	AVGPOOL_I16=8,  ///< AVERAGE POOL with halfs
-	MAXPOOL_U8 =9,  ///< MAXPOOL with bytes and stride or size greater than 2
-	MAXPOOL_I8 =10,  ///< MAXPOOL with bytes and stride or size greater than 2
-	MAXPOOL_I16=11, ///< MAXPOOL with halfwords and stride or size greater than 2
-	CAST_I16_I8=12,  ///< Convert type from halfs to bytes
-	CAST_I16_I32=13,  ///< Convert type from halfs to bytes
-	CAST_I32_I16=14,  ///< Convert type from words to halfs
-	CAST_U8_I16=15,  ///< Convert type from ubytes to halfs
-	CAST_U8_I8=16,  ///< Convert type from ubytes to bytes
-	CAST_U8_I32=17,  ///< Convert type from ubytes to bytes
-	CAST_I8_I16=18,  ///< Convert type from bytes to halfs
-	CAST_I8_I32=19,  ///< Convert type from bytes to halfs
-	DEPTHWISE_CONV_I8=20,  ///< In-scratch Depthwise Convolution CVI
-	LEAKYRELU_I8=21, ///< Leaky Relu on bytes
-	LEAKYRELU_I16=22, ///< Leaky Relu on halfwords
-	RELU_I8=23, ///< Relu on bytes
-	RELU_I16=24, ///< Relu on halfwords
-	PRELU_I8=25, ///< PRelu on bytes
-	PRELU_I16=26, ///< PRelu on halfwords
-	PADCONST_U8=27,  ///< Pad Const with bytes
-	PADCONST_I8=28,  ///< Pad Const with bytes
-	PADCONST_I16=29, ///< Pad Const with halfwords
-	MUL_SCALAR_I8=30,  ///< Multiply const with bytes
-	MUL_SCALAR_I16=31, ///< Multiply const with halfwords
-	MUL_SCALAR_U8=32,  ///< Multiply const with unsigned bytes
-	MUL_SCALAR_U16=33, ///< Multiply const with unsigned halfwords
-	MUL_BROADCAST_MAP_I8=34,  ///< Multiply consts per channel with bytes
-	MUL_BROADCAST_MAP_I16=35, ///< Multiply consts per channel with halfwords
-        MUL_BROADCAST_ROW_I8=36, ///< Multiply array row with halfwords
-        MUL_BROADCAST_ROW_I16=37, ///< Multiply array per row with halfwords
-	ADD_BROADCAST_MAP_U8 =38,  ///< Add consts per channel with unsigned bytes
-	ADD_BROADCAST_MAP_I8 =39,  ///< Add consts per channel with bytes
-	ADD_BROADCAST_MAP_I16=40, ///< Add consts per channel with halfwords
-	ADD_BROADCAST_ROW_I8=41,  ///< Add array per row with bytes
-	ADD_BROADCAST_ROW_I16=42, ///< Add array per row with halfwords
-	PREFETCH=43, ///< Prefetch DMA for later sublayer
-	LAYER_UNKNOWN=44
-} layer_type_e;
+    ADD = 0,
+    AVERAGE_POOL_2D = 1,
+    CONCATENATION = 2,
+    CONV_2D = 3,
+    DEPTHWISE_CONV_2D = 4,
+    DEPTH_TO_SPACE = 5,
+    DEQUANTIZE = 6,
+    EMBEDDING_LOOKUP = 7,
+    FLOOR = 8,
+    FULLY_CONNECTED = 9,
+    HASHTABLE_LOOKUP = 10,
+    L2_NORMALIZATION = 11,
+    L2_POOL_2D = 12,
+    LOCAL_RESPONSE_NORMALIZATION = 13,
+    LOGISTIC = 14,
+    LSH_PROJECTION = 15,
+    LSTM = 16,
+    MAX_POOL_2D = 17,
+    MUL = 18,
+    RELU = 19,
+    RELU_N1_TO_1 = 20,
+    RELU6 = 21,
+    RESHAPE = 22,
+    RESIZE_BILINEAR = 23,
+    RNN = 24,
+    SOFTMAX = 25,
+    SPACE_TO_DEPTH = 26,
+    SVDF = 27,
+    TANH = 28,
+    CONCAT_EMBEDDINGS = 29,
+    SKIP_GRAM = 30,
+    CALL = 31,
+    CUSTOM = 32,
+    EMBEDDING_LOOKUP_SPARSE = 33,
+    PAD = 34,
+    UNIDIRECTIONAL_SEQUENCE_RNN = 35,
+    GATHER = 36,
+    BATCH_TO_SPACE_ND = 37,
+    SPACE_TO_BATCH_ND = 38,
+    TRANSPOSE = 39,
+    MEAN = 40,
+    SUB = 41,
+    DIV = 42,
+    SQUEEZE = 43,
+    UNIDIRECTIONAL_SEQUENCE_LSTM = 44,
+    STRIDED_SLICE = 45,
+    BIDIRECTIONAL_SEQUENCE_RNN = 46,
+    EXP = 47,
+    TOPK_V2 = 48,
+    SPLIT = 49,
+    LOG_SOFTMAX = 50,
+    DELEGATE = 51,
+    BIDIRECTIONAL_SEQUENCE_LSTM = 52,
+    CAST = 53,
+    PRELU = 54,
+    MAXIMUM = 55,
+    ARG_MAX = 56,
+    MINIMUM = 57,
+    LESS = 58,
+    NEG = 59,
+    PADV2 = 60,
+    GREATER = 61,
+    GREATER_EQUAL = 62,
+    LESS_EQUAL = 63,
+    SELECT = 64,
+    SLICE = 65,
+    SIN = 66,
+    TRANSPOSE_CONV = 67,
+    SPARSE_TO_DENSE = 68,
+    TILE = 69,
+    EXPAND_DIMS = 70,
+    EQUAL = 71,
+    NOT_EQUAL = 72,
+    LOG = 73,
+    SUM = 74,
+    SQRT = 75,
+    RSQRT = 76,
+    SHAPE = 77,
+    POW = 78,
+    ARG_MIN = 79,
+    FAKE_QUANT = 80,
+    REDUCE_PROD = 81,
+    REDUCE_MAX = 82,
+    PACK = 83,
+    LOGICAL_OR = 84,
+    ONE_HOT = 85,
+    LOGICAL_AND = 86,
+    LOGICAL_NOT = 87,
+    UNPACK = 88,
+    REDUCE_MIN = 89,
+    FLOOR_DIV = 90,
+    REDUCE_ANY = 91,
+    SQUARE = 92,
+    ZEROS_LIKE = 93,
+    FILL = 94,
+    FLOOR_MOD = 95,
+    RANGE = 96,
+    RESIZE_NEAREST_NEIGHBOR = 97,
+    LEAKY_RELU = 98,
+    SQUARED_DIFFERENCE = 99,
+    MIRROR_PAD = 100,
+    ABS = 101,
+    SPLIT_V = 102,
+    UNIQUE = 103,
+    CEIL = 104,
+    REVERSE_V2 = 105,
+    ADD_N = 106,
+    GATHER_ND = 107,
+    COS = 108,
+    WHERE = 109,
+    RANK = 110,
+    ELU = 111,
+    REVERSE_SEQUENCE = 112,
+    MATRIX_DIAG = 113,
+    QUANTIZE = 114,
+    MATRIX_SET_DIAG = 115,
+    ROUND = 116,
+    HARD_SWISH = 117,
+    IF = 118,
+    WHILE = 119,
+    NON_MAX_SUPPRESSION_V4 = 120,
+    NON_MAX_SUPPRESSION_V5 = 121,
+    SCATTER_ND = 122,
+    SELECT_V2 = 123,
+    DENSIFY = 124,
+    SEGMENT_SUM = 125,
+    BATCH_MATMUL = 126,
+    PLACEHOLDER_FOR_GREATER_OP_CODES = 127,
+    CUMSUM = 128,
+    CALL_ONCE = 129,
+    BROADCAST_TO = 130,
+    RFFT2D = 131,
+    CONV_3D = 132,
+    IMAG=133,
+    REAL=134,
+    COMPLEX_ABS=135,
+    HASHTABLE = 136,
+    HASHTABLE_FIND = 137,
+    HASHTABLE_IMPORT = 138,
+    HASHTABLE_SIZE = 139,
+    REDUCE_ALL = 140,
+    CONV_3D_TRANSPOSE = 141,
+    VAR_HANDLE = 142,
+    READ_VARIABLE = 143,
+    ASSIGN_VARIABLE = 144,
+    BROADCAST_ARGS = 145,
+    RANDOM_STANDARD_NORMAL = 146,
+    BUCKETIZE = 147,
+    RANDOM_UNIFORM = 148,
+    MULTINOMIAL = 149,
+    GELU = 150,
+    DYNAMIC_UPDATE_SLICE = 151,
+    RELU_0_TO_1 = 152,
+    UNSORTED_SEGMENT_PROD = 153,
+    UNSORTED_SEGMENT_MAX = 154,
+    UNSORTED_SEGMENT_SUM = 155,
+    ATAN2 = 156,
+    UNSORTED_SEGMENT_MIN = 157,
+    SIGN = 158,
+    BITCAST = 159,
+    BITWISE_XOR = 160,
+    RIGHT_SHIFT = 161
+} BuiltinOperator;
+
+
+typedef STRUCT_PACKED {
+	uint32_t base_ptr_offset_from_sp_start;
+	uint32_t offset;
+} indirect_ptr_t;
+
+/**
+ * @brief Describes tensor used by nodes
+ */
+typedef STRUCT_PACKED {
+	int32_t type;
+	int32_t shape[SHAPE_DIMS];
+	int32_t dims;
+	float scale;
+	int32_t scale_f16;
+	int32_t zero;
+	int32_t multiplier;
+	int32_t shift;
+	indirect_ptr_t indirect;
+	obj_off_t direct;
+} vnnx_tensor_t;
+
 
 /**
  * @brief Parameter to minor mode function
  */
 typedef struct {
-	//TODO: make this more generic for dense etc
-	int maps,r,col,n,m,c,y,x;
-    int total_input_channels;
+	/* int maps,r,col,n,m,c,channels,y,x; */
+	int c,maps,channels;
+	int y,r,m;
+	int x,col,n;
+	int b,batch,batches;
+	int32_t idx[SHAPE_DIMS];
+	int32_t step[SHAPE_DIMS];
+	int32_t total[SHAPE_DIMS];
+	int32_t dims;
 	void* sp_in;
 	void* sp_out;
 	void* sp_prefetch;
@@ -137,10 +287,83 @@ typedef STRUCT_PACKED vnnx_layer{
 	int32_t dilations[2];
 	int32_t pads[6];
 	int32_t maps;
+	int32_t num_inputs;
+	int32_t num_outputs;
+	int32_t num_tensors;
+	int32_t activation_min;
+	int32_t activation_max;
+	obj_off_t input_multiplier;
+	obj_off_t input_shift;
+	int32_t input_offset;
+	obj_off_t output_multiplier;
+	obj_off_t output_shift;
+	int32_t output_offset;
+	int32_t nop;
+	obj_off_t tensors;
 	union{
-		STRUCT_PACKED{
-			float value;
-		}pad_const;
+		STRUCT_PACKED {
+			int32_t kernels;
+			int32_t stride_width;
+			int32_t stride_height;
+			int32_t dilation_width_factor;
+			int32_t dilation_height_factor;
+			int32_t padding_width;
+			int32_t padding_height;
+			int32_t filter_shape_dims[4];
+			int32_t group;
+			int32_t imaps;
+			int32_t conv_rows;
+			int32_t use_vector;
+			int32_t use_fia;
+			int32_t use_db;
+			int32_t use_depthwise;
+			int32_t use_strided;
+			int32_t fit_weights;
+			int32_t split_weight_shaper_buffers;
+			int32_t direct_dma;
+			int32_t mxp_double_buffer;
+			obj_off_t filter_data;
+			obj_off_t bias_data;
+			obj_off_t quantization_records;
+		} Conv2DOptions;
+		STRUCT_PACKED {
+			int32_t axis;
+			int32_t skip;
+		} ConcatOptions;
+		STRUCT_PACKED {
+			obj_off_t input2_multiplier;
+			obj_off_t input2_shift;
+			int32_t input2_offset;
+			obj_off_t bias_data;
+			int32_t optimized;
+			int32_t isize;
+			int32_t left_shift;
+			int32_t type;
+		} eltwise8;
+		STRUCT_PACKED {
+			int32_t filter_shape_dims[4];
+			obj_off_t filter_multiplier;
+			obj_off_t filter_shift;
+			int32_t filter_offset;
+			obj_off_t filter_data;
+			obj_off_t bias_data;
+			float iscale;
+			float fscale;
+			float oscale;
+			int32_t broadcast;
+			int32_t optimized;
+			int32_t isize;
+			int32_t left_shift;
+			int32_t sub;
+			int32_t swap_inputs;
+		} broadcast8;
+		STRUCT_PACKED {
+			int32_t axis;
+			int32_t arg_max;
+		} reduce8;
+		STRUCT_PACKED{ 
+			int32_t value;
+		}PadOptions;
 		STRUCT_PACKED{
 			float min;
 			float max;
@@ -151,54 +374,103 @@ typedef STRUCT_PACKED vnnx_layer{
 			obj_off_t weights;
 		}depthwise;
 		STRUCT_PACKED{
-			obj_off_t slope;
+			obj_off_t alpha_multiplier;
+			obj_off_t alpha_shift;
+			int32_t alpha_offset;
+			int32_t optimized;
+			int32_t maps_at_once;
+			float iscale;
+			float ascale;
+			float oscale;
+			obj_off_t vci_int8;
+			obj_off_t alpha_data;
+			int32_t alpha_shape[4];
 		}prelu;
 		STRUCT_PACKED{
-			int32_t alpha;
+			obj_off_t alpha_multiplier;
+			obj_off_t alpha_shift;
 		}leakyrelu;
 		STRUCT_PACKED{
-			int32_t use_xl;
-			float scalarf32;
-			int32_t scalar32;
-			int16_t scalar16;
-			int8_t scalar8;
-			uint8_t scalaru8;
-		}mul_scalar;
+			int32_t diff_min;
+			int32_t axis;
+			int32_t depth;
+			int32_t count;
+			obj_off_t vci_int8;
+			obj_off_t lut_int32;
+			obj_off_t idx_int8;
+		}SoftmaxOptions;
 		STRUCT_PACKED{
-			int32_t use_xl;
-			obj_off_t array;
-			obj_off_t array_xl;
-		}add_broadcast_map;
+			int32_t input_range_radius;
+			int32_t count;
+			int32_t lut_count;
+			obj_off_t vci_int8;
+			obj_off_t lut_int8;
+			obj_off_t idx_int8;
+		}ActivationOptions;
 		STRUCT_PACKED{
-			int32_t use_xl;
-			obj_off_t array;
-			obj_off_t array_xl;
-		}add_broadcast_row;
-		STRUCT_PACKED{
-			int32_t use_xl;
-			obj_off_t array;
-			obj_off_t array_xl;
-		}mul_broadcast_map;
-		STRUCT_PACKED{
-			int32_t use_xl;
-			obj_off_t array;
-			obj_off_t array_xl;
-		}mul_broadcast_row;
-		STRUCT_PACKED{
-		  int32_t scale;
-		}cast;
-		STRUCT_PACKED{
-			int ceil_mode;
-		}pool;
+			int32_t diff_min;
+			int32_t outer_size;
+			int32_t depth;
+			int32_t reverse_scaling_divisor;
+			int32_t reverse_scaling_right_shift;
+			int32_t axis;
+		}LogSoftmaxOptions;
 		STRUCT_PACKED{
 			obj_off_t memory_offset;
 		}prefetch;
+		STRUCT_PACKED{
+			int32_t begin[4];
+			int32_t end[4];
+			int32_t stride[4];
+		}SliceOptions;
+		STRUCT_PACKED{
+			int32_t axis;
+			int32_t batch_dims;
+			obj_off_t coord_data;
+			int32_t batch_size;
+			int32_t outer_size;
+			int32_t axis_size;
+			int32_t inner_size;
+			int32_t coord_size;
+		}GatherOptions;
+		STRUCT_PACKED{
+			obj_off_t block_shape_data;
+			obj_off_t paddings_data;
+		}SpaceToBatchNDOptions;
+		STRUCT_PACKED{
+			obj_off_t block_shape_data;
+			obj_off_t crop_data;
+		}BatchToSpaceNDOptions;
+		STRUCT_PACKED{
+			int32_t mode;
+		}MirrorPadOptions;
+		STRUCT_PACKED{
+			int32_t mode;
+		}ReshapeOptions;
+		STRUCT_PACKED{
+			int32_t axis;
+			int32_t count;
+			int32_t dims;
+		}PackOptions;
+		STRUCT_PACKED{
+			float scale[2];
+                        int32_t mode;
+		}ResizeOptions;
+		STRUCT_PACKED{
+			int32_t permutation[3];
+                        int32_t out_maps_at_once;
+                        int32_t out_rows_at_once;
+		}TransposeOptions;
+		STRUCT_PACKED{
+			int32_t axis;
+			obj_off_t splits;
+		}SplitOptions;
 	};
 } vnnx_layer_t;
 
 struct vnnx_subgraph_node;
 struct vnnx_graph;
-typedef int (*subgraph_run_func)(const struct vnnx_graph* g,struct vnnx_subgraph_node*, const int cores, const int core_start, const int core_stop);
+typedef int (*subgraph_run_func)(const struct vnnx_graph* g,struct vnnx_subgraph_node*, const int n, const int cores, const int core_start, const int core_stop);
 
 /**
  * @brief Describes major node in graph
@@ -207,188 +479,148 @@ typedef STRUCT_PACKED vnnx_subgraph_node {
 	int32_t type;
 	int32_t input_data_type;
 	int32_t output_data_type;
-	int32_t input_unsigned;
-	int32_t output_unsigned;
-	int32_t input_size;
-	int32_t output_size;
+	int32_t input_strides[2];
 	int32_t output_strides[2];
+	int32_t channels;
+	int32_t m;
+	int32_t n;
+	int32_t maps;
+	int32_t rows;
+	int32_t cols;
 	int32_t scratchpad_bytes;
-	int32_t dma_split;
-	int32_t dma_channel_offset;
-	int32_t dma_input_buffer_offset;
-	int32_t dma_output_buffer_offset;
 
-	obj_off_t input_data;
-	obj_off_t output_data;
-	char input_description[24];
-	char output_description[24];
-	obj_off_t test_input_data;
-	obj_off_t test_output_data;
+	char input_description[48];
+	char output_description[48];
 	obj_off_t sublayers;
-	float output_scale_factor;
 	int32_t num_sublayers;
-	int32_t sublayer_stride[2];
-	int32_t sublayer_shape[2];
-	int32_t sublayer_shape_0[2];
-	int32_t sublayer_shape_full[2];
-	int32_t sublayer_shape_last[2];
-	int32_t sublayer_rows;
-	int32_t sublayer_columns;
-	int32_t sublayer_scratchpad_per_map;
+	int32_t row_start;
+	int32_t row_last;
+	int32_t row_inc;
+	int32_t row_inc0;
+	int32_t rows_0;
+	int32_t rows_final;
+	int32_t col_start;
+	int32_t col_last;
+	int32_t col_inc;
+	int32_t col_inc0;
+	int32_t cols_0;
+	int32_t cols_final;
+	int32_t prefetch_bytes_per_map;
 	int32_t use_replay;
 	obj_off_t replay_buffer;
 	int32_t replay_buffer_size;
-	int32_t input_shape[3];
-	int32_t output_shape[3];
+	int32_t num_inputs;
+	int32_t num_outputs;
+	int32_t num_tensors;
+	obj_off_t tensors;
+	int32_t activation_min;
+	int32_t activation_max;
+	obj_off_t input_multiplier;
+	obj_off_t input_shift;
+	int32_t input_offset;
+	obj_off_t output_multiplier;
+	obj_off_t output_shift;
+	int32_t output_offset;
 	union {
 		STRUCT_PACKED {
-			int32_t fxp_scalar;
-			int32_t bias_scalar;
-			int32_t bias_lower_scalar;
 			int32_t kernels;
-			int32_t channels;
-			int32_t kernel_shape[2];
-			int32_t strides[2];
-			int32_t dilations[2];
+			int32_t stride_width;
+			int32_t stride_height;
+			int32_t dilation_width_factor;
+			int32_t dilation_height_factor;
+			int32_t padding_width;
+			int32_t padding_height;
+			int32_t filter_shape_dims[4];
 			int32_t group;
-			int32_t m;
-			int32_t n;
-			int32_t padded_kernels;
-			int32_t padded_channels;
 			int32_t imaps;
-			int32_t maps;
-			int32_t acc_maps;
-			int32_t rows;
-			int32_t cols;
-			int32_t inc_rows;
 			int32_t conv_rows;
-			int32_t core_split;
-			int32_t core_maps;
-			int32_t core_m;
-			int32_t use_weights32;
-			int32_t use_cvi;
+			int32_t use_vector;
+			int32_t use_fia;
+			int32_t use_db;
 			int32_t use_depthwise;
 			int32_t use_strided;
-			float max_weight;
-			obj_off_t weights;
-			obj_off_t weights32;
-			obj_off_t biases;
-			obj_off_t biases_lower;
-			obj_off_t scale;
-		} conv;
+			int32_t fit_weights;
+			int32_t split_weight_shaper_buffers;
+			int32_t direct_dma;
+			int32_t mxp_double_buffer;
+			int32_t first_fia;
+			int32_t last_fia;
+			int32_t fia_collision;
+			obj_off_t filter_data;
+			obj_off_t bias_data;
+			obj_off_t quantization_records;
+		} Conv2DOptions;
 		STRUCT_PACKED {
-			int32_t channels;
-			int32_t m;
-			int32_t n;
-			int32_t num_inputs;
-			int32_t maps;
-			int32_t rows;
-		} sum;
+			obj_off_t input2_multiplier;
+			obj_off_t input2_shift;
+			int32_t input2_offset;
+			obj_off_t bias_data;
+			int32_t optimized;
+			int32_t isize;
+			int32_t left_shift;
+			int32_t type;
+		} eltwise8;
 		STRUCT_PACKED {
-			int32_t channels;
-			int32_t m;
-			int32_t n;
-			int32_t num_inputs;
-		} max;
+			int32_t filter_shape_dims[2];
+			int32_t input_stride;
+			int32_t use_fia;
+			int32_t first_fia;
+			int32_t last_fia;
+			int32_t fia_collision;
+			obj_off_t filter_data;
+			obj_off_t bias_data;
+			obj_off_t quantization_records;
+		} FullyConnectedOptions;
 		STRUCT_PACKED {
-			int32_t channels;
-			int32_t m;
-			int32_t n;
-			int32_t num_inputs;
-		} min;
+			int32_t axis;
+			int32_t skip;
+		} ConcatOptions;
+		STRUCT_PACKED{
+			int32_t axis;
+			int32_t count;
+			int32_t dims;
+		}PackOptions;
 		STRUCT_PACKED {
-			int32_t channels;
-			int32_t m;
-			int32_t n;
-            int32_t pixels_per_loop;
+			int32_t pixels_per_loop;
 		} argmax;
-		STRUCT_PACKED {
-			int32_t channels;
-			int32_t m;
-			int32_t n;
-			int32_t maps;
-			int32_t core_split;
-			int32_t core_maps;
-			int32_t core_m;
-			int32_t rows;
-		} identity;
-		STRUCT_PACKED {
-			int32_t max_input_size;
-			int32_t max_output_size;
-			int32_t input_size;
-			int32_t output_size;
-			obj_off_t weights;
-			obj_off_t biases;
-		} gemm;
 		STRUCT_PACKED{
 			float alpha;
 			float beta;
 			float bias;
 			float scale;
 			int32_t size;
-			int32_t channels;
-			int32_t m;
-			int32_t n;
-			int32_t maps;
-			int32_t rows;
 		}lrn;
 		STRUCT_PACKED{
-			int32_t channels;
-			int32_t m;
-			int32_t n;
-			int32_t permutation[3];
-                        int32_t out_maps_at_once;
-                        int32_t out_rows_at_once;
-		}transpose;
+			int32_t tile[4];
+		}TileOptions;
 		STRUCT_PACKED{
-			float scale[2];
-                        int32_t mode;
-			int32_t channels;
-			int32_t m;
-			int32_t n;
-			int32_t maps;
-			int32_t rows;
-		}resize;
-		STRUCT_PACKED{
-			int32_t tile[3];
-			int32_t channels;
-			int32_t m;
-			int32_t n;
-			int32_t maps;
-			int32_t rows;
-		}tile;
-		STRUCT_PACKED{
-			int32_t channels;
-			int32_t m;
 			int32_t m0;
-			int32_t n;
 		}reduce;
 		STRUCT_PACKED{
 			int32_t stride;
-			int32_t channels;
-			int32_t m;
-			int32_t n;
-			int32_t maps;
-			int32_t rows;
 		}reorg;
 		STRUCT_PACKED{
-			obj_off_t scale;
-			int32_t mode;
-			int32_t channels;
-			int32_t m;
-			int32_t n;
-			int32_t maps;
-			int32_t rows;
-		}activation;
+			float scale[2];
+            int32_t mode;
+		}ResizeOptions;
+		STRUCT_PACKED{
+			int32_t permutation[3];
+                        int32_t out_maps_at_once;
+                        int32_t out_rows_at_once;
+		}TransposeOptions;
+		STRUCT_PACKED{
+			int32_t axis;
+			obj_off_t splits;
+		}SplitOptions;
 	};
 } vnnx_subgraph_node_t;
 
 /**
- * @brief Description of communication interface between slave and host
+ * @brief Description of communication interface between client and host
  */
 
 typedef STRUCT_PACKED {
-	uint8_t is_master;
+	uint8_t is_host;
 
 	uint32_t max_message_length;
   volatile uint8_t *send_base;
@@ -428,14 +660,28 @@ typedef struct vnnx_shared_allocator{
  *  @brief External facing graph object
  */
 typedef STRUCT_PACKED vnnx_graph{
-	uint32_t version;
+	uint32_t version; 
 	uint32_t vbx_nn_preset;
 	uint32_t num_inputs;
 	uint32_t num_outputs;
+	/*
+	 * 16 bytes in (4*word)
+	((uint32_t *)fixed_replay_buffer)[0] = (((0) << (0)) | (((1 << 17) | (1 << 18))));
+        ((uint32_t *)fixed_replay_buffer)[1] = (uint32_t)(((uintptr_t)model_replay_buffer)-((uintptr_t)model_address));
+        ((uint32_t *)fixed_replay_buffer)[2] = (uint32_t)((((uintptr_t)model_replay_buffer_mxp_end)-16)-((uintptr_t)model_address));
+         ((uint32_t *)fixed_replay_buffer)[3] = 0;
+	*/
+	uint32_t fixed_replay_buffer0; 
+	uint32_t fixed_replay_buffer1; 
+	uint32_t fixed_replay_buffer2; 
+	uint32_t fixed_replay_buffer3; 
+
+	uint32_t include_io_data;
 	uint32_t data_bytes;
 	uint32_t allocate_bytes;
 	//after this the attributes are private
 	obj_off_t io_nodes;
+	obj_off_t io_offsets;
 	int32_t num_layers;
 	obj_off_t replay_buffer;
 	int32_t replay_buffer_size;
@@ -462,4 +708,8 @@ typedef int (*vnnx_user_kernel)(uint32_t core,
 /**
  @}*/
 
+#ifdef __cplusplus
+}
+#endif
+	
 #endif //VNNX_TYPES_H

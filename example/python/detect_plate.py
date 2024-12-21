@@ -3,20 +3,15 @@ import vbx.sim
 import cv2
 import os
 import json
-import onnxruntime
 import argparse
 
 import vbx.postprocess.lpd as lpd
-from vbx.generate.onnx_infer import onnx_infer, load_input
-from vbx.generate.openvino_infer import openvino_infer, get_model_input_shape as get_xml_input_shape
-from vbx.generate.onnx_infer import onnx_infer, load_input
-from vbx.generate.onnx_helper import get_model_input_shape as get_onnx_input_shape
+from vbx.generate.utils import openvino_infer, openvino_input_shape
 
 def preProcess(img,input_shape):
     imgDims = np.array(img.shape[:2]) #img dimensions
-    input_shape = input_shape[-2:] #model input dimensions
-
-    resizeRatio = np.min(np.array(input_shape)/imgDims)
+    input_shape = input_shape[-2:] #model input dimensions       
+    resizeRatio = [i / j for i, j in zip(input_shape, imgDims)]
     resizeDims = np.round(imgDims * resizeRatio).astype('int')
 
     padTop = int((input_shape[0]-resizeDims[0])/2)    # if cropping, these values may be negative
@@ -33,7 +28,6 @@ def preProcess(img,input_shape):
             'padBottom':padBottom,
             'padLeft':padLeft,
             'padRight':padRight}
-    
     imgResize = cv2.resize(img, (resizeDims[1],resizeDims[0]), interpolation=cv2.INTER_LINEAR)
     arr = imgResize.swapaxes(1, 2).swapaxes(0, 1).astype(np.float32)
     return arr,meta
@@ -43,15 +37,17 @@ def preProcess(img,input_shape):
 def get_vnnx_io_shapes(vnxx):
     with open(vnxx, 'rb') as mf:
         model = vbx.sim.Model(mf.read())
-    return model.input_dims[0], model.output_dims
+    return model.input_shape[0], model.output_shape
 
 
 def vnnx_infer(vnnx_model, input_array):
     model = vbx.sim.model.Model(open(vnnx_model,"rb").read())
-    input_array = input_array.astype(np.uint8)
+    input_array = (input_array / model.input_scale_factor[0]) + model.input_zeropoint[0]
+    input_array = input_array.astype(model.input_dtypes[0])
     outputs = model.run([input_array.flatten()])
-    outputs = [o/(1<<16) for o in outputs]
-    
+    for idx, o in enumerate(outputs):
+        out_scaled = model.output_scale_factor[idx] * (o.astype(np.float32) - model.output_zeropoint[idx])
+        outputs[idx] = out_scaled.reshape(model.output_shape[idx])
 
     bw = model.get_bandwidth_per_run()
     print("Bandwidth per run = {} Bytes ({:.3} MB/s at 100MHz)".format(bw,bw/100E6))
@@ -82,16 +78,47 @@ def main():
         input_shape , _ = get_vnnx_io_shapes(args.model)
         input_array, meta = preProcess(imgLower, input_shape) #takes lower half of img and resizes
         output = vnnx_infer(args.model,input_array)
+        outputs = output.copy()
     elif '.xml' in args.model:
         weights=args.model.replace('.xml', '.bin')
-        input_shape = get_xml_input_shape(args.model, weights)
+        input_shape = openvino_input_shape(args.model, weights)[0]
         input_array, meta = preProcess(imgLower, input_shape)
         output = openvino_infer(args.model, input_array)
-    elif '.onnx' in args.model:
-        input_shape = get_onnx_input_shape(args.model)
-        input_array, meta = preProcess(imgLower, input_shape)  
-        output = onnx_infer(args.model, input_array)      
-    objs = lpd.postprocess_lpd(output,288,1024,detectThresh,maxIou)
+        outputs = output.copy()
+    elif args.model.endswith('.tflite'):
+        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+        import tensorflow as tf
+        interpreter= tf.lite.Interpreter(model_path=args.model)
+        interpreter.allocate_tensors()
+
+        input_details = interpreter.get_input_details()
+        output_details = interpreter.get_output_details()
+        img_resized, meta = preProcess(imgLower, [1, 3, 288, 1024])
+        img_resized = img_resized.swapaxes(0, 1).swapaxes(1, 2).astype(np.float32)
+        img_resized = img_resized.astype(np.float32)
+        img_resized = np.expand_dims(img_resized, axis=0)
+        input_scale, input_zero_point = input_details[0].get('quantization', (0.0, 0))
+        if  input_scale != 0.0:
+            img_resized = (img_resized / input_scale) + input_zero_point
+        img_resized = img_resized.astype(input_details[0]['dtype'])
+        interpreter.set_tensor(input_details[0]['index'], img_resized)
+        interpreter.invoke()
+        outputs = []
+        for o in range(len(output_details)):
+            output_scale, output_zero_point = output_details[o].get('quantization', (0.0, 0))
+            output = interpreter.get_tensor(output_details[o]['index'])
+            if  output_scale != 0.0:
+                # output = output_scale * (output.astype(output_details[o]['dtype']) - output_zero_point)
+                output = output_scale * (output.astype(np.float32) - output_zero_point)
+            output = output.transpose((0,3,1,2))
+            outputs.append(output)
+    orig_output = outputs.copy()
+    
+    for ind,o in enumerate(orig_output):
+        
+        outputs[2*int(o.shape[2]/18) + int(o.shape[1]/6)] = orig_output[ind]
+        
+    objs = lpd.postprocess_lpd(outputs,288,1024,detectThresh,maxIou)
     #resizing values back to original size
     for obj in objs:
         box = obj['box']

@@ -95,7 +95,8 @@ typedef struct {
  * @return A vbx_cnn_t structure. On success .initialized is set, otherwise it is zero;
  *
  */
-vbx_cnn_t* vbx_cnn_init(void* ctrl_reg_addr,void* firmware_blob);
+//vbx_cnn_t* vbx_cnn_init(void* ctrl_reg_addr,void* firmware_blob);
+vbx_cnn_t* vbx_cnn_init(void* ctrl_reg_addr);
 
 /**
  * Read error register and return the error
@@ -204,20 +205,36 @@ size_t model_get_output_length(const model_t* model,int output_index);
 size_t model_get_input_length(const model_t* model,int input_index);
 
 /**
- * Get dimensions of elements of an input buffer
+ * Get tensor dimensions of elements of an input buffer
  * @param model The model to query
  * @param index The index of the input to get the length of
- * @return dimensions of in elements of input buffer
+ * @return tensor dimensions of in elements of input buffer
  */
-int* model_get_input_dims(const model_t* model,int input_index);
+int* model_get_input_shape(const model_t* model,int input_index);
 
 /**
- * Get dimensions of elements of an output buffer
+ * Get tensor dimensions of elements of an output buffer
  * @param model The model to query
  * @param index The index of the output to get the length of
- * @return dimensions of in elements of output buffer
+ * @return tensor dimensions of in elements of output buffer
  */
-int* model_get_output_dims(const model_t* model,int output_index);
+int* model_get_output_shape(const model_t* model,int output_index);
+
+/**
+ * Get number of dimensions of elements of an input buffer
+ * @param model The model to query
+ * @param index The index of the input to get the length of
+ * @return number of dimensions of in elements of input buffer
+ */
+size_t model_get_input_dims(const model_t* model,int input_index);
+
+/**
+ * Get number of dimensions of elements of an output buffer
+ * @param model The model to query
+ * @param index The index of the output to get the length of
+ * @return number of dimensions of in elements of output buffer
+ */
+size_t model_get_output_dims(const model_t* model,int output_index);
 
 /**
  * Get the datatype of an output buffer
@@ -289,7 +306,7 @@ size_t model_get_allocate_bytes(const model_t* model);
  */
 void* model_get_test_input(const model_t* model,int input_index);
 
-//void* model_get_test_output(const model_t* model,int output_index);
+void* model_get_test_output(const model_t* model,int output_index);
 
 /**
  * Get a the amount the the output values should be scaled to
@@ -301,7 +318,17 @@ void* model_get_test_input(const model_t* model,int input_index);
  */
 
 float model_get_output_scale_value(const model_t* model,int index);
+int model_get_output_scale_fix16_value(const model_t* model,int index);
 
+float model_get_input_scale_value(const model_t* model, int index);
+int model_get_input_scale_fix16_value(const model_t* model, int index);
+
+int model_get_output_zeropoint(const model_t* model, int index);
+int model_get_input_zeropoint(const model_t* model, int index);
+
+int vbx_cnn_get_debug_prints(vbx_cnn_t* vbx_cnn,char* buf,size_t max_chars)
+    __attribute__((warning("vbx_cnn_get_debug_prints() is not part of the official Vectorblox API"
+                           " and could be removed at any time")));
 #ifdef __cplusplus
 }
 #endif

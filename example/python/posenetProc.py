@@ -8,13 +8,11 @@ from collections import namedtuple
 import posenet_python.posenet as pnpy
 import matplotlib.pyplot as plt
 
-from vbx.generate.openvino_infer import openvino_infer
-from vbx.generate.onnx_infer import onnx_infer
+from vbx.generate.utils import openvino_infer, openvino_input_shape
 
 GeometricOperationMetadata = namedtuple('GeometricOperationMetadata', ['type', 'parameters']) # matching openvino
 
-
-def preprocessImage(data):
+def preprocessImage(data, rgb=None, mean=0., in_scale=1.):
     model_h = 273
     model_w = 481
     image_h, image_w = data.shape[:2]
@@ -25,7 +23,7 @@ def preprocessImage(data):
     resize_w = round(scale*image_w)
     resize_h = round(scale*image_h)
     data = cv2.resize(data, (resize_w, resize_h), interpolation=2)
-    data = cv2.cvtColor(data, cv2.COLOR_BGR2RGB).astype(np.float32)
+
     if len(data.shape) == 1:
         data = np.expand_dims(data, axis=-1)
     pad_top = int((model_h - resize_h)/2)
@@ -33,6 +31,9 @@ def preprocessImage(data):
     pad_left = int((model_w - resize_w)/2)
     pad_right = model_w - pad_left - resize_w
     data = cv2.copyMakeBorder(data, pad_top, pad_bottom, pad_left, pad_right, cv2.BORDER_CONSTANT, value=(128,128,128))
+    if rgb:
+        data = cv2.cvtColor(data, cv2.COLOR_BGR2RGB)
+    data = (data - mean) / in_scale
 
     meta = {}
     meta['image_size'] = [image_h, image_w, 3]
@@ -94,11 +95,15 @@ def postProcess(prediction, meta, imageId=0):
 def vnnx_infer(model, input_array):
     with open(model,'rb') as mf:
         m = vbx.sim.Model(mf.read())
-    input_flat = input_array.flatten().astype(np.uint8)
-    outputs = m.run([input_flat])
+    input_array = input_array.astype(np.float32)
+    input_array = (input_array / m.input_scale_factor[0]) + m.input_zeropoint[0]
+    # input_flat = input_array.swapaxes(2,3).swapaxes(1,2).flatten().astype(m.input_dtypes[0])
+    input_flat = input_array.flatten().astype(m.input_dtypes[0])
 
-    for n in range(len(outputs)):
-        outputs[n] = outputs[n].astype(np.float32) * m.output_scale_factor[n]
+    outputs = m.run([input_flat])
+    for idx, o in enumerate(outputs):
+        out_scaled = m.output_scale_factor[idx] * (o.astype(np.float32) - m.output_zeropoint[idx])
+        outputs[idx] = out_scaled
 
     bw = m.get_bandwidth_per_run()
     print("Bandwidth per run = {} Bytes ({:.3} MB/s at 100MHz)".format(bw,bw/100E6))    
@@ -107,29 +112,50 @@ def vnnx_infer(model, input_array):
 
     return outputs
 
+def tflite_infer(model, input_array):
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+    import tensorflow as tf
+    interpreter= tf.lite.Interpreter(model_path=model)
+    interpreter.allocate_tensors()
+
+    input_details = interpreter.get_input_details()
+    output_details = interpreter.get_output_details()
+
+    # img_resized = np.expand_dims(img_resized, axis=0)
+    input_array = input_array.astype(np.float32)
+    input_scale, input_zero_point = input_details[0].get('quantization', (0.0, 0))
+    if  input_scale != 0.0:
+        input_array = (input_array / input_scale) + input_zero_point
+    input_array = input_array.astype(input_details[0]['dtype'])
+    interpreter.set_tensor(input_details[0]['index'], input_array)
+    interpreter.invoke()
+    outputs = []
+    for o in range(len(output_details)):
+        output_scale, output_zero_point = output_details[o].get('quantization', (0.0, 0))
+        output = interpreter.get_tensor(output_details[o]['index'])
+        if  output_scale != 0.0:
+            # output = output_scale * (output.astype(output_details[o]['dtype']) - output_zero_point)
+            output = output_scale * (output.astype(np.float32) - output_zero_point)
+        output = output.transpose((0,3,1,2))
+        outputs.append(output)
+    return outputs
 
 def model_infer(model, input_array):
     if '.vnnx' in model:
         outputs = vnnx_infer(model, input_array)
-        prediction = {
-            'heatmap':outputs[1].reshape(1,17,18,31),
-            'offset':outputs[0].reshape(1,34,18,31),
-            'displacement_fwd':outputs[2].reshape(1,32,18,31),
-            'displacement_bwd':outputs[3].reshape(1,32,18,31)}
+        outputs = [outputs[1], outputs[0], outputs[2], outputs[3]]
     elif '.xml' in model:
         outputs = openvino_infer(model, input_array)
-        prediction = {
-            'heatmap':outputs[2].reshape(1,17,18,31),
-            'offset':outputs[3].reshape(1,34,18,31),
-            'displacement_fwd':outputs[1].reshape(1,32,18,31),
-            'displacement_bwd':outputs[0].reshape(1,32,18,31)} 
-    elif '.onnx' in model:
-        outputs = onnx_infer(model, input_array)   
-        prediction = {
-            'heatmap':outputs[1].reshape(1,17,18,31),
-            'offset':outputs[0].reshape(1,34,18,31),
-            'displacement_fwd':outputs[2].reshape(1,32,18,31),
-            'displacement_bwd':outputs[3].reshape(1,32,18,31)}
+        outputs = [outputs[2], outputs[3], outputs[1], outputs[0]]
+    elif '.tflite' in model:
+        input_array = input_array.swapaxes(1, 2).swapaxes(2, 3).astype(np.float32) # nchw -> nhwc
+        outputs = tflite_infer(model, input_array)
+        outputs = [outputs[1], outputs[0], outputs[2], outputs[3]]
+    prediction = {
+        'heatmap':outputs[0].reshape(1,17,18,31),
+        'offset':outputs[1].reshape(1,34,18,31),
+        'displacement_fwd':outputs[2].reshape(1,32,18,31),
+        'displacement_bwd':outputs[3].reshape(1,32,18,31)}
     return prediction
 
 

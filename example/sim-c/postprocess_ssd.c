@@ -202,6 +202,57 @@ static prior_t priors[] = {
 	.img_size = 300,
     }};
 
+static prior_t torch_priors[] = {
+    {
+        .shape = {1, 24, 20, 20},
+        .height = {F16(64.0), F16(84.66403), F16(45.25482), F16(90.50964), F16(36.95041), F16(110.85123)},
+        .width = {F16(64.0), F16(84.66403), F16(90.50964), F16(45.25482), F16(110.85123), F16(36.95041)},
+        .offset = F16(0.5),
+        .variance = {F16(0.1), F16(0.1), F16(0.2), F16(0.2)},
+	.img_size = 320,
+    },
+    {
+        .shape = {1, 24, 10, 10},
+        .height = {F16(112.0), F16(133.86562), F16(79.195984), F16(158.3919), F16(64.66324), F16(193.98969)},
+        .width = {F16(112.0), F16(133.86562), F16(158.3919), F16(79.195984), F16(193.98969), F16(64.66324)},
+        .offset = F16(0.5),
+        .variance = {F16(0.1), F16(0.1), F16(0.2), F16(0.2)},
+	.img_size = 320,
+    },
+    {
+        .shape = {1, 24, 5, 5},
+
+        .height = {F16(160.0), F16(182.42805), F16(113.13707), F16(226.27419), F16(92.37601), F16(277.1281)},
+        .width = {F16(160.0), F16(182.42805), F16(226.27419), F16(113.13707), F16(277.1281), F16(92.37601)},
+        .offset = F16(0.5),
+        .variance = {F16(0.1), F16(0.1), F16(0.2), F16(0.2)},
+	.img_size = 320,
+    },
+    {
+        .shape = {1, 24, 3, 3},
+        .height = {F16(208.0), F16(230.7553), F16(147.07819), F16(294.15643), F16(120.08885), F16(319.99997)},
+        .width = {F16(208.0), F16(230.7553), F16(294.15643), F16(147.07819), F16(319.99997), F16(120.08885)},
+        .offset = F16(0.5),
+        .variance = {F16(0.1), F16(0.1), F16(0.2), F16(0.2)},
+	.img_size = 320,
+    },
+    {
+        .shape = {1, 24, 2, 2},
+        .height = {F16(256.0), F16(278.96957), F16(181.01935), F16(320.0), F16(147.80165), F16(320.0)},
+        .width = {F16(256.0), F16(278.96957), F16(320.0), F16(181.01935), F16(320.0), F16(147.80165)},
+        .offset = F16(0.5),
+        .variance = {F16(0.1), F16(0.1), F16(0.2), F16(0.2)},
+	.img_size = 320,
+    },
+    {
+        .shape = {1, 24, 1, 1},
+        .height = {F16(304.0), F16(311.89743), F16(214.96045), F16(320.0), F16(175.5145), F16(320.0)},
+        .width = {F16(304.0), F16(311.89743), F16(320.0), F16(214.96045), F16(320.0), F16(175.5145)},
+        .offset = F16(0.5),
+        .variance = {F16(0.1), F16(0.1), F16(0.2), F16(0.2)},
+	.img_size = 320,
+    }};
+
 static prior_t vehicle_priors[] = {
 	{
 		.shape = {1, 8, 16, 16},
@@ -296,6 +347,48 @@ static inline fix16_t clamp(fix16_t val,fix16_t low,fix16_t high) {
         return high;
     return val;
 }
+
+static fix16_box get_box_int8(int8_t *box_output, fix16_t scale, int32_t zero, int x, int y, int r, prior_t *prior) {
+    int grid = prior->shape[2];
+    prior_box pbox = gen_prior_box(prior, x, y, r);
+
+    fix16_box base_box;
+    base_box.xmin =
+	int8_to_fix16_single(box_output[r * grid * grid * 4 + grid * grid * 0 + grid * y + x],
+		scale, zero);
+    base_box.ymin =
+        int8_to_fix16_single(box_output[r * grid * grid * 4 + grid * grid * 1 + grid * y + x],
+		scale, zero);
+    base_box.xmax =
+        int8_to_fix16_single(box_output[r * grid * grid * 4 + grid * grid * 2 + grid * y + x],
+		scale, zero);
+    base_box.ymax =
+        int8_to_fix16_single(box_output[r * grid * grid * 4 + grid * grid * 3 + grid * y + x],
+		scale, zero);
+    fix16_t pw = pbox.w;
+    fix16_t ph = pbox.h;
+
+    fix16_t pcx = pbox.cx;
+    fix16_t pcy = pbox.cy;
+    fix16_t cx =
+        fix16_mul(fix16_mul(prior->variance[0], base_box.xmin), pw) + pcx;
+    fix16_t cy =
+        fix16_mul(fix16_mul(prior->variance[1], base_box.ymin), ph) + pcy;
+    fix16_t w =
+        fix16_mul(fix16_exp(fix16_mul(prior->variance[2], base_box.xmax)), pw);
+    fix16_t h =
+        fix16_mul(fix16_exp(fix16_mul(prior->variance[3], base_box.ymax)), ph);
+
+
+    base_box.xmin = clamp(fix16_to_int( (cx - w / 2)), 0, prior->img_size);
+    base_box.ymin = clamp(fix16_to_int( (cy - h / 2)), 0, prior->img_size);
+    base_box.xmax = clamp(fix16_to_int( (cx + w / 2)), 0, prior->img_size);
+    base_box.ymax = clamp(fix16_to_int( (cy + h / 2)), 0, prior->img_size);
+
+
+    return base_box;
+}
+
 static fix16_box get_box(fix16_t *box_output, int x, int y, int r, prior_t *prior) {
     int grid = prior->shape[2];
     prior_box pbox = gen_prior_box(prior, x, y, r);
@@ -332,6 +425,7 @@ static fix16_box get_box(fix16_t *box_output, int x, int y, int r, prior_t *prio
 
     return base_box;
 }
+
 extern int fix16_box_iou(fix16_box box_1, fix16_box box_2, fix16_t thresh);
 #define swap(a, b)                              \
     do {                                        \
@@ -354,6 +448,97 @@ void insert_into_sorted_array(fix16_box *boxes, int *box_count,
     }
 }
 
+static int get_boxes_above_confidence_torch_int8(fix16_box *boxes, int max_boxes,
+                                      int current_box_count,
+                                      fix16_t confidence_threshold,
+                                      int8_t *class_output, fix16_t class_scale, int32_t class_zero,
+                                      int8_t *box_output, fix16_t box_scale, int32_t box_zero,
+				      int repeats, int num_classes,
+                                      prior_t *prior) {
+    int grid = prior->shape[2];
+    int box_count = current_box_count;
+    int repeated = prior->shape[1] / repeats;
+    fix16_t class_scores[num_classes];
+    for (int y = 0; y < grid; ++y) {
+	    for (int x = 0; x < grid; ++x) {
+		    for (int r = 0; r < repeated; r++) {
+			    int class_offset = r * num_classes * grid * grid + y * grid + x;
+			    int max_score = class_output[class_offset];
+			    int max_class = 0;
+			    for (int c = 1; c < num_classes; c++) {
+				    int8_t score = class_output[class_offset+c*grid*grid];
+				    if(max_score < score) {
+					    max_score = score;
+					    max_class = c;
+				    }
+			    }
+			    if (max_class > 0) {
+				    for (int c = 0; c < num_classes; c++) {
+					    class_scores[c] = int8_to_fix16_single(class_output[class_offset+c*grid*grid], class_scale, class_zero);
+				    }
+				    fix16_softmax(class_scores, num_classes, class_scores);
+				    fix16_t class_confidence = class_scores[max_class];
+				    if (class_confidence > confidence_threshold) {
+					    fix16_box box = get_box_int8(box_output, box_scale, box_zero, x, y, r, prior);
+					    box.class_id = max_class;
+					    box.confidence = class_confidence;
+#if 0
+					    insert_into_sorted_array(boxes, &box_count, max_boxes, box);
+#else
+					    boxes[box_count++]=box;
+#endif
+				    }
+			    }
+		    }
+	    }
+    }
+    return box_count;
+}
+
+static int get_boxes_above_confidence_torch(fix16_box *boxes, int max_boxes,
+                                      int current_box_count,
+                                      fix16_t confidence_threshold,
+                                      fix16_t *class_output,
+                                      fix16_t *box_output, int repeats, int num_classes,
+                                      prior_t *prior) {
+    int grid = prior->shape[2];
+    int box_count = current_box_count;
+    int repeated = prior->shape[1] / repeats;
+    fix16_t class_scores[num_classes];
+    for (int y = 0; y < grid; ++y) {
+	    for (int x = 0; x < grid; ++x) {
+		    for (int r = 0; r < repeated; r++) {
+			    int class_offset = r * num_classes * grid * grid + y * grid + x;
+			    int max_score = class_output[class_offset];
+			    int max_class = 0;
+			    class_scores[0] =  max_score;
+			    for (int c = 1; c < num_classes; c++) {
+				    class_scores[c] = class_output[class_offset+c*grid*grid];
+				    if(max_score < class_scores[c]) {
+					    max_score = class_scores[c];
+					    max_class = c;
+				    }
+			    }
+			    if (max_class > 0) {
+				    fix16_softmax(class_scores, num_classes, class_scores);
+				    fix16_t class_confidence = class_scores[max_class];
+				    if (class_confidence > confidence_threshold) {
+					    fix16_box box = get_box(box_output, x, y, r, prior);
+					    box.class_id = max_class;
+					    box.confidence = class_confidence;
+#if 0
+					    insert_into_sorted_array(boxes, &box_count, max_boxes, box);
+#else
+					    boxes[box_count++]=box;
+#endif
+				    }
+			    }
+		    }
+	    }
+    }
+    return box_count;
+}
+
 static int get_boxes_above_confidence(fix16_box *boxes, int max_boxes,
                                       int current_box_count,
                                       fix16_t confidence_threshold,
@@ -373,11 +558,11 @@ static int get_boxes_above_confidence(fix16_box *boxes, int max_boxes,
                         fix16_box box = get_box(box_output, x, y, r, prior);
                         box.class_id = c;
                         box.confidence = class_confidence;
-                        #if 1
-                        insert_into_sorted_array(boxes, &box_count, max_boxes, box);
-                        #else
-                        boxes[box_count++]=box;
-                        #endif
+#if 0
+			insert_into_sorted_array(boxes, &box_count, max_boxes, box);
+#else
+			boxes[box_count++]=box;
+#endif
                     }
                 }
             }
@@ -392,7 +577,6 @@ static inline fix16_t fix16_logistic(fix16_t x) {
 static inline fix16_t fix16_logistic_inverse(fix16_t x) {
     return fix16_log(fix16_div(x, fix16_one - x));
 }
-
 
 int post_process_ssd(fix16_box *boxes, const int max_boxes,
                        fix16_t **network_outputs, const int num_outputs, const int repeats, const int num_classes,
@@ -440,6 +624,57 @@ int post_process_ssdv2(fix16_box *boxes, int max_boxes,
 {
 	return post_process_ssd(boxes, max_boxes, network_outputs, 12, 4, num_classes,
 			confidence_threshold, nms_threshold, priors);
+}
+
+int post_process_ssd_torch(fix16_box *boxes, int max_boxes, 
+                       fix16_t *network_outputs[12], int num_classes,
+                       fix16_t confidence_threshold, fix16_t nms_threshold) 
+{
+    int box_count = 0;
+    for (int o = 0; o < 6; ++o) {
+	    fix16_t *class_outputs = network_outputs[2 * o + 1];
+	    fix16_t *box_outputs = network_outputs[2 * o];
+
+	    box_count = get_boxes_above_confidence_torch(
+			    boxes, max_boxes, box_count, confidence_threshold, class_outputs, box_outputs,
+			    4, num_classes, torch_priors + o);
+    }
+
+    fix16_sort_boxes(boxes, box_count);
+    fix16_do_nms(boxes, box_count, nms_threshold);
+    int clean_box_count = fix16_clean_boxes(boxes, box_count, 320, 320);
+
+    return clean_box_count;
+}
+
+int post_process_ssd_torch_int8(fix16_box *boxes, int max_boxes, 
+                       int8_t *network_outputs[12],
+                       fix16_t network_scales[12],
+                       int32_t network_zeros[12],
+		       int num_classes,
+                       fix16_t confidence_threshold, fix16_t nms_threshold)
+{
+    int box_count = 0;
+    for (int o = 0; o < 6; ++o) {
+	    int8_t *class_outputs = network_outputs[2 * o + 1];
+	    int8_t *box_outputs = network_outputs[2 * o];
+	    fix16_t class_scale = network_scales[2 * o + 1];
+	    fix16_t box_scale = network_scales[2 * o];
+	    int32_t class_zero = network_zeros[2 * o + 1];
+	    int32_t box_zero = network_zeros[2 * o];
+
+	    box_count = get_boxes_above_confidence_torch_int8(
+			    boxes, max_boxes, box_count, confidence_threshold,
+			    class_outputs, class_scale, class_zero,
+			    box_outputs, box_scale, box_zero,
+			    4, num_classes, torch_priors + o);
+    }
+
+    fix16_sort_boxes(boxes, box_count);
+    fix16_do_nms(boxes, box_count, nms_threshold);
+    int clean_box_count = fix16_clean_boxes(boxes, box_count, 320, 320);
+
+    return clean_box_count;
 }
 
 int post_process_vehicles(fix16_box *boxes, int max_boxes,

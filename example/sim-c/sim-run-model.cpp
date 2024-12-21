@@ -3,22 +3,26 @@
 #include "vbx_cnn_api.h"
 #include "postprocess.h"
 
-
+#define TEST_OUT 0
+#define INT8FLAG 1
 extern "C" int read_JPEG_file (const char * filename, int* width, int* height,
 		unsigned char **image, const int grayscale);
 extern "C" int resize_image(uint8_t* image_in,int in_w,int in_h,
 		uint8_t* image_out,int out_w,int out_h);
 
-
-void* read_image(const char* filename, const int channels, const int height, const int width, int data_type){
+void* read_image(const char* filename, const int channels, const int height, const int width, int data_type, int use_bgr){
 	unsigned char* image;
 	int h,w;
 	read_JPEG_file (filename,&w,&h,&image, channels == 1);
 	unsigned char* planer_img = (unsigned char*)malloc(w*h*channels);
 	for(int r=0;r<h;r++){
 		for(int c=0;c<w;c++){
-			for(int ch=0;ch<channels;ch++){ // read as BGR
-				planer_img[ch*w*h+r*w+c] = image[(r*w+c)*channels+((channels-1)-ch)];
+			for(int ch=0;ch<channels;ch++){
+				if (use_bgr) {
+					planer_img[ch*w*h+r*w+c] = image[(r*w+c)*channels+((channels-1)-ch)]; // read as BGR
+				} else {
+					planer_img[ch*w*h+r*w+c] = image[(r*w+c)*channels+ch]; // read as RGB
+				}
 			}
 		}
 	}
@@ -34,49 +38,28 @@ void* read_image(const char* filename, const int channels, const int height, con
 }
 
 
-static uint32_t fletcher32(const uint16_t *data, size_t len)
-{
-	uint32_t c0, c1;
-	unsigned int i;
-
-	for (c0 = c1 = 0; len >= 360; len -= 360) {
-		for (i = 0; i < 360; ++i) {
-			c0 = c0 + *data++;
-			c1 = c1 + c0;
-		}
-		c0 = c0 % 65535;
-		c1 = c1 % 65535;
-	}
-	for (i = 0; i < len; ++i) {
-		c0 = c0 + *data++;
-		c1 = c1 + c0;
-	}
-	c0 = c0 % 65535;
-	c1 = c1 % 65535;
-	return (c1 << 16 | c0);
-}
-
 int main(int argc, char** argv){
 
 	//On hardware these two variables would be set with real values
 	//because this is for the simulator, we use NULL
 	void* ctrl_reg_addr = NULL;
-	void* firmware_blob = NULL;
-	vbx_cnn_t* vbx_cnn = vbx_cnn_init(ctrl_reg_addr,firmware_blob);
+	//void* firmware_blob = NULL;
+	//vbx_cnn_t* vbx_cnn = vbx_cnn_init(ctrl_reg_addr,firmware_blob);
+	vbx_cnn_t* vbx_cnn = vbx_cnn_init(ctrl_reg_addr);
 
-	if(argc < 3){
+	if(argc < 2){
 		fprintf(stderr,
 		"Usage: %s  MODEL_FILE IMAGE.jpg [POST_PROCESS]\n"
 		"   if using POST_PROCESS to select post-processing, must be one of:\n"
-		"   CLASSIFY, YOLOV2, YOLOV3, YOLOV4, YOLOV5,\n"
+		"   CLASSIFY, YOLOV2, YOLOV3, YOLOV4, YOLOV5, ULTRALYTICS, ULTRALYTICS_CUT\n"
 		"   BLAZEFACE, SCRFD, RETINAFACE, SSDV2, PLATE, LPD, LPR\n",
 				argv[0]);
 		return 1;
 	}
-
+	
 	FILE* model_file = fopen(argv[1],"r");
 	if(model_file == NULL){
-		printf("Unable to open file %s\n", argv[1]);
+		fprintf(stderr,"Unable to open file %s\n", argv[1]);
 		return 1;
 	}
 	fseek(model_file,0,SEEK_END);
@@ -89,30 +72,48 @@ int main(int argc, char** argv){
 	}
 	int model_data_size = model_get_data_bytes(model);
 	if(model_data_size != file_size){
-		fprintf(stderr,"Error model file is not correct size%s\n",argv[1]);
+		fprintf(stderr,"Error model file is not correct size %s\n",argv[1]);
 	}
 	int model_allocate_size = model_get_allocate_bytes(model);
 	model = (model_t*)realloc(model, model_allocate_size);
-	uint8_t* input_buffer=NULL;
-	void* read_buffer=NULL;
-	if(std::string(argv[2]) != "TEST_DATA"){
-		int input_datatype = model_get_input_datatype(model,0);
-		int* input_dims = model_get_input_dims(model, 0);
-		read_buffer = read_image(argv[2], input_dims[0], input_dims[1], input_dims[2], input_datatype);
-		input_buffer = (uint8_t*)read_buffer;
+	vbx_cnn_io_ptr_t* io_buffers= (vbx_cnn_io_ptr_t*)malloc(sizeof(vbx_cnn_io_ptr_t)*(model_get_num_inputs(model)+model_get_num_outputs(model)));	
+	if (argc>2){
+		if(strcmp(argv[2],"TEST_DATA")!=0){
+			for (unsigned i = 0; i < model_get_num_inputs(model); ++i) {
+				int input_datatype = model_get_input_datatype(model,i);
+				int* input_shape = model_get_input_shape(model,i);
+				int dims = model_get_input_dims(model,i);
+				io_buffers[i] = (uintptr_t)read_image(argv[2], input_shape[dims-3], input_shape[dims-2], input_shape[dims-1], input_datatype, 0); // don't use_bgr
+#if 0
+				fix16_t scale = (fix16_t)model_get_input_scale_fix16_value(model,i); // input scale * 255 (as inputs are 0-255 not 0-1.
+				printf("%f\n",fix16_to_float(scale));
+				int32_t zero_point = model_get_input_zeropoint(model,i); 
+				int8_t* input = (int8_t*)io_buffers[i];
+				preprocess_inputs((uint8_t*)input, scale, zero_point,(int)model_get_input_length(model, i),0);
+#endif
+			}
+		} else {
+			for (unsigned i = 0; i < model_get_num_inputs(model); ++i) {
+				io_buffers[i] = (uintptr_t)model_get_test_input(model,i);
+			}
+		}
 	} else {
-		input_buffer = (uint8_t*)model_get_test_input(model,0);
+		for (unsigned i = 0; i < model_get_num_inputs(model); ++i) {
+			io_buffers[i] = (uintptr_t)model_get_test_input(model,i);
+		}
 	}
-	vbx_cnn_io_ptr_t* io_buffers= (vbx_cnn_io_ptr_t*)malloc(sizeof(vbx_cnn_io_ptr_t)*(1+model_get_num_outputs(model)));
-	io_buffers[0] = (uintptr_t)input_buffer;
 	for (unsigned o = 0; o < model_get_num_outputs(model); ++o) {
 		int output_length = model_get_output_length(model, o);
-		io_buffers[o+1] = (uintptr_t)malloc(output_length*sizeof(fix16_t));
+		io_buffers[model_get_num_inputs(model) + o] = (uintptr_t)malloc(output_length*sizeof(fix16_t));
 	}
-
+#if TEST_OUT
+	for(unsigned o =0; o<model_get_num_outputs(model); ++o){
+		io_buffers[model_get_num_inputs(model) + o] = (uintptr_t)model_get_test_output(model,o);
+	}
+	vbx_cnn_get_state(vbx_cnn);
 	//buffers are now setup,
 	//we can run the model.
-
+#else
 	vbx_cnn_model_start(vbx_cnn, model, io_buffers);
 	int err=1;
 	while (err>0) {
@@ -122,19 +123,46 @@ int main(int argc, char** argv){
 		printf("Model Run failed with error code: %d\n",err);
 	}
 	// data should be available int the output buffers now.
-	
+#endif	
+
+
+
+	fix16_t* fix16_buffers[model_get_num_inputs(model)+model_get_num_outputs(model)];
+	for (int o = 0; o < (int)model_get_num_outputs(model); ++o){
+		int size=model_get_output_length(model, o);
+		fix16_t scale = (fix16_t)model_get_output_scale_fix16_value(model,o); // get output scale
+		int32_t zero_point = model_get_output_zeropoint(model,o); // get output zero
+		fix16_buffers[model_get_num_inputs(model) + o] = (fix16_t*)malloc(size*sizeof(fix16_t));
+		int8_to_fix16(fix16_buffers[model_get_num_inputs(model)+o], (int8_t*)io_buffers[model_get_num_inputs(model)+o], size, scale, zero_point);
+	}	
 	// users can modify this post-processing function in post_process.c
-	if (argc > 3) pprint_post_process(argv[1], argv[3], model, io_buffers);
+#if INT8FLAG
+	if (argc > 3) pprint_post_process(argv[1], argv[3], model, io_buffers,1);
+#else
+	if (argc > 3) pprint_post_process(argv[1], argv[3], model, (vbx_cnn_io_ptr_t*)fix16_buffers,0);
+#endif
 
-
-	unsigned checksum = fletcher32((uint16_t*)(io_buffers[1]),model_get_output_length(model, 0)*sizeof(fix16_t)/sizeof(uint16_t));
+	unsigned checksum = fletcher32((uint16_t*)(io_buffers[model_get_num_inputs(model)]),model_get_output_length(model, 0)*sizeof(int8_t)/sizeof(uint16_t));
 	for(unsigned o =1;o<model_get_num_outputs(model);++o){
-		checksum ^= fletcher32((uint16_t*)io_buffers[1+o], model_get_output_length(model, o)*sizeof(fix16_t)/sizeof(uint16_t));
+		checksum ^= fletcher32((uint16_t*)io_buffers[model_get_num_inputs(model)+o], model_get_output_length(model, o)*sizeof(int8_t)/sizeof(uint16_t));
 	}
 	printf("CHECKSUM = 0x%08x\n",checksum);
-	if (read_buffer) {
-		free(read_buffer);
+	if (argc>2){
+		if(std::string(argv[2]) != "TEST_DATA"){
+			for (unsigned i = 0; i < model_get_num_inputs(model); ++i) {
+				if ((void*)io_buffers[i] != NULL) free((void*)io_buffers[i]);
+			}
+		}
 	}
+
+	if(fix16_buffers){
+		for (int o = 0; o < (int)model_get_num_outputs(model); ++o){
+			if(fix16_buffers[model_get_num_inputs(model) + o]){
+				free(fix16_buffers[model_get_num_inputs(model) + o]);
+			}
+		}
+	}
+	free(io_buffers);
 	free(model);
 
 	return 0;

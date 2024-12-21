@@ -1,0 +1,1583 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "definitions": {
+    "tflite_TensorType" : {
+      "type" : "string",
+      "enum": ["FLOAT32", "FLOAT16", "INT32", "UINT8", "INT64", "STRING", "BOOL", "INT16", "COMPLEX64", "INT8", "FLOAT64", "COMPLEX128", "UINT64", "RESOURCE", "VARIANT", "UINT32", "UINT16", "INT4"]
+    },
+    "tflite_QuantizationDetails" : {
+      "type" : "string",
+      "enum": ["NONE", "CustomQuantization"]
+    },
+    "tflite_DimensionType" : {
+      "type" : "string",
+      "enum": ["DENSE", "SPARSE_CSR"]
+    },
+    "tflite_SparseIndexVector" : {
+      "type" : "string",
+      "enum": ["NONE", "Int32Vector", "Uint16Vector", "Uint8Vector"]
+    },
+    "tflite_BuiltinOperator" : {
+      "type" : "string",
+      "enum": ["ADD", "AVERAGE_POOL_2D", "CONCATENATION", "CONV_2D", "DEPTHWISE_CONV_2D", "DEPTH_TO_SPACE", "DEQUANTIZE", "EMBEDDING_LOOKUP", "FLOOR", "FULLY_CONNECTED", "HASHTABLE_LOOKUP", "L2_NORMALIZATION", "L2_POOL_2D", "LOCAL_RESPONSE_NORMALIZATION", "LOGISTIC", "LSH_PROJECTION", "LSTM", "MAX_POOL_2D", "MUL", "RELU", "RELU_N1_TO_1", "RELU6", "RESHAPE", "RESIZE_BILINEAR", "RNN", "SOFTMAX", "SPACE_TO_DEPTH", "SVDF", "TANH", "CONCAT_EMBEDDINGS", "SKIP_GRAM", "CALL", "CUSTOM", "EMBEDDING_LOOKUP_SPARSE", "PAD", "UNIDIRECTIONAL_SEQUENCE_RNN", "GATHER", "BATCH_TO_SPACE_ND", "SPACE_TO_BATCH_ND", "TRANSPOSE", "MEAN", "SUB", "DIV", "SQUEEZE", "UNIDIRECTIONAL_SEQUENCE_LSTM", "STRIDED_SLICE", "BIDIRECTIONAL_SEQUENCE_RNN", "EXP", "TOPK_V2", "SPLIT", "LOG_SOFTMAX", "DELEGATE", "BIDIRECTIONAL_SEQUENCE_LSTM", "CAST", "PRELU", "MAXIMUM", "ARG_MAX", "MINIMUM", "LESS", "NEG", "PADV2", "GREATER", "GREATER_EQUAL", "LESS_EQUAL", "SELECT", "SLICE", "SIN", "TRANSPOSE_CONV", "SPARSE_TO_DENSE", "TILE", "EXPAND_DIMS", "EQUAL", "NOT_EQUAL", "LOG", "SUM", "SQRT", "RSQRT", "SHAPE", "POW", "ARG_MIN", "FAKE_QUANT", "REDUCE_PROD", "REDUCE_MAX", "PACK", "LOGICAL_OR", "ONE_HOT", "LOGICAL_AND", "LOGICAL_NOT", "UNPACK", "REDUCE_MIN", "FLOOR_DIV", "REDUCE_ANY", "SQUARE", "ZEROS_LIKE", "FILL", "FLOOR_MOD", "RANGE", "RESIZE_NEAREST_NEIGHBOR", "LEAKY_RELU", "SQUARED_DIFFERENCE", "MIRROR_PAD", "ABS", "SPLIT_V", "UNIQUE", "CEIL", "REVERSE_V2", "ADD_N", "GATHER_ND", "COS", "WHERE", "RANK", "ELU", "REVERSE_SEQUENCE", "MATRIX_DIAG", "QUANTIZE", "MATRIX_SET_DIAG", "ROUND", "HARD_SWISH", "IF", "WHILE", "NON_MAX_SUPPRESSION_V4", "NON_MAX_SUPPRESSION_V5", "SCATTER_ND", "SELECT_V2", "DENSIFY", "SEGMENT_SUM", "BATCH_MATMUL", "PLACEHOLDER_FOR_GREATER_OP_CODES", "CUMSUM", "CALL_ONCE", "BROADCAST_TO", "RFFT2D", "CONV_3D", "IMAG", "REAL", "COMPLEX_ABS", "HASHTABLE", "HASHTABLE_FIND", "HASHTABLE_IMPORT", "HASHTABLE_SIZE", "REDUCE_ALL", "CONV_3D_TRANSPOSE", "VAR_HANDLE", "READ_VARIABLE", "ASSIGN_VARIABLE", "BROADCAST_ARGS", "RANDOM_STANDARD_NORMAL", "BUCKETIZE", "RANDOM_UNIFORM", "MULTINOMIAL", "GELU", "DYNAMIC_UPDATE_SLICE", "RELU_0_TO_1", "UNSORTED_SEGMENT_PROD", "UNSORTED_SEGMENT_MAX", "UNSORTED_SEGMENT_SUM", "ATAN2", "UNSORTED_SEGMENT_MIN", "SIGN", "BITCAST", "BITWISE_XOR", "RIGHT_SHIFT"]
+    },
+    "tflite_BuiltinOptions" : {
+      "type" : "string",
+      "enum": ["NONE", "Conv2DOptions", "DepthwiseConv2DOptions", "ConcatEmbeddingsOptions", "LSHProjectionOptions", "Pool2DOptions", "SVDFOptions", "RNNOptions", "FullyConnectedOptions", "SoftmaxOptions", "ConcatenationOptions", "AddOptions", "L2NormOptions", "LocalResponseNormalizationOptions", "LSTMOptions", "ResizeBilinearOptions", "CallOptions", "ReshapeOptions", "SkipGramOptions", "SpaceToDepthOptions", "EmbeddingLookupSparseOptions", "MulOptions", "PadOptions", "GatherOptions", "BatchToSpaceNDOptions", "SpaceToBatchNDOptions", "TransposeOptions", "ReducerOptions", "SubOptions", "DivOptions", "SqueezeOptions", "SequenceRNNOptions", "StridedSliceOptions", "ExpOptions", "TopKV2Options", "SplitOptions", "LogSoftmaxOptions", "CastOptions", "DequantizeOptions", "MaximumMinimumOptions", "ArgMaxOptions", "LessOptions", "NegOptions", "PadV2Options", "GreaterOptions", "GreaterEqualOptions", "LessEqualOptions", "SelectOptions", "SliceOptions", "TransposeConvOptions", "SparseToDenseOptions", "TileOptions", "ExpandDimsOptions", "EqualOptions", "NotEqualOptions", "ShapeOptions", "PowOptions", "ArgMinOptions", "FakeQuantOptions", "PackOptions", "LogicalOrOptions", "OneHotOptions", "LogicalAndOptions", "LogicalNotOptions", "UnpackOptions", "FloorDivOptions", "SquareOptions", "ZerosLikeOptions", "FillOptions", "BidirectionalSequenceLSTMOptions", "BidirectionalSequenceRNNOptions", "UnidirectionalSequenceLSTMOptions", "FloorModOptions", "RangeOptions", "ResizeNearestNeighborOptions", "LeakyReluOptions", "SquaredDifferenceOptions", "MirrorPadOptions", "AbsOptions", "SplitVOptions", "UniqueOptions", "ReverseV2Options", "AddNOptions", "GatherNdOptions", "CosOptions", "WhereOptions", "RankOptions", "ReverseSequenceOptions", "MatrixDiagOptions", "QuantizeOptions", "MatrixSetDiagOptions", "HardSwishOptions", "IfOptions", "WhileOptions", "DepthToSpaceOptions", "NonMaxSuppressionV4Options", "NonMaxSuppressionV5Options", "ScatterNdOptions", "SelectV2Options", "DensifyOptions", "SegmentSumOptions", "BatchMatMulOptions", "CumsumOptions", "CallOnceOptions", "BroadcastToOptions", "Rfft2dOptions", "Conv3DOptions", "HashtableOptions", "HashtableFindOptions", "HashtableImportOptions", "HashtableSizeOptions", "VarHandleOptions", "ReadVariableOptions", "AssignVariableOptions", "RandomOptions", "BucketizeOptions", "GeluOptions", "DynamicUpdateSliceOptions", "UnsortedSegmentProdOptions", "UnsortedSegmentMaxOptions", "UnsortedSegmentMinOptions", "UnsortedSegmentSumOptions", "ATan2Options", "SignOptions", "BitcastOptions", "BitwiseXorOptions", "RightShiftOptions"]
+    },
+    "tflite_Padding" : {
+      "type" : "string",
+      "enum": ["SAME", "VALID"]
+    },
+    "tflite_ActivationFunctionType" : {
+      "type" : "string",
+      "enum": ["NONE", "RELU", "RELU_N1_TO_1", "RELU6", "TANH", "SIGN_BIT"]
+    },
+    "tflite_LSHProjectionType" : {
+      "type" : "string",
+      "enum": ["UNKNOWN", "SPARSE", "DENSE"]
+    },
+    "tflite_FullyConnectedOptionsWeightsFormat" : {
+      "type" : "string",
+      "enum": ["DEFAULT", "SHUFFLED4x16INT8"]
+    },
+    "tflite_LSTMKernelType" : {
+      "type" : "string",
+      "enum": ["FULL", "BASIC"]
+    },
+    "tflite_CombinerType" : {
+      "type" : "string",
+      "enum": ["SUM", "MEAN", "SQRTN"]
+    },
+    "tflite_MirrorPadMode" : {
+      "type" : "string",
+      "enum": ["REFLECT", "SYMMETRIC"]
+    },
+    "tflite_CustomOptionsFormat" : {
+      "type" : "string",
+      "enum": ["FLEXBUFFERS"]
+    },
+    "tflite_CustomQuantization" : {
+      "type" : "object",
+      "properties" : {
+        "custom" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : 0, "maximum" :255}
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_QuantizationParameters" : {
+      "type" : "object",
+      "properties" : {
+        "min" : {
+                "type" : "array", "items" : {"type" : "number"}
+              },
+        "max" : {
+                "type" : "array", "items" : {"type" : "number"}
+              },
+        "scale" : {
+                "type" : "array", "items" : {"type" : "number"}
+              },
+        "zero_point" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              },
+        "details_type" : {
+                "$ref" : "#/definitions/tflite_QuantizationDetails"
+              },
+        "details" : {
+                "anyOf": [{ "$ref" : "#/definitions/tflite_CustomQuantization" }]
+              },
+        "quantized_dimension" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_Int32Vector" : {
+      "type" : "object",
+      "properties" : {
+        "values" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647}
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_Uint16Vector" : {
+      "type" : "object",
+      "properties" : {
+        "values" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : 0, "maximum" : 65535}
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_Uint8Vector" : {
+      "type" : "object",
+      "properties" : {
+        "values" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : 0, "maximum" :255}
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_DimensionMetadata" : {
+      "type" : "object",
+      "properties" : {
+        "format" : {
+                "$ref" : "#/definitions/tflite_DimensionType"
+              },
+        "dense_size" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "array_segments_type" : {
+                "$ref" : "#/definitions/tflite_SparseIndexVector"
+              },
+        "array_segments" : {
+                "anyOf": [{ "$ref" : "#/definitions/tflite_Int32Vector" },{ "$ref" : "#/definitions/tflite_Uint16Vector" },{ "$ref" : "#/definitions/tflite_Uint8Vector" }]
+              },
+        "array_indices_type" : {
+                "$ref" : "#/definitions/tflite_SparseIndexVector"
+              },
+        "array_indices" : {
+                "anyOf": [{ "$ref" : "#/definitions/tflite_Int32Vector" },{ "$ref" : "#/definitions/tflite_Uint16Vector" },{ "$ref" : "#/definitions/tflite_Uint8Vector" }]
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_SparsityParameters" : {
+      "type" : "object",
+      "properties" : {
+        "traversal_order" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647}
+              },
+        "block_map" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647}
+              },
+        "dim_metadata" : {
+                "type" : "array", "items" : {"$ref" : "#/definitions/tflite_DimensionMetadata"}
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_VariantSubType" : {
+      "type" : "object",
+      "properties" : {
+        "shape" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647}
+              },
+        "type" : {
+                "$ref" : "#/definitions/tflite_TensorType"
+              },
+        "has_rank" : {
+                "type" : "boolean"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_Tensor" : {
+      "type" : "object",
+      "properties" : {
+        "shape" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647}
+              },
+        "type" : {
+                "$ref" : "#/definitions/tflite_TensorType"
+              },
+        "buffer" : {
+                "type" : "integer", "minimum" : 0, "maximum" : 4294967295
+              },
+        "name" : {
+                "type" : "string"
+              },
+        "quantization" : {
+                "$ref" : "#/definitions/tflite_QuantizationParameters"
+              },
+        "is_variable" : {
+                "type" : "boolean"
+              },
+        "sparsity" : {
+                "$ref" : "#/definitions/tflite_SparsityParameters"
+              },
+        "shape_signature" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647}
+              },
+        "has_rank" : {
+                "type" : "boolean"
+              },
+        "variant_tensors" : {
+                "type" : "array", "items" : {"$ref" : "#/definitions/tflite_VariantSubType"}
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_Conv2DOptions" : {
+      "type" : "object",
+      "properties" : {
+        "padding" : {
+                "$ref" : "#/definitions/tflite_Padding"
+              },
+        "stride_w" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "stride_h" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "fused_activation_function" : {
+                "$ref" : "#/definitions/tflite_ActivationFunctionType"
+              },
+        "dilation_w_factor" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "dilation_h_factor" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_Conv3DOptions" : {
+      "type" : "object",
+      "properties" : {
+        "padding" : {
+                "$ref" : "#/definitions/tflite_Padding"
+              },
+        "stride_d" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "stride_w" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "stride_h" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "fused_activation_function" : {
+                "$ref" : "#/definitions/tflite_ActivationFunctionType"
+              },
+        "dilation_d_factor" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "dilation_w_factor" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "dilation_h_factor" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_Pool2DOptions" : {
+      "type" : "object",
+      "properties" : {
+        "padding" : {
+                "$ref" : "#/definitions/tflite_Padding"
+              },
+        "stride_w" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "stride_h" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "filter_width" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "filter_height" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "fused_activation_function" : {
+                "$ref" : "#/definitions/tflite_ActivationFunctionType"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_DepthwiseConv2DOptions" : {
+      "type" : "object",
+      "properties" : {
+        "padding" : {
+                "$ref" : "#/definitions/tflite_Padding"
+              },
+        "stride_w" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "stride_h" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "depth_multiplier" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "fused_activation_function" : {
+                "$ref" : "#/definitions/tflite_ActivationFunctionType"
+              },
+        "dilation_w_factor" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "dilation_h_factor" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_ConcatEmbeddingsOptions" : {
+      "type" : "object",
+      "properties" : {
+        "num_channels" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "num_columns_per_channel" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647}
+              },
+        "embedding_dim_per_channel" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647}
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_LSHProjectionOptions" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+                "$ref" : "#/definitions/tflite_LSHProjectionType"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_SVDFOptions" : {
+      "type" : "object",
+      "properties" : {
+        "rank" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "fused_activation_function" : {
+                "$ref" : "#/definitions/tflite_ActivationFunctionType"
+              },
+        "asymmetric_quantize_inputs" : {
+                "type" : "boolean"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_RNNOptions" : {
+      "type" : "object",
+      "properties" : {
+        "fused_activation_function" : {
+                "$ref" : "#/definitions/tflite_ActivationFunctionType"
+              },
+        "asymmetric_quantize_inputs" : {
+                "type" : "boolean"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_SequenceRNNOptions" : {
+      "type" : "object",
+      "properties" : {
+        "time_major" : {
+                "type" : "boolean"
+              },
+        "fused_activation_function" : {
+                "$ref" : "#/definitions/tflite_ActivationFunctionType"
+              },
+        "asymmetric_quantize_inputs" : {
+                "type" : "boolean"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_BidirectionalSequenceRNNOptions" : {
+      "type" : "object",
+      "properties" : {
+        "time_major" : {
+                "type" : "boolean"
+              },
+        "fused_activation_function" : {
+                "$ref" : "#/definitions/tflite_ActivationFunctionType"
+              },
+        "merge_outputs" : {
+                "type" : "boolean"
+              },
+        "asymmetric_quantize_inputs" : {
+                "type" : "boolean"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_FullyConnectedOptions" : {
+      "type" : "object",
+      "properties" : {
+        "fused_activation_function" : {
+                "$ref" : "#/definitions/tflite_ActivationFunctionType"
+              },
+        "weights_format" : {
+                "$ref" : "#/definitions/tflite_FullyConnectedOptionsWeightsFormat"
+              },
+        "keep_num_dims" : {
+                "type" : "boolean"
+              },
+        "asymmetric_quantize_inputs" : {
+                "type" : "boolean"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_SoftmaxOptions" : {
+      "type" : "object",
+      "properties" : {
+        "beta" : {
+                "type" : "number"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_ConcatenationOptions" : {
+      "type" : "object",
+      "properties" : {
+        "axis" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "fused_activation_function" : {
+                "$ref" : "#/definitions/tflite_ActivationFunctionType"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_AddOptions" : {
+      "type" : "object",
+      "properties" : {
+        "fused_activation_function" : {
+                "$ref" : "#/definitions/tflite_ActivationFunctionType"
+              },
+        "pot_scale_int16" : {
+                "type" : "boolean"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_MulOptions" : {
+      "type" : "object",
+      "properties" : {
+        "fused_activation_function" : {
+                "$ref" : "#/definitions/tflite_ActivationFunctionType"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_L2NormOptions" : {
+      "type" : "object",
+      "properties" : {
+        "fused_activation_function" : {
+                "$ref" : "#/definitions/tflite_ActivationFunctionType"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_LocalResponseNormalizationOptions" : {
+      "type" : "object",
+      "properties" : {
+        "radius" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "bias" : {
+                "type" : "number"
+              },
+        "alpha" : {
+                "type" : "number"
+              },
+        "beta" : {
+                "type" : "number"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_LSTMOptions" : {
+      "type" : "object",
+      "properties" : {
+        "fused_activation_function" : {
+                "$ref" : "#/definitions/tflite_ActivationFunctionType"
+              },
+        "cell_clip" : {
+                "type" : "number"
+              },
+        "proj_clip" : {
+                "type" : "number"
+              },
+        "kernel_type" : {
+                "$ref" : "#/definitions/tflite_LSTMKernelType"
+              },
+        "asymmetric_quantize_inputs" : {
+                "type" : "boolean"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_UnidirectionalSequenceLSTMOptions" : {
+      "type" : "object",
+      "properties" : {
+        "fused_activation_function" : {
+                "$ref" : "#/definitions/tflite_ActivationFunctionType"
+              },
+        "cell_clip" : {
+                "type" : "number"
+              },
+        "proj_clip" : {
+                "type" : "number"
+              },
+        "time_major" : {
+                "type" : "boolean"
+              },
+        "asymmetric_quantize_inputs" : {
+                "type" : "boolean"
+              },
+        "diagonal_recurrent_tensors" : {
+                "type" : "boolean"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_BidirectionalSequenceLSTMOptions" : {
+      "type" : "object",
+      "properties" : {
+        "fused_activation_function" : {
+                "$ref" : "#/definitions/tflite_ActivationFunctionType"
+              },
+        "cell_clip" : {
+                "type" : "number"
+              },
+        "proj_clip" : {
+                "type" : "number"
+              },
+        "merge_outputs" : {
+                "type" : "boolean"
+              },
+        "time_major" : {
+                "type" : "boolean"
+              },
+        "asymmetric_quantize_inputs" : {
+                "type" : "boolean"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_ResizeBilinearOptions" : {
+      "type" : "object",
+      "properties" : {
+        "new_height" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647,
+                "deprecated" : true
+              },
+        "new_width" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647,
+                "deprecated" : true
+              },
+        "align_corners" : {
+                "type" : "boolean"
+              },
+        "half_pixel_centers" : {
+                "type" : "boolean"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_ResizeNearestNeighborOptions" : {
+      "type" : "object",
+      "properties" : {
+        "align_corners" : {
+                "type" : "boolean"
+              },
+        "half_pixel_centers" : {
+                "type" : "boolean"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_CallOptions" : {
+      "type" : "object",
+      "properties" : {
+        "subgraph" : {
+                "type" : "integer", "minimum" : 0, "maximum" : 4294967295
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_PadOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_PadV2Options" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_ReshapeOptions" : {
+      "type" : "object",
+      "properties" : {
+        "new_shape" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647}
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_SpaceToBatchNDOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_BatchToSpaceNDOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_SkipGramOptions" : {
+      "type" : "object",
+      "properties" : {
+        "ngram_size" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "max_skip_size" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "include_all_ngrams" : {
+                "type" : "boolean"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_SpaceToDepthOptions" : {
+      "type" : "object",
+      "properties" : {
+        "block_size" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_DepthToSpaceOptions" : {
+      "type" : "object",
+      "properties" : {
+        "block_size" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_SubOptions" : {
+      "type" : "object",
+      "properties" : {
+        "fused_activation_function" : {
+                "$ref" : "#/definitions/tflite_ActivationFunctionType"
+              },
+        "pot_scale_int16" : {
+                "type" : "boolean"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_DivOptions" : {
+      "type" : "object",
+      "properties" : {
+        "fused_activation_function" : {
+                "$ref" : "#/definitions/tflite_ActivationFunctionType"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_TopKV2Options" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_EmbeddingLookupSparseOptions" : {
+      "type" : "object",
+      "properties" : {
+        "combiner" : {
+                "$ref" : "#/definitions/tflite_CombinerType"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_GatherOptions" : {
+      "type" : "object",
+      "properties" : {
+        "axis" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "batch_dims" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_TransposeOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_ExpOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_CosOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_ReducerOptions" : {
+      "type" : "object",
+      "properties" : {
+        "keep_dims" : {
+                "type" : "boolean"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_SqueezeOptions" : {
+      "type" : "object",
+      "properties" : {
+        "squeeze_dims" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647}
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_SplitOptions" : {
+      "type" : "object",
+      "properties" : {
+        "num_splits" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_SplitVOptions" : {
+      "type" : "object",
+      "properties" : {
+        "num_splits" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_StridedSliceOptions" : {
+      "type" : "object",
+      "properties" : {
+        "begin_mask" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "end_mask" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "ellipsis_mask" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "new_axis_mask" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "shrink_axis_mask" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "offset" : {
+                "type" : "boolean"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_LogSoftmaxOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_CastOptions" : {
+      "type" : "object",
+      "properties" : {
+        "in_data_type" : {
+                "$ref" : "#/definitions/tflite_TensorType"
+              },
+        "out_data_type" : {
+                "$ref" : "#/definitions/tflite_TensorType"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_DequantizeOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_MaximumMinimumOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_TileOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_ArgMaxOptions" : {
+      "type" : "object",
+      "properties" : {
+        "output_type" : {
+                "$ref" : "#/definitions/tflite_TensorType"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_ArgMinOptions" : {
+      "type" : "object",
+      "properties" : {
+        "output_type" : {
+                "$ref" : "#/definitions/tflite_TensorType"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_GreaterOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_GreaterEqualOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_LessOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_LessEqualOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_NegOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_SelectOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_SliceOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_TransposeConvOptions" : {
+      "type" : "object",
+      "properties" : {
+        "padding" : {
+                "$ref" : "#/definitions/tflite_Padding"
+              },
+        "stride_w" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "stride_h" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "fused_activation_function" : {
+                "$ref" : "#/definitions/tflite_ActivationFunctionType"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_ExpandDimsOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_SparseToDenseOptions" : {
+      "type" : "object",
+      "properties" : {
+        "validate_indices" : {
+                "type" : "boolean"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_EqualOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_NotEqualOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_ShapeOptions" : {
+      "type" : "object",
+      "properties" : {
+        "out_type" : {
+                "$ref" : "#/definitions/tflite_TensorType"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_RankOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_PowOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_FakeQuantOptions" : {
+      "type" : "object",
+      "properties" : {
+        "min" : {
+                "type" : "number"
+              },
+        "max" : {
+                "type" : "number"
+              },
+        "num_bits" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "narrow_range" : {
+                "type" : "boolean"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_PackOptions" : {
+      "type" : "object",
+      "properties" : {
+        "values_count" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "axis" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_LogicalOrOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_OneHotOptions" : {
+      "type" : "object",
+      "properties" : {
+        "axis" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_AbsOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_HardSwishOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_LogicalAndOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_LogicalNotOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_UnpackOptions" : {
+      "type" : "object",
+      "properties" : {
+        "num" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "axis" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_FloorDivOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_SquareOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_ZerosLikeOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_FillOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_FloorModOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_RangeOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_LeakyReluOptions" : {
+      "type" : "object",
+      "properties" : {
+        "alpha" : {
+                "type" : "number"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_SquaredDifferenceOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_MirrorPadOptions" : {
+      "type" : "object",
+      "properties" : {
+        "mode" : {
+                "$ref" : "#/definitions/tflite_MirrorPadMode"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_UniqueOptions" : {
+      "type" : "object",
+      "properties" : {
+        "idx_out_type" : {
+                "$ref" : "#/definitions/tflite_TensorType"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_ReverseV2Options" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_AddNOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_GatherNdOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_WhereOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_ReverseSequenceOptions" : {
+      "type" : "object",
+      "properties" : {
+        "seq_dim" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "batch_dim" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_MatrixDiagOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_QuantizeOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_MatrixSetDiagOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_IfOptions" : {
+      "type" : "object",
+      "properties" : {
+        "then_subgraph_index" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "else_subgraph_index" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_CallOnceOptions" : {
+      "type" : "object",
+      "properties" : {
+        "init_subgraph_index" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_WhileOptions" : {
+      "type" : "object",
+      "properties" : {
+        "cond_subgraph_index" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "body_subgraph_index" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_NonMaxSuppressionV4Options" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_NonMaxSuppressionV5Options" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_ScatterNdOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_SelectV2Options" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_DensifyOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_SegmentSumOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_BatchMatMulOptions" : {
+      "type" : "object",
+      "properties" : {
+        "adj_x" : {
+                "type" : "boolean"
+              },
+        "adj_y" : {
+                "type" : "boolean"
+              },
+        "asymmetric_quantize_inputs" : {
+                "type" : "boolean"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_CumsumOptions" : {
+      "type" : "object",
+      "properties" : {
+        "exclusive" : {
+                "type" : "boolean"
+              },
+        "reverse" : {
+                "type" : "boolean"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_BroadcastToOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_Rfft2dOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_HashtableOptions" : {
+      "type" : "object",
+      "properties" : {
+        "table_id" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "key_dtype" : {
+                "$ref" : "#/definitions/tflite_TensorType"
+              },
+        "value_dtype" : {
+                "$ref" : "#/definitions/tflite_TensorType"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_HashtableFindOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_HashtableImportOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_HashtableSizeOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_VarHandleOptions" : {
+      "type" : "object",
+      "properties" : {
+        "container" : {
+                "type" : "string"
+              },
+        "shared_name" : {
+                "type" : "string"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_ReadVariableOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_AssignVariableOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_RandomOptions" : {
+      "type" : "object",
+      "properties" : {
+        "seed" : {
+                "type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807
+              },
+        "seed2" : {
+                "type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_BucketizeOptions" : {
+      "type" : "object",
+      "properties" : {
+        "boundaries" : {
+                "type" : "array", "items" : {"type" : "number"}
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_GeluOptions" : {
+      "type" : "object",
+      "properties" : {
+        "approximate" : {
+                "type" : "boolean"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_DynamicUpdateSliceOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_UnsortedSegmentProdOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_UnsortedSegmentMaxOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_UnsortedSegmentSumOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_ATan2Options" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_UnsortedSegmentMinOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_SignOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_BitcastOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_BitwiseXorOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_RightShiftOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_OperatorCode" : {
+      "type" : "object",
+      "properties" : {
+        "deprecated_builtin_code" : {
+                "type" : "integer", "minimum" : -128, "maximum" : 127
+              },
+        "custom_code" : {
+                "type" : "string"
+              },
+        "version" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "builtin_code" : {
+                "$ref" : "#/definitions/tflite_BuiltinOperator"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_Operator" : {
+      "type" : "object",
+      "properties" : {
+        "opcode_index" : {
+                "type" : "integer", "minimum" : 0, "maximum" : 4294967295
+              },
+        "inputs" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647}
+              },
+        "outputs" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647}
+              },
+        "builtin_options_type" : {
+                "$ref" : "#/definitions/tflite_BuiltinOptions"
+              },
+        "builtin_options" : {
+                "anyOf": [{ "$ref" : "#/definitions/tflite_Conv2DOptions" },{ "$ref" : "#/definitions/tflite_DepthwiseConv2DOptions" },{ "$ref" : "#/definitions/tflite_ConcatEmbeddingsOptions" },{ "$ref" : "#/definitions/tflite_LSHProjectionOptions" },{ "$ref" : "#/definitions/tflite_Pool2DOptions" },{ "$ref" : "#/definitions/tflite_SVDFOptions" },{ "$ref" : "#/definitions/tflite_RNNOptions" },{ "$ref" : "#/definitions/tflite_FullyConnectedOptions" },{ "$ref" : "#/definitions/tflite_SoftmaxOptions" },{ "$ref" : "#/definitions/tflite_ConcatenationOptions" },{ "$ref" : "#/definitions/tflite_AddOptions" },{ "$ref" : "#/definitions/tflite_L2NormOptions" },{ "$ref" : "#/definitions/tflite_LocalResponseNormalizationOptions" },{ "$ref" : "#/definitions/tflite_LSTMOptions" },{ "$ref" : "#/definitions/tflite_ResizeBilinearOptions" },{ "$ref" : "#/definitions/tflite_CallOptions" },{ "$ref" : "#/definitions/tflite_ReshapeOptions" },{ "$ref" : "#/definitions/tflite_SkipGramOptions" },{ "$ref" : "#/definitions/tflite_SpaceToDepthOptions" },{ "$ref" : "#/definitions/tflite_EmbeddingLookupSparseOptions" },{ "$ref" : "#/definitions/tflite_MulOptions" },{ "$ref" : "#/definitions/tflite_PadOptions" },{ "$ref" : "#/definitions/tflite_GatherOptions" },{ "$ref" : "#/definitions/tflite_BatchToSpaceNDOptions" },{ "$ref" : "#/definitions/tflite_SpaceToBatchNDOptions" },{ "$ref" : "#/definitions/tflite_TransposeOptions" },{ "$ref" : "#/definitions/tflite_ReducerOptions" },{ "$ref" : "#/definitions/tflite_SubOptions" },{ "$ref" : "#/definitions/tflite_DivOptions" },{ "$ref" : "#/definitions/tflite_SqueezeOptions" },{ "$ref" : "#/definitions/tflite_SequenceRNNOptions" },{ "$ref" : "#/definitions/tflite_StridedSliceOptions" },{ "$ref" : "#/definitions/tflite_ExpOptions" },{ "$ref" : "#/definitions/tflite_TopKV2Options" },{ "$ref" : "#/definitions/tflite_SplitOptions" },{ "$ref" : "#/definitions/tflite_LogSoftmaxOptions" },{ "$ref" : "#/definitions/tflite_CastOptions" },{ "$ref" : "#/definitions/tflite_DequantizeOptions" },{ "$ref" : "#/definitions/tflite_MaximumMinimumOptions" },{ "$ref" : "#/definitions/tflite_ArgMaxOptions" },{ "$ref" : "#/definitions/tflite_LessOptions" },{ "$ref" : "#/definitions/tflite_NegOptions" },{ "$ref" : "#/definitions/tflite_PadV2Options" },{ "$ref" : "#/definitions/tflite_GreaterOptions" },{ "$ref" : "#/definitions/tflite_GreaterEqualOptions" },{ "$ref" : "#/definitions/tflite_LessEqualOptions" },{ "$ref" : "#/definitions/tflite_SelectOptions" },{ "$ref" : "#/definitions/tflite_SliceOptions" },{ "$ref" : "#/definitions/tflite_TransposeConvOptions" },{ "$ref" : "#/definitions/tflite_SparseToDenseOptions" },{ "$ref" : "#/definitions/tflite_TileOptions" },{ "$ref" : "#/definitions/tflite_ExpandDimsOptions" },{ "$ref" : "#/definitions/tflite_EqualOptions" },{ "$ref" : "#/definitions/tflite_NotEqualOptions" },{ "$ref" : "#/definitions/tflite_ShapeOptions" },{ "$ref" : "#/definitions/tflite_PowOptions" },{ "$ref" : "#/definitions/tflite_ArgMinOptions" },{ "$ref" : "#/definitions/tflite_FakeQuantOptions" },{ "$ref" : "#/definitions/tflite_PackOptions" },{ "$ref" : "#/definitions/tflite_LogicalOrOptions" },{ "$ref" : "#/definitions/tflite_OneHotOptions" },{ "$ref" : "#/definitions/tflite_LogicalAndOptions" },{ "$ref" : "#/definitions/tflite_LogicalNotOptions" },{ "$ref" : "#/definitions/tflite_UnpackOptions" },{ "$ref" : "#/definitions/tflite_FloorDivOptions" },{ "$ref" : "#/definitions/tflite_SquareOptions" },{ "$ref" : "#/definitions/tflite_ZerosLikeOptions" },{ "$ref" : "#/definitions/tflite_FillOptions" },{ "$ref" : "#/definitions/tflite_BidirectionalSequenceLSTMOptions" },{ "$ref" : "#/definitions/tflite_BidirectionalSequenceRNNOptions" },{ "$ref" : "#/definitions/tflite_UnidirectionalSequenceLSTMOptions" },{ "$ref" : "#/definitions/tflite_FloorModOptions" },{ "$ref" : "#/definitions/tflite_RangeOptions" },{ "$ref" : "#/definitions/tflite_ResizeNearestNeighborOptions" },{ "$ref" : "#/definitions/tflite_LeakyReluOptions" },{ "$ref" : "#/definitions/tflite_SquaredDifferenceOptions" },{ "$ref" : "#/definitions/tflite_MirrorPadOptions" },{ "$ref" : "#/definitions/tflite_AbsOptions" },{ "$ref" : "#/definitions/tflite_SplitVOptions" },{ "$ref" : "#/definitions/tflite_UniqueOptions" },{ "$ref" : "#/definitions/tflite_ReverseV2Options" },{ "$ref" : "#/definitions/tflite_AddNOptions" },{ "$ref" : "#/definitions/tflite_GatherNdOptions" },{ "$ref" : "#/definitions/tflite_CosOptions" },{ "$ref" : "#/definitions/tflite_WhereOptions" },{ "$ref" : "#/definitions/tflite_RankOptions" },{ "$ref" : "#/definitions/tflite_ReverseSequenceOptions" },{ "$ref" : "#/definitions/tflite_MatrixDiagOptions" },{ "$ref" : "#/definitions/tflite_QuantizeOptions" },{ "$ref" : "#/definitions/tflite_MatrixSetDiagOptions" },{ "$ref" : "#/definitions/tflite_HardSwishOptions" },{ "$ref" : "#/definitions/tflite_IfOptions" },{ "$ref" : "#/definitions/tflite_WhileOptions" },{ "$ref" : "#/definitions/tflite_DepthToSpaceOptions" },{ "$ref" : "#/definitions/tflite_NonMaxSuppressionV4Options" },{ "$ref" : "#/definitions/tflite_NonMaxSuppressionV5Options" },{ "$ref" : "#/definitions/tflite_ScatterNdOptions" },{ "$ref" : "#/definitions/tflite_SelectV2Options" },{ "$ref" : "#/definitions/tflite_DensifyOptions" },{ "$ref" : "#/definitions/tflite_SegmentSumOptions" },{ "$ref" : "#/definitions/tflite_BatchMatMulOptions" },{ "$ref" : "#/definitions/tflite_CumsumOptions" },{ "$ref" : "#/definitions/tflite_CallOnceOptions" },{ "$ref" : "#/definitions/tflite_BroadcastToOptions" },{ "$ref" : "#/definitions/tflite_Rfft2dOptions" },{ "$ref" : "#/definitions/tflite_Conv3DOptions" },{ "$ref" : "#/definitions/tflite_HashtableOptions" },{ "$ref" : "#/definitions/tflite_HashtableFindOptions" },{ "$ref" : "#/definitions/tflite_HashtableImportOptions" },{ "$ref" : "#/definitions/tflite_HashtableSizeOptions" },{ "$ref" : "#/definitions/tflite_VarHandleOptions" },{ "$ref" : "#/definitions/tflite_ReadVariableOptions" },{ "$ref" : "#/definitions/tflite_AssignVariableOptions" },{ "$ref" : "#/definitions/tflite_RandomOptions" },{ "$ref" : "#/definitions/tflite_BucketizeOptions" },{ "$ref" : "#/definitions/tflite_GeluOptions" },{ "$ref" : "#/definitions/tflite_DynamicUpdateSliceOptions" },{ "$ref" : "#/definitions/tflite_UnsortedSegmentProdOptions" },{ "$ref" : "#/definitions/tflite_UnsortedSegmentMaxOptions" },{ "$ref" : "#/definitions/tflite_UnsortedSegmentMinOptions" },{ "$ref" : "#/definitions/tflite_UnsortedSegmentSumOptions" },{ "$ref" : "#/definitions/tflite_ATan2Options" },{ "$ref" : "#/definitions/tflite_SignOptions" },{ "$ref" : "#/definitions/tflite_BitcastOptions" },{ "$ref" : "#/definitions/tflite_BitwiseXorOptions" },{ "$ref" : "#/definitions/tflite_RightShiftOptions" }]
+              },
+        "custom_options" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : 0, "maximum" :255}
+              },
+        "custom_options_format" : {
+                "$ref" : "#/definitions/tflite_CustomOptionsFormat"
+              },
+        "mutating_variable_inputs" : {
+                "type" : "array", "items" : {"type" : "boolean"}
+              },
+        "intermediates" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647}
+              },
+        "large_custom_options_offset" : {
+                "type" : "integer", "minimum" : 0, "maximum" : 18446744073709551615
+              },
+        "large_custom_options_size" : {
+                "type" : "integer", "minimum" : 0, "maximum" : 18446744073709551615
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_SubGraph" : {
+      "type" : "object",
+      "properties" : {
+        "tensors" : {
+                "type" : "array", "items" : {"$ref" : "#/definitions/tflite_Tensor"}
+              },
+        "inputs" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647}
+              },
+        "outputs" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647}
+              },
+        "operators" : {
+                "type" : "array", "items" : {"$ref" : "#/definitions/tflite_Operator"}
+              },
+        "name" : {
+                "type" : "string"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_Buffer" : {
+      "type" : "object",
+      "properties" : {
+        "data" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : 0, "maximum" :255}
+              },
+        "offset" : {
+                "type" : "integer", "minimum" : 0, "maximum" : 18446744073709551615
+              },
+        "size" : {
+                "type" : "integer", "minimum" : 0, "maximum" : 18446744073709551615
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_Metadata" : {
+      "type" : "object",
+      "properties" : {
+        "name" : {
+                "type" : "string"
+              },
+        "buffer" : {
+                "type" : "integer", "minimum" : 0, "maximum" : 4294967295
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_TensorMap" : {
+      "type" : "object",
+      "properties" : {
+        "name" : {
+                "type" : "string"
+              },
+        "tensor_index" : {
+                "type" : "integer", "minimum" : 0, "maximum" : 4294967295
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_SignatureDef" : {
+      "type" : "object",
+      "properties" : {
+        "inputs" : {
+                "type" : "array", "items" : {"$ref" : "#/definitions/tflite_TensorMap"}
+              },
+        "outputs" : {
+                "type" : "array", "items" : {"$ref" : "#/definitions/tflite_TensorMap"}
+              },
+        "signature_key" : {
+                "type" : "string"
+              },
+        "deprecated_tag" : {
+                "type" : "string",
+                "deprecated" : true
+              },
+        "subgraph_index" : {
+                "type" : "integer", "minimum" : 0, "maximum" : 4294967295
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_Model" : {
+      "type" : "object",
+      "properties" : {
+        "version" : {
+                "type" : "integer", "minimum" : 0, "maximum" : 4294967295
+              },
+        "operator_codes" : {
+                "type" : "array", "items" : {"$ref" : "#/definitions/tflite_OperatorCode"}
+              },
+        "subgraphs" : {
+                "type" : "array", "items" : {"$ref" : "#/definitions/tflite_SubGraph"}
+              },
+        "description" : {
+                "type" : "string"
+              },
+        "buffers" : {
+                "type" : "array", "items" : {"$ref" : "#/definitions/tflite_Buffer"}
+              },
+        "metadata_buffer" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647}
+              },
+        "metadata" : {
+                "type" : "array", "items" : {"$ref" : "#/definitions/tflite_Metadata"}
+              },
+        "signature_defs" : {
+                "type" : "array", "items" : {"$ref" : "#/definitions/tflite_SignatureDef"}
+              }
+      },
+      "additionalProperties" : false
+    }
+  },
+  "$ref" : "#/definitions/tflite_Model"
+}

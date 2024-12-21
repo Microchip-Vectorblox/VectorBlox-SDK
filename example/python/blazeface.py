@@ -5,10 +5,8 @@ import numpy as np
 import cv2
 from vbx.postprocess.blazeface import blazeface
 
-from vbx.generate.openvino_infer import openvino_infer, get_model_input_shape as get_xml_input_shape
-from vbx.generate.onnx_infer import onnx_infer, load_input
-from vbx.generate.onnx_helper import get_model_input_shape as get_onnx_input_shape
-
+from vbx.generate.utils import openvino_infer, openvino_input_shape
+from vbx.generate.utils import load_input
 
 def plot_detections(img, detections, with_keypoints=True):
         output_img = img
@@ -37,7 +35,7 @@ def plot_detections(img, detections, with_keypoints=True):
 def get_vnnx_io_shapes(vnxx):
     with open(vnxx, 'rb') as mf:
         model = vbx.sim.Model(mf.read())
-    return model.input_dims[0], model.output_dims
+    return model.input_shape[0], model.output_shape
 
 
 def vnnx_infer(vnnx_model, input_array):
@@ -58,6 +56,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('model')
     parser.add_argument('image')
+    parser.add_argument('-b', '--bgr', action='store_true')
     parser.add_argument('-a', '--anchors', default='BlazeFace-PyTorch/anchors.npy')
     parser.add_argument('-s', '--size', type=int, default=128)
     parser.add_argument('-t', '--threshold', type=float, default=0.75)
@@ -66,17 +65,13 @@ def main():
 
     if args.model.endswith('.vnnx'):
         input_shape, _ = get_vnnx_io_shapes(args.model)
-        input_array = load_input(args.image, 1., input_shape)
+        input_array = load_input(args.image, 1., input_shape, (not args.bgr))
         outputs = vnnx_infer(args.model, input_array)
     elif args.model.endswith('.xml'):
         weights=args.model.replace('.xml', '.bin')
-        input_shape = get_xml_input_shape(args.model, weights)
-        input_array = load_input(args.image, 1., input_shape)
+        input_shape = openvino_input_shape(args.model, weights)[0]
+        input_array = load_input(args.image, 1., input_shape, (not args.bgr))
         outputs = openvino_infer(args.model, input_array)
-    elif args.model.endswith('.onnx'):
-        input_shape = get_onnx_input_shape(args.model)
-        input_array = load_input(args.image, 1., input_shape)  
-        outputs = onnx_infer(args.model, input_array)
 
     if len(outputs) == 4:
         a = np.concatenate((outputs[0], outputs[1]))

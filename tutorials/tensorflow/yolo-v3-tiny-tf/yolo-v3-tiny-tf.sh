@@ -1,49 +1,53 @@
 
-#######################################
-#                                     #
-#  ____    ____  ______   ___   ___   #
-#  \   \  /   / |   _  \  \  \ /  /   #
-#   \   \/   /  |  |_)  |  \  V  /    #
-#    \      /   |   _  <    >   <     #
-#     \    /    |  |_)  |  /  ^  \    #
-#      \__/     |______/  /__/ \__\   #
-#                                     #
-# Refer to Programmer's Guide         #
-# for full details                    #
-#                                     #
-#                                     #
-#######################################
+##########################################################
+#  _    __          __             ____  __              #
+# | |  / /__  _____/ /_____  _____/ __ )/ /___  _  __    #
+# | | / / _ \/ ___/ __/ __ \/ ___/ __  / / __ \| |/_/    #
+# | |/ /  __/ /__/ /_/ /_/ / /  / /_/ / / /_/ />  <      #
+# |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
+#                                                        #
+# https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
+# v2.0                                                   #
+#                                                        #
+##########################################################
 
 set -e
-echo "Checking and Activating VBX Python Environment..."
+echo "Checking and activating VBX Python Environment..."
 if [ -z $VBX_SDK ]; then
     echo "\$VBX_SDK not set. Please run 'source setup_vars.sh' from the SDK's root folder" && exit 1
 fi
 source $VBX_SDK/vbx_env/bin/activate
 
+echo "Checking for Numpy calibration data file..."
+if [ ! -f $VBX_SDK/tutorials/coco2017_rgb_20x416x416x3.npy ]; then
+    wget -P $VBX_SDK/tutorials/ https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/EAP/calib_npy/coco2017_rgb_20x416x416x3.npy
+fi
+
 echo "Downloading yolo-v3-tiny-tf..."
+# model details @ https://github.com/openvinotoolkit/open_model_zoo/tree/2021.4.2/models/public/yolo-v3-tiny-tf/
 [ -f coco.names ] || wget https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
 [ -f yolov3-tiny.weights ] || wget http://web.archive.org/web/20210225040312/https://pjreddie.com/media/files/yolov3-tiny.weights
 omz_downloader --name yolo-v3-tiny-tf
 rm -rf keras-YOLOv3-model-set && git clone https://github.com/david8862/keras-YOLOv3-model-set
 cd keras-YOLOv3-model-set && git checkout 56bcc2e && cd ..
 python keras-YOLOv3-model-set/tools/model_converter/convert.py keras-YOLOv3-model-set/cfg/yolov3-tiny.cfg yolov3-tiny.weights yolo-v3-tiny.h5
-python -m pip install keras_applications
-python keras-YOLOv3-model-set/tools/model_converter/keras_to_tensorflow.py --input_model=yolo-v3-tiny.h5 --output_model=yolo-v3-tiny.pb
 
-echo "Running Model Optimizer..."
-# model details @ https://github.com/openvinotoolkit/open_model_zoo/tree/2021.4.2/models/public/yolo-v3-tf/
-mo --input_model=yolo-v3-tiny.pb \
---framework tf \
---input_shape [1,416,416,3] \
---scale_values [255.] \
---reverse_input_channels \
---static_shape
+echo "Generating TF Lite..."
+tflite_quantize yolo-v3-tiny.h5 yolo-v3-tiny-tf.tflite -d $VBX_SDK/tutorials/coco2017_rgb_20x416x416x3.npy \
+--scale 255. --shape 1 416 416 3
 
-echo "Generating VNNX for V1000 configuration..."
-generate_vnnx -x yolo-v3-tiny.xml  -c V1000 -f ../../sample_images -o yolo-v3-tiny-tf.vnnx --bias-correction
+if [ -f yolo-v3-tiny-tf.tflite ]; then
+   tflite_preprocess yolo-v3-tiny-tf.tflite  --scale 255
+fi
 
-echo "Running Simulation..."
-python $VBX_SDK/example/python/yoloInfer.py yolo-v3-tiny-tf.vnnx ../../test_images/dog.jpg -j yolo-v3-tiny-tf.json -l coco.names
+if [ -f yolo-v3-tiny-tf.pre.tflite ]; then
+    echo "Generating VNNX for V1000 configuration..."
+    vnnx_compile -c V1000 -t yolo-v3-tiny-tf.pre.tflite -o yolo-v3-tiny-tf.vnnx
+fi
+
+if [ -f yolo-v3-tiny-tf.vnnx ]; then
+    echo "Running Simulation..."
+    python $VBX_SDK/example/python/yoloInfer.py yolo-v3-tiny-tf.vnnx $VBX_SDK/tutorials/test_images/dog.jpg -j yolo-v3-tiny-tf.json -l coco.names 
+fi
 
 deactivate

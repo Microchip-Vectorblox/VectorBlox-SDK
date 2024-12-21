@@ -32,7 +32,7 @@ static const int CTRL_REG_START = 0x00000002;
 static const int CTRL_REG_RUNNING = 0x00000004;
 static const int CTRL_REG_OUTPUT_VALID = 0x00000008;
 static const int CTRL_REG_ERROR = 0x00000010;
-static uint32_t fletcher32(const void *d, size_t len) {
+/*static uint32_t fletcher32(const void *d, size_t len) {
   uint32_t c0, c1;
   unsigned int i;
   len /= sizeof(uint16_t);
@@ -52,7 +52,7 @@ static uint32_t fletcher32(const void *d, size_t len) {
   c0 = c0 % 65535;
   c1 = c1 % 65535;
   return (c1 << 16 | c0);
-}
+}*/
 
 #if VBX_SOC_DRIVER
 #include <string.h>
@@ -144,7 +144,7 @@ static uintptr_t uio_dma_phys_addr(){
 }
 #else
 static size_t uio_dma_size(){
-  return 512*1024*1024;
+  return 512*1024*1024*2;
 }
 static void* mmap_vbx_dma(){
   int fd = open("/dev/mem", O_RDWR);
@@ -169,7 +169,8 @@ void* virt_to_phys(vbx_cnn_t* vbx_cnn,void* virt){
 }
 #endif //!VBX_SOC_DRIVER
 
-vbx_cnn_t *vbx_cnn_init(void *ctrl_reg_addr,void *instruction_blob) {
+vbx_cnn_t *vbx_cnn_init(void *ctrl_reg_addr) {
+//vbx_cnn_t *vbx_cnn_init(void *ctrl_reg_addr,void *instruction_blob) {
   vbx_cnn_t* the_cnn = (vbx_cnn_t*)malloc(sizeof(vbx_cnn_t));
 #if VBX_SOC_DRIVER
   int uio_dev_num = find_uio_dev_num(ctrl_reg_addr);
@@ -183,7 +184,6 @@ vbx_cnn_t *vbx_cnn_init(void *ctrl_reg_addr,void *instruction_blob) {
   the_cnn->dma_phys_trans_offset = uio_dma_phys_addr(uio_dev_num)-(uintptr_t)the_cnn->dma_buffer;
   the_cnn->dma_buffer_end = the_cnn->dma_buffer + uio_dma_size(uio_dev_num)-1;
   void* dma_instr_blob = vbx_allocate_dma_buffer(the_cnn,VBX_INSTRUCTION_SIZE,21);
-  memcpy(dma_instr_blob,instruction_blob,VBX_INSTRUCTION_SIZE);
   the_cnn->io_buffers = vbx_allocate_dma_buffer(the_cnn,MAX_IO_BUFFERS*sizeof(vbx_cnn_io_ptr_t), 3);
 #elif SPLASHKIT_PCIE
   fpga_init();
@@ -203,14 +203,6 @@ vbx_cnn_t *vbx_cnn_init(void *ctrl_reg_addr,void *instruction_blob) {
     // instruction_blob must be aligned to a 2M boundary
     return NULL;
   }
-  uint32_t checksum = fletcher32(instruction_blob, 2 * 1024 * 1024 - 4);
-  uint32_t* expected = ((uint32_t *)instruction_blob)+(2 * 1024 * 1024 / 4 - 1);
-  if (checksum != *expected) {
-    // firmware does not look correct. Perhaps it was loaded incorrectly.
-    return NULL;
-  }
-  //set checksum to zero to reset orca stdout pointer
-  *expected=0;
   the_cnn->ctrl_reg = ctrl_reg_addr;
   the_cnn->instruction_blob = dma_instr_blob;
   // processor in reset:
@@ -222,6 +214,31 @@ vbx_cnn_t *vbx_cnn_init(void *ctrl_reg_addr,void *instruction_blob) {
   the_cnn->output_valid = 0;
   the_cnn->debug_print_ptr=0;
   return the_cnn;
+}
+
+#define DEBUG_PRINT_SPOOL_SIZE (16*1024)
+int vbx_cnn_get_debug_prints(vbx_cnn_t* vbx_cnn,char* buf,size_t max_chars){
+#if SPLASHKIT_PCIE
+  static char orca_std_out[DEBUG_PRINT_SPOOL_SIZE];
+  read_fpga((uintptr_t)(vbx_cnn->instruction_blob) + VBX_INSTRUCTION_SIZE - DEBUG_PRINT_SPOOL_SIZE,
+      orca_std_out,
+      DEBUG_PRINT_SPOOL_SIZE);
+#else
+  volatile char* orca_std_out = (volatile char*)(vbx_cnn->instruction_blob);
+  orca_std_out+=VBX_INSTRUCTION_SIZE-DEBUG_PRINT_SPOOL_SIZE;
+#endif
+  volatile int32_t* orca_pointer = (volatile int32_t*)(orca_std_out + 16*1024-4);
+  size_t char_count=0;
+  while(vbx_cnn->debug_print_ptr != *orca_pointer && char_count+1 <= max_chars){
+    buf[char_count]=orca_std_out[vbx_cnn->debug_print_ptr];
+    vbx_cnn->debug_print_ptr++;
+    char_count++;
+    if(vbx_cnn->debug_print_ptr >=DEBUG_PRINT_SPOOL_SIZE-4){
+      vbx_cnn->debug_print_ptr=0;
+    }
+  }
+  return (int)char_count;
+
 }
 
 #if VBX_SOC_DRIVER || SPLASHKIT_PCIE

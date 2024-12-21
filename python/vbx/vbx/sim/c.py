@@ -6,9 +6,9 @@ from ctypes import c_int16,c_int8,c_uint8,c_int32,c_float
 import os.path
 #_so = ctypes.cdll.LoadLibrary('libvbx_cnn_sim.so')
 _so = np.ctypeslib.load_library('libvbx_cnn_sim.so', os.path.dirname(__file__))
-#vbx_cnn_t vbx_cnn_init(volatile void* ctrl_reg_addr,void* firmware_blob);
+#vbx_cnn_t vbx_cnn_init(volatile void* ctrl_reg_addr);
 
-_so.vbx_cnn_init.arg_types = [c_void_p,c_void_p]
+_so.vbx_cnn_init.arg_types = [c_void_p]
 _so.vbx_cnn_init.restype = c_void_p
 
 def ctype_from_enum(e):
@@ -18,7 +18,7 @@ def ctype_from_enum(e):
         return c_int8
     if e == 2:
         return c_int16
-    if e == 3:
+    if ((e == 3) or (e == 4)):   
         return c_int32
     raise NotImplementedError("Unknown type enum ({})".format(e))
 
@@ -45,7 +45,7 @@ class vbx_cnn:
     def __init__(self,p):
         self.p = p
 def vbx_cnn_init():
-    return vbx_cnn(_so.vbx_cnn_init(None,None))
+    return vbx_cnn(_so.vbx_cnn_init(None))
 
 #vbx_cnn_err_e vbx_cnn_get_error_val(vbx_cnn_t* vbx_cnn);
 _so.vbx_cnn_get_error_val.arg_types = [c_void_p]
@@ -99,17 +99,30 @@ def model_get_output_length(model,output_index):
 _so.model_get_input_length.restype = c_size_t
 def model_get_input_length(model,input_index):
     return _so.model_get_input_length(c_char_p(model),c_int(input_index))
-#size_t* model_get_output_dims(const model_t* model,int output_index);
-_so.model_get_output_dims.restype = ctypes.POINTER(c_int)
-def model_get_output_dims(model,output_index):
-    ret = _so.model_get_output_dims(c_char_p(model),c_int(output_index))
-    return [ret[_] for _ in range(3)]
-#
-#size_t* model_get_input_dims(const model_t* model,int input_index);
-_so.model_get_input_dims.restype = ctypes.POINTER(c_int)
+
+#size_t model_get_input_dims(const model_t* model,int input_index);
+_so.model_get_input_dims.restype = c_size_t
 def model_get_input_dims(model,input_index):
-    ret = _so.model_get_input_dims(c_char_p(model),c_int(input_index))
-    return [ret[_] for _ in range(3)]
+    return _so.model_get_input_dims(c_char_p(model),c_int(input_index))
+
+#size_t model_get_output_dims(const model_t* model,int output_index);
+_so.model_get_output_dims.restype = c_size_t
+def model_get_output_dims(model,output_index):
+    return _so.model_get_output_dims(c_char_p(model),c_int(output_index))
+
+#size_t* model_get_output_shape(const model_t* model,int output_index);
+_so.model_get_output_shape.restype = ctypes.POINTER(c_int)
+def model_get_output_shape(model,output_index):
+    dims = model_get_output_dims(model,output_index)
+    ret = _so.model_get_output_shape(c_char_p(model),c_int(output_index))
+    return [ret[_] for _ in range(dims)]
+#
+#size_t* model_get_input_shape(const model_t* model,int input_index);
+_so.model_get_input_shape.restype = ctypes.POINTER(c_int)
+def model_get_input_shape(model,input_index):
+    dims = model_get_input_dims(model,input_index)
+    ret = _so.model_get_input_shape(c_char_p(model),c_int(input_index))
+    return [ret[_] for _ in range(dims)]
 #
 #vbx_cnn_calc_type_e model_get_output_datatype(const model_t* model,int output_index);
 def model_get_output_datatype(model,output_index):
@@ -157,15 +170,38 @@ def model_get_test_input(model,input_index):
     length = model_get_input_length(model,input_index)
     return np.ctypeslib.as_array(ptr,shape=(length,))
 
+#void* model_get_test_output(const model_t* model,int output_index);
+_so.model_get_test_output.restype= c_void_p
+def model_get_test_output(model,output_index):
+    ti = _so.model_get_test_output(c_char_p(model),c_int(output_index))
+    datatype = model_get_output_datatype(model,output_index)
+    ctypes_datatype = np.ctypeslib.as_ctypes_type(datatype)
+    ptr = ctypes.cast(ti,ctypes.POINTER(ctypes_datatype))
+    length = model_get_output_length(model,output_index)
+    return np.ctypeslib.as_array(ptr,shape=(length,))
+
+_so.model_get_input_scale_value.restype = c_float
+def model_get_input_scale_value(model,input_index):
+    return _so.model_get_input_scale_value(model,input_index)
+
 _so.model_get_output_scale_value.restype = c_float
 def model_get_output_scale_value(model,output_index):
     return _so.model_get_output_scale_value(model,output_index)
+
+_so.model_get_output_zeropoint.restype = c_int
+def model_get_output_zeropoint(model,output_index):
+    return _so.model_get_output_zeropoint(model,output_index)
+
+_so.model_get_input_zeropoint.restype = c_int
+def model_get_input_zeropoint(model,input_index):
+    return _so.model_get_input_zeropoint(model,input_index)
+
 def model_check_sanity(model):
     return _so.model_check_sanity(model)
 
 class simulator_stats(ctypes.Structure):
-    MAX_INSTR_VAL = 41;
-    NUM_OP_SIZE = 3;
+    MAX_INSTR_VAL = 47
+    NUM_OP_SIZE = 3
     LOG2_MAX_DMA_LANES =9
     _fields_ = [
         ("instruction_cycles",ctypes.c_uint64*NUM_OP_SIZE*(MAX_INSTR_VAL+1)),

@@ -4,7 +4,7 @@ import os
 import numpy as np
 import cv2
 
-from vbx.generate.openvino_infer import openvino_infer, get_model_input_shape as get_xml_input_shape
+from vbx.generate.utils import openvino_infer, openvino_input_shape
 from vbx.generate.onnx_infer import onnx_infer, load_input
 from vbx.generate.onnx_helper import get_model_input_shape as get_onnx_input_shape
 
@@ -623,7 +623,7 @@ def get_roi(detection, w, h, bp=False):
 def get_vnnx_io_shapes(vnxx):
     with open(vnxx, 'rb') as mf:
         model = vbx.sim.Model(mf.read())
-    return model.input_dims[0], model.output_dims
+    return model.input_shape[0], model.output_shape
 
 
 def vnnx_infer(vnnx_model, input_array):
@@ -659,6 +659,7 @@ def vnnx_infer_landmarks(model, input_array):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('detection_model')
+    parser.add_argument('-b', '--bgr', action='store_true')
     parser.add_argument('-i', '--image', default='../../hands.960.640.jpg')
 
     parser.add_argument('--landmark-model', type=str, default=None)
@@ -714,19 +715,19 @@ def main():
         for region_img_name, rect_points in cropped_ROIs:
             if args.landmark_model.endswith('.vnnx'):
                 input_shape, _ = get_vnnx_io_shapes(args.model)
-                input_array = load_input(region_img_name, 1., input_shape)
+                input_array = load_input(region_img_name, 1., input_shape, (not args.bgr))
                 outputs = vnnx_infer_landmarks(args.landmark_model, input_array)
 
             elif args.landmark_model.endswith('.xml'):
                 weights=args.landmark_model.replace('.xml', '.bin')
-                input_shape = get_xml_input_shape(args.landmark_model, weights)
-                input_array = load_input(region_img_name, 1., input_shape)
+                input_shape = openvino_input_shape(args.landmark_model, weights)[0]
+                input_array = load_input(region_img_name, 1., input_shape, (not args.bgr))
                 outputs = openvino_infer(args.landmark_model, input_array)
 
             elif args.landmark_model.endswith('.onnx'):
                 input_shape = get_onnx_input_shape(args.landmark_model)
                 # NOTE: pinto needs BGR2RGB conversion, scaling, transpose
-                input_array = load_input(region_img_name, 1., input_shape)
+                input_array = load_input(region_img_name, 1., input_shape, (not args.bgr))
                 if args.landmark_model.endswith('model_float32.onnx'):
                     input_array /= 255.0
                     if args.bp:

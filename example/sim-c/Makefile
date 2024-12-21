@@ -7,7 +7,7 @@ all:sim-run-model
 C_SRCS=image.c
 C_SRCS+=libfixmath/fix16.c libfixmath/fix16_exp.c libfixmath/fix16_sqrt.c libfixmath/fix16_str.c
 C_SRCS+=libfixmath/fix16_trig.c libfixmath/fract32.c libfixmath/uint32.c
-C_SRCS+=postprocess.c postprocess_scrfd.c postprocess_ssd.c postprocess_retinaface.c postprocess_license_plate.c
+C_SRCS+=postprocess.c postprocess_scrfd.c postprocess_ssd.c postprocess_retinaface.c postprocess_license_plate.c postprocess_pose.c
 CXX_SRCS=sim-run-model.cpp
 C_OBJS=$(addsuffix .o,$(addprefix obj/,$(abspath $(C_SRCS))))
 CXX_OBJS=$(addsuffix .o,$(addprefix obj/,$(abspath $(CXX_SRCS))))

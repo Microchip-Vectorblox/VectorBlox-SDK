@@ -1,3 +1,5 @@
+kws_classes = ['no', 'yes', 'down', 'go', 'left', 'up', 'right', 'stop']
+
 voc_classes = [
 "aeroplane",
 "bicycle",
@@ -1147,3 +1149,4 @@ voc_colors = color_map(21)[1:]
 
 np.random.seed(1337)
 coco_colors = [_.tolist() for  _ in np.random.randint(0, 255, size=(80, 3), dtype="uint8")]
+coco91_colors = [_.tolist() for  _ in np.random.randint(0, 255, size=(91, 3), dtype="uint8")]

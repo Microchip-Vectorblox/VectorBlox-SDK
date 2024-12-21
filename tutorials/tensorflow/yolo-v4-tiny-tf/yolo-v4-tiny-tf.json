@@ -14,8 +14,7 @@
         "h": 13,
         "w": 13,
         "c": 255,
-        "outputName": "Y15",
-        "layerNum": 16
+        "outputName": "Y15"
     },
     {
         "type": "yolo",
@@ -26,7 +25,6 @@
         "h": 26,
         "w": 26,
         "c": 255,
-        "outputName": "Y22",
-        "layerNum": 23
+        "outputName": "Y22"
     }
 ]
