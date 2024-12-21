@@ -59,11 +59,5 @@ Below is a list of included tutorials. Frames per Second (FPS) assumes the cores
   
   
 </div>
-  
-  
-<style>   
-  
-</style>  
-  
-<div></div>
+
 
