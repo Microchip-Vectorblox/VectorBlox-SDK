@@ -11,7 +11,7 @@ The networks can then be run via the VectorBlox simulator, or on a physical Vect
 ## Prerequisites
 
 
- To use the VectorBlox SDK, you will need run the SDK in an Ubuntu 20.04 environment with Python 3.8+.
+ To use the VectorBlox SDK, you will need run the SDK in an Ubuntu 20.04 / 22.04 environment with Python 3.8+.
 > To check which version of python is on the native Ubuntu OS, type either `python -V` or `python3 -V`
  If using WSL, ensure you are running from your home directory or have permissions set.
 
