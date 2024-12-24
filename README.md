@@ -2,7 +2,7 @@
 
 VectorBlox 2.0 is an SDK for compiling and running TFLITE INT8 networks on the VectorBlox accelerator.
 
-The list of the TFLITE INT8 supported operators can be found [here](./docs/OPS.md). We are currently support 68 TFLITE OPS.
+The list of the TFLITE INT8 supported operators can be found [here](./docs/OPS.md). We are currently support 62 TFLITE OPS.
 
 Networks must be converted via the included scripts.
 
