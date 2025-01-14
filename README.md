@@ -2,7 +2,7 @@
 
 VectorBlox 2.0 is an SDK for compiling and running TFLITE INT8 networks on the VectorBlox accelerator.
 
-The list of the TFLITE INT8 supported operators can be found [here](./docs/OPS.md). We are currently support 62 TFLITE OPS.
+The list of the TFLITE INT8 supported operators can be found [here](./docs/OPS.md). We are currently support 68 TFLITE OPS.
 
 Networks must be converted via the included scripts.
 
@@ -11,11 +11,20 @@ The networks can then be run via the VectorBlox simulator, or on a physical Vect
 ## Prerequisites
 
 
- To use the VectorBlox SDK, you will need run the SDK in an Ubuntu 20.04 / 22.04 environment with Python 3.8+.
+ To use the VectorBlox SDK, you will need run the SDK in an Ubuntu 20.04 environment with Python 3.8+.
 > To check which version of python is on the native Ubuntu OS, type either `python -V` or `python3 -V`
  If using WSL, ensure you are running from your home directory or have permissions set.
 
+## Upgrading Python (if needed)
 
+The base Python version in Ubuntu 20.04 is Python 3.8.
+
+If you need to upgrade your Python version, you can upgrade to Python 3.10 with the following commands:
+```
+sudo add-apt-repository ppa:deadsnakes/ppa
+sudo apt-get update
+sudo apt-get install python3.10 python3.10-venv
+```
 ## Downloading the SDK
 
 There are two options for downloading the sdk:
@@ -33,6 +42,8 @@ There are two options for downloading the sdk:
     ```
      
 ### Install required dependencies (requires sudo permission)
+
+Navigate to the root directory of `VectorBlox-SDK` and run the following commands:
 
 ```
 bash install_dependencies.sh
