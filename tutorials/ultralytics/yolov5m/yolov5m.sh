@@ -25,8 +25,8 @@ fi
 
 echo "Downloading yolov5m..."
 # model details @ https://github.com/ultralytics/yolov5
-[ -f yolov5m.pt ] || wget https://github.com/ultralytics/yolov5/releases/download/v6.0/yolov5m.pt
-[ -f coco.names ] || wget https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
+[ -f yolov5m.pt ] || wget -q https://github.com/ultralytics/yolov5/releases/download/v6.0/yolov5m.pt
+[ -f coco.names ] || wget -q https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
 [ -d yolov5 ] || git clone --branch v7.0 https://github.com/ultralytics/yolov5
 cd yolov5
 python3 -m venv ultralytics
@@ -34,6 +34,7 @@ source ultralytics/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
 pip install onnx
+pip install torch==2.5.0 torchvision==0.20.0
 python export.py --weights ../yolov5m.pt --include onnx
 cd ..
 source $VBX_SDK/vbx_env/bin/activate
@@ -61,6 +62,8 @@ fi
 if [ -f yolov5m.vnnx ]; then
     echo "Running Simulation..."
     python $VBX_SDK/example/python/yoloInfer.py yolov5m.vnnx $VBX_SDK/tutorials/test_images/dog.jpg -j yolov5m.json -v 5 -l coco.names -t 0.25 
+    echo "C Simulation Command:"
+    echo '$VBX_SDK/example/sim-c/sim-run-model yolov5m.vnnx $VBX_SDK/tutorials/test_images/dog.jpg  '
 fi
 
 deactivate

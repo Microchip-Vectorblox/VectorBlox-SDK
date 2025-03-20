@@ -25,8 +25,8 @@ fi
 
 echo "Downloading mobilefacenet-arcface..."
 # model details @ https://github.com/deepinsight/insightface
-wget --no-check-certificate https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/Releases/ModelZoo/model-0000.xml
-wget --no-check-certificate https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/Releases/ModelZoo/model-0000.bin
+wget -q --no-check-certificate https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/Releases/ModelZoo/model-0000.xml
+wget -q --no-check-certificate https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/Releases/ModelZoo/model-0000.bin
 mv model-0000.xml mobilefacenet-arcface.xml
 mv model-0000.bin mobilefacenet-arcface.bin
 
@@ -49,6 +49,8 @@ fi
 if [ -f mobilefacenet-arcface.vnnx ]; then
     echo "Running Simulation..."
     python $VBX_SDK/example/python/face_compare.py mobilefacenet-arcface.vnnx $VBX_SDK/tutorials/test_images/MattDamon0001_arcface.jpg $VBX_SDK/tutorials/test_images/MattDamon0002_arcface.jpg 
+    echo "C Simulation Command:"
+    echo '$VBX_SDK/example/sim-c/sim-run-model mobilefacenet-arcface.vnnx $VBX_SDK/tutorials/test_images/MattDamon0001_arcface.jpg  '
 fi
 
 deactivate

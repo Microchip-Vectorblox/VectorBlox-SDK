@@ -8,7 +8,7 @@ import posenetProc as pn
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('model')
-    parser.add_argument('-i', '--image', default='../../test_images/ski.273.481.jpg')
+    parser.add_argument('image', default='../../test_images/ski.273.481.jpg')
     parser.add_argument('-o', '--out_dir', default='output')
     parser.add_argument('-n', '--out_name', default='output')
     parser.add_argument('-b', '--bgr', action='store_true')

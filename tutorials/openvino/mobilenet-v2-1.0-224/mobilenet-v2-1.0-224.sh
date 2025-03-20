@@ -55,6 +55,8 @@ fi
 if [ -f mobilenet-v2-1.0-224.vnnx ]; then
     echo "Running Simulation..."
     python $VBX_SDK/example/python/classifier.py mobilenet-v2-1.0-224.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg 
+    echo "C Simulation Command:"
+    echo '$VBX_SDK/example/sim-c/sim-run-model mobilenet-v2-1.0-224.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg CLASSIFY'
 fi
 
 deactivate

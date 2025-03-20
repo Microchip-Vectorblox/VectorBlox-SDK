@@ -25,8 +25,8 @@ fi
 
 echo "Downloading yolov5n.relu..."
 # model details @ https://github.com/ultralytics/yolov5
-[ -f coco.names ] || wget https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
-wget https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/Releases/ModelZoo/ultralytics.yolov5n.relu.onnx
+[ -f coco.names ] || wget -q https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
+wget -q https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/Releases/ModelZoo/ultralytics.yolov5n.relu.onnx
 if [ ! -f calibration_image_sample_data_20x128x128x3_float32.npy ]; then
     wget https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/EAP/calib_npy/calibration_image_sample_data_20x128x128x3_float32.npy
 fi
@@ -52,6 +52,8 @@ fi
 if [ -f yolov5n.relu.vnnx ]; then
     echo "Running Simulation..."
     python $VBX_SDK/example/python/yoloInfer.py yolov5n.relu.vnnx $VBX_SDK/tutorials/test_images/dog.jpg -j yolov5n.json -v 5 -l coco.names -t 0.25 
+    echo "C Simulation Command:"
+    echo '$VBX_SDK/example/sim-c/sim-run-model yolov5n.relu.vnnx $VBX_SDK/tutorials/test_images/dog.jpg YOLOV5'
 fi
 
 deactivate

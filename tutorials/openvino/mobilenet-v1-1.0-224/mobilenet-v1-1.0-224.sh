@@ -32,7 +32,8 @@ mo --input_model public/mobilenet-v1-1.0-224/mobilenet-v1-1.0-224.caffemodel \
 --reverse_input_channels \
 --mean_values [103.94,116.78,123.68] \
 --scale_values [58.82] \
---static_shape
+--static_shape \
+--input_shape [1,3,224,224]
 
 echo "Running OpenVINO2Tensorflow..."
 openvino2tensorflow --load_dest_file_path_for_the_calib_npy $VBX_SDK/tutorials/imagenetv2_20x224x224x3.npy \
@@ -53,6 +54,8 @@ fi
 if [ -f mobilenet-v1-1.0-224.vnnx ]; then
     echo "Running Simulation..."
     python $VBX_SDK/example/python/classifier.py mobilenet-v1-1.0-224.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg 
+    echo "C Simulation Command:"
+    echo '$VBX_SDK/example/sim-c/sim-run-model mobilenet-v1-1.0-224.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg CLASSIFY'
 fi
 
 deactivate

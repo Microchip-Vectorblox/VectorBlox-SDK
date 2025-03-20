@@ -5,6 +5,7 @@ import sys
 import os.path
 import numpy as np
 import hashlib
+import numpy as np
 
 
 Q32 = 27
@@ -72,6 +73,8 @@ Graph_struct = [('uint32_t', 'version'),
 Tensor_struct = [('int32_t', 'type'),
                ('int32_t[{}]'.format(SHAPE_DIMS), 'shape'),
                ('int32_t', 'dims'),
+               ('int32_t', 'external_producer'),
+               ('int32_t', 'external_consumer'),
                ('float', 'scale'),
                ('int32_t', 'scale_f16'),
                ('int32_t', 'zero'),
@@ -84,6 +87,7 @@ Tensor_struct = [('int32_t', 'type'),
 Node_struct = [('int32_t', 'type'),
                ('int32_t', 'input_data_type'),
                ('int32_t', 'output_data_type'),
+               ('int32_t', 'offloaded'),
                ('int32_t[2]', 'input_strides'),
                ('int32_t[2]', 'output_strides'),
                ('int32_t', 'channels'),
@@ -92,6 +96,7 @@ Node_struct = [('int32_t', 'type'),
                ('int32_t', 'maps'),
                ('int32_t', 'rows'),
                ('int32_t', 'cols'),
+               ('int32_t', 'skip'),
                ('int32_t', 'scratchpad_bytes'),
                ('int8_t[{}]'.format(DESCRIPTION_CHARS), 'input_description'),
                ('int8_t[{}]'.format(DESCRIPTION_CHARS), 'output_description'),
@@ -157,6 +162,7 @@ Node_struct = [('int32_t', 'type'),
                                           ('offset', 'input2_shift'),
                                           ('int32_t', 'input2_offset'),
                                           ('offset', 'bias_data'),
+                                          ('int32_t', 'swap'),
                                           ('int32_t', 'optimized'),
                                           ('int32_t', 'isize'),
                                           ('int32_t', 'left_shift'),
@@ -170,8 +176,7 @@ Node_struct = [('int32_t', 'type'),
                                     ('offset', 'filter_data'),
                                     ('offset', 'bias_data'),
                                     ('offset', 'quantization_records')],
-                          'ConcatOptions':[('int32_t', 'axis'),
-                                       ('int32_t', 'skip')],
+                          'ConcatOptions':[('int32_t', 'axis')],
                           "PackOptions":[('int32_t', 'axis'),
                                        ('int32_t', 'count'),
                                        ('int32_t', 'dims')],
@@ -237,12 +242,12 @@ Subnode_struct = [('int32_t', 'type'),
                                     ('offset', 'filter_data'),
                                     ('offset', 'bias_data'),
                                     ('offset', 'quantization_records')],
-                             'ConcatOptions':[('int32_t', 'axis'),
-                                       ('int32_t', 'skip')],
+                             'ConcatOptions':[('int32_t', 'axis')],
                              "eltwise8": [('offset', 'input2_multiplier'),
                                           ('offset', 'input2_shift'),
                                           ('int32_t', 'input2_offset'),
                                           ('offset', 'bias_data'),
+                                          ('int32_t', 'swap'),
                                           ('int32_t', 'optimized'),
                                           ('int32_t', 'isize'),
                                           ('int32_t', 'left_shift'),
@@ -263,8 +268,12 @@ Subnode_struct = [('int32_t', 'type'),
                                           ('int32_t', 'sub'),
                                           ('int32_t', 'swap_inputs')],
                              "reduce8":[('int32_t', 'axis'),
-                                        ('int32_t', 'arg_max')],
-                             "PadOptions": [('int32_t', 'value')],
+                                        ('int32_t', 'arg_max'),
+                                        ('offset', 'axis_list')],
+                             "PadOptions": [('int32_t', 'value'),
+                                            ('int32_t', 'transpose_dilate_w'),
+                                            ('int32_t', 'transpose_dilate_h'),
+                                            ],
                              "clip": [('float', 'min'),
                                       ('float', 'max')],
                              "depthwise": [('int32_t', 'unsigned_input'),
@@ -313,7 +322,8 @@ Subnode_struct = [('int32_t', 'type'),
                                        ('int32_t', 'outer_size'),
                                        ('int32_t', 'axis_size'),
                                        ('int32_t', 'inner_size'),
-                                       ('int32_t', 'coord_size')],
+                                       ('int32_t', 'coord_size'),
+                                       ('int32_t', 'swap_input_order')],
                              "SpaceToBatchNDOptions":[('offset', 'block_shape_data'),
                                        ('offset', 'paddings_data')],
                              "BatchToSpaceNDOptions":[('offset', 'block_shape_data'),
@@ -324,12 +334,21 @@ Subnode_struct = [('int32_t', 'type'),
                                        ('int32_t', 'count'),
                                        ('int32_t', 'dims')],
                           'ResizeOptions':[('float[2]', 'scale'),
+                                    ('int32_t', 'mode'),
                                     ('int32_t', 'mode')],
                           'TransposeOptions':[('int32_t[3]', 'permutation'),
                                        ('int32_t','out_maps_at_once'),
                                        ('int32_t','out_rows_at_once')],
                           'SplitOptions':[('int32_t', 'axis'),
-                                     ('offset', 'splits')]
+                                     ('offset', 'splits')],
+                            'embedding':[('int32_t[2]', 'colar_map_dims'),
+                                          ('offset', 'colar_map_data')],
+                            'MinMaxOptions':[('int32_t', 'max'),
+                                             ('int32_t[4]', 'filter_shape_dims'),
+                                            ('offset', 'filter_multiplier'),
+                                            ('offset', 'filter_shift'),
+                                            ('int32_t', 'filter_offset'),
+                                            ('offset', 'filter_data')]
                                        }
                    )]
 
@@ -475,6 +494,8 @@ class Tensor(Struct):
         self.scale_f16 = -1
         self.buffer = [0,-1]
         self.direct = -1
+        self.external_producer = 0
+        self.external_consumer = 0
 
 
 class Node(Struct):
@@ -491,6 +512,7 @@ class Node(Struct):
         self.maps = 0
         self.rows = 0
         self.cols = 0
+        self.skip = 0
         self.num_inputs = 1
         self.num_outputs = 1
         self.num_tensors = -1
@@ -506,6 +528,8 @@ class Node(Struct):
         self.output_offset = -1
         self.output_multiplier = -1
         self.output_shift = -1
+
+        self.offloaded = 0
 
 
 class Subnode(Struct):
@@ -572,9 +596,22 @@ class calc_type(enum.IntEnum):
             return calc_type.INT8
         if e == "UINT8":
             return calc_type.UINT8
+        if e == "INT16":
+            return calc_type.INT16
+        if e == "INT32":
+            return calc_type.INT32
         if e == "BOOL":
             return calc_type.UINT8
         return calc_type.UNKNOWN
+
+
+def np_type(t):
+       return {
+            calc_type.UINT8 : np.uint8,
+            calc_type.INT8  : np.int8,
+            calc_type.INT16 : np.int16,
+            calc_type.INT32 : np.int32,
+        } [t]
 
 
 def sizeof_calc_type(t):
@@ -844,7 +881,10 @@ def enum_to_union_name(e):
                    (BuiltinOperator.UNPACK, 'PackOptions'),
                    (BuiltinOperator.TILE, 'TileOptions'),
                    (BuiltinOperator.SPLIT, "SplitOptions"),
-                   (BuiltinOperator.SPLIT_V, "SplitOptions")
+                   (BuiltinOperator.SPLIT_V, "SplitOptions"),
+                   (BuiltinOperator.EMBEDDING_LOOKUP, "embedding"),
+                   (BuiltinOperator.MAXIMUM, "MinMaxOptions"),
+                   (BuiltinOperator.MINIMUM, "MinMaxOptions")
                    ]
     for t, n in union_names:
         if type(t) == type(e) and t == e:

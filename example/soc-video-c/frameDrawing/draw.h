@@ -20,6 +20,8 @@ void draw_clear_frame( uint32_t* f_buf,int f_width,int f_height);
 void draw_rectangle(int x,int y,int w,int h,uint32_t colour,
                     uint32_t* f_buf,int f_width,int f_height);
 
+void draw_circle(int r, int x, int y, uint32_t colour, 
+			  uint32_t* f_buf,int f_width,int f_height, uint32_t* f_buf2);
 
 void draw_box(int x,int y,int w,int h,int thickness,uint32_t colour,
               uint32_t* f_buf,int f_width,int f_height);
@@ -35,6 +37,11 @@ void draw_label(const char* label,int x,int y,
                 uint32_t* f_buf,int f_width,int f_height,label_colour_e colour);
 
 uint32_t get_colour_modulo(int i);
+
+void draw_line(int start_col, int start_row,
+               int end_col, int end_row, uint32_t colour,
+               uint32_t* f_buf,int f_width,int f_height, int thickness, int alpha);
+
 #ifdef __cplusplus
 }
 #endif

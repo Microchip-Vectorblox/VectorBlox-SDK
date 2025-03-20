@@ -22,6 +22,7 @@ extern "C" int resize_image(uint8_t *image_in, int in_w, int in_h,
 #endif
 #define TEST_OUT 0
 #define INT8FLAG 1
+#define WRITE_OUT 0
 
 static inline void* virt_to_phys(vbx_cnn_t* vbx_cnn,void* virt){
 	return (char*)(virt) + vbx_cnn->dma_phys_trans_offset;
@@ -57,83 +58,6 @@ int32_t pdma_ch_transfer(uint64_t output_data_phys, void* source_buffer,int offs
 	return pdma_ch_cpy(output_data_phys + offset, srcbuf, size, channel);
 
 }
-
-void print_to_json(model_t* model,vbx_cnn_io_ptr_t *io_buffers,int is_flatten){
-	
-	FILE *fp;
-	fp = fopen ("hw_vnnx_tests.txt", "w+");
-	
-	//Take in model and iobuffers;
-	model_get_num_outputs(model);
-	int dim_check = 1;
-	fprintf(fp,"\nTotal Input Buffers: %d",(int)model_get_num_inputs(model));
-	fprintf(fp,"\nTotal Output Buffers: %d\n",(int)model_get_num_outputs(model));
-	for(int i =0; i < (int)model_get_num_inputs(model);i++){
-			dim_check = 1;
-			fprintf(fp,"Input Number: %d\n", i);
-			fprintf(fp,"Flattened Length: %d \n", (int)model_get_input_length(model, i));
-			
-			int *in_dims = model_get_input_shape(model,i);
-	// input values			
-#if TFLITE			
-			int8_t* input_buffer=(int8_t*)io_buffers[i];
-#else			
-			fix16_t* input_buffer=(fix16_t*)io_buffers[i];
-#endif
-			fprintf(fp,"Input Dims: ");
-			for(int j=0;dim_check < (int)model_get_input_length(model, i);j++){
-				dim_check *= in_dims[j];
-				fprintf(fp,"%d ",in_dims[j]);
-			}
-			fprintf(fp,"\n");
-			fprintf(fp,"value: [ ");
-			for (int j=0; j< (int)model_get_input_length(model, i); j++){
-				if(j == (int)model_get_input_length(model, i)-1){
-					fprintf(fp,"%d]\n", input_buffer[j]);
-				}
-				else{
-					fprintf(fp,"%d ,",input_buffer[j]);
-				}
-			}
-	}
-	for (int o =0; o < (int)model_get_num_outputs(model); o++){
-		
-			fprintf(fp,"Output Number: %d\n", o);
-			fprintf(fp,"Flattened Length: %d \n", (int)model_get_output_length(model, o));
-			int *out_dims = model_get_output_shape(model,o);
-	
-#if TFLITE
-			int8_t *output_buffer=(int8_t*)(uintptr_t)io_buffers[o+model_get_num_inputs(model)];
-#else
-			
-			fix16_t* output_buffer=(fix16_t*)(uintptr_t)io_buffers[o+model_get_num_inputs(model)];
-#endif
-			
-
-	// output values			
-			dim_check = 1;
-			
-			fprintf(fp,"Output Dims: ");
-			for(int i=0;dim_check < (int)model_get_output_length(model, o);i++){
-				dim_check *= out_dims[i];
-				fprintf(fp,"%d ",out_dims[i]);
-			}
-			fprintf(fp,"\n");
-			fprintf(fp,"value: [ ");
-			for (int i=0; i< (int)model_get_output_length(model, o); i++){
-				if(i == (int)model_get_output_length(model, o)-1){
-					fprintf(fp,"%d]\n", output_buffer[i]);
-				}
-				else{
-					fprintf(fp,"%d ,",output_buffer[i]);
-				}
-			}
-			dim_check = 1;		
-	}
-	fclose(fp);
-}
-
-
 
 
 void* read_image(const char* filename, const int channels, const int height, const int width, int data_type, int use_bgr){
@@ -213,7 +137,7 @@ int main(int argc, char **argv) {
 		fprintf(stderr,
 		"Usage: %s MODEL_FILE IMAGE.jpg [POST_PROCESS]\n"
 		"   if using POST_PROCESS to select post-processing, must be one of:\n"
-		"   CLASSIFY, YOLOV2, YOLOV3, YOLOV4, YOLOV5, ULTRALYTICS, ULTRALYTICS_CUT\n"
+		"   CLASSIFY, YOLOV2, YOLOV3, YOLOV4, YOLOV5, ULTRALYTICS, ULTRALYTICS_FULL\n"
 		"   BLAZEFACE, SCRFD, RETINAFACE, SSDV2, PLATE, LPD, LPR\n",
 				argv[0]);
 		return 1;
@@ -329,7 +253,7 @@ int main(int argc, char **argv) {
 		int8_to_fix16(fix16_buffers[model_get_num_inputs(model)+o], (int8_t*)io_buffers[model_get_num_inputs(model)+o], size, scale, zero_point);
 	}	
 	// users can modify this post-processing function in post_process.c
-	vbx_cnn_io_ptr_t pdma_buffer[model_get_num_inputs(model)+model_get_num_outputs(model)];
+	vbx_cnn_io_ptr_t pdma_buffer[model_get_num_outputs(model)];
 	for(int i =0; i<(int)model_get_num_inputs(model);i++){
 		pdma_buffer[i]=0;
 	}
@@ -339,14 +263,14 @@ int main(int argc, char **argv) {
 	for(int o =0; o<(int)model_get_num_outputs(model);o++){
 		int output_length = model_get_output_length(model, o);
 		//pdma_transfer(pdma_out,(void*)io_buffers[model_get_num_inputs(model)+o],output_offset,model_get_output_length(model, o),vbx_cnn);
-		pdma_ch_transfer(pdma_out,(void*)io_buffers[model_get_num_inputs(model)+o],output_offset,model_get_output_length(model, o),vbx_cnn,pdma_channel);
-		pdma_buffer[model_get_num_inputs(model)+o] = (vbx_cnn_io_ptr_t)(pdma_mmap_t + output_offset);
+		pdma_ch_transfer(pdma_out,(void*)io_buffers[1+o],output_offset,model_get_output_length(model, o),vbx_cnn,pdma_channel);
+		pdma_buffer[o] = (vbx_cnn_io_ptr_t)(pdma_mmap_t + output_offset);
 		output_offset+= output_length;
 	}
 
 #if INT8FLAG	
 //	if (argc > 4) pprint_post_process(argv[2], argv[4], model, io_buffers,1);
-	if (argc > 3) pprint_post_process(argv[1], argv[3], model, (vbx_cnn_io_ptr_t*)pdma_buffer,1);
+	if (argc > 3) pprint_post_process(argv[1], argv[3], model, (vbx_cnn_io_ptr_t*)pdma_buffer,1,0);
 #else	
 	if (argc > 3) pprint_post_process(argv[1], argv[3], model, (vbx_cnn_io_ptr_t*)fix16_buffers,0);
 #endif
@@ -356,8 +280,8 @@ int main(int argc, char **argv) {
 		checksum ^= fletcher32((uint16_t*)io_buffers[model_get_num_inputs(model)+o], model_get_output_length(model, o)*sizeof(int8_t)/sizeof(uint16_t));
 	}
 	printf("CHECKSUM = %08x\n",checksum);
-	if(argc<=3 && !strcmp(argv[1],"test.vnnx")){
-		print_to_json(model,io_buffers,1);
+	if(WRITE_OUT || (argc<=3 && !strcmp(argv[1],"test.vnnx"))){
+		print_json(model,io_buffers,INT8FLAG);
 	}
 	if (read_buffer) free(read_buffer);
 

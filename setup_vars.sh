@@ -14,6 +14,7 @@ function install_venv() {
     # - tensorflow/yolo-v3-tiny-tf, yolo-v3-tf, yolo-v4-tf
     # when using keras-YOLOv3-model-set
     python -m pip install tensorflow==2.15.1
+    python -m pip install numpy==1.23.5
 
     python -m pip install tensorflow_datasets==4.9.3
     python -m pip install nvidia-pyindex
@@ -25,7 +26,7 @@ function install_venv() {
     python -m pip install sng4onnx==1.0.1
     python -m pip install onnxruntime==1.18.1
     python -m pip install ml_dtypes==0.3.1
-    python -m pip install onnx2tf==1.26.0
+    python -m pip install onnx2tf==1.22.3
     python -m pip install opencv-python==4.7.0.72
 
     # openvino 2024 fails for the openvino tutorials when using openvino2tensorflow.
@@ -35,21 +36,25 @@ function install_venv() {
     python -m pip install openvino-telemetry==2023.2.1
 
     python -m pip install openvino2tensorflow==1.34.0
-    python -m pip install torch==1.13.1
-    python -m pip install torchvision==0.14.1
+    python -m pip install torch==2.3.0
+    python -m pip install torchvision==0.18.0
     python -m pip install matplotlib
     python -m pip install silence_tensorflow
     python -m pip install natsort
-    python -m pip install ultralytics==8.2.60
+    python -m pip install ultralytics==8.3.72
     python -m pip install tf_keras==2.15.1
     python -m pip install tflite_support==0.4.4
     python -m pip install onnxslim==0.1.32
+    python -m pip install XlsxWriter
+    python -m pip install prtpy==0.8.1
     python -m pip install -e $SCRIPTDIR/python/vbx
+	
+	python -m pip install posix-ipc
     deactivate
 }
 
 function has_python() {
-    for v in 3.10 3.9
+    for v in 3.11 3.10
     do
         if [ -n "$(which python$v)" ]
         then
@@ -57,7 +62,7 @@ function has_python() {
             return 0
         fi
     done
-	echo "Error Unable to find compatible version of python. Allowed Versions: Python3.9 or Python3.10" >&2
+	echo "Error Unable to find compatible version of python. Allowed Versions: Python3.10 or Python3.11" >&2
 	return 1
 }
 
@@ -85,6 +90,9 @@ if has_python && has_installed; then
 	echo ""
 	echo "export VBX_SDK="$VBX_SDK
 	echo ""
+	export NX_SDK=$SCRIPTDIR/../../../../../tsnp_software/
+	export TF_CPP_MIN_LOG_LEVEL=3
+
 
 	echo "VBX Python Environment ready. Activating..."
 	source $VBX_SDK/vbx_env/bin/activate

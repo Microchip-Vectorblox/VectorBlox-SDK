@@ -25,7 +25,7 @@ fi
 
 echo "Downloading yolo-v4-tiny-tf..."
 # model details @ https://github.com/openvinotoolkit/open_model_zoo/tree/2021.4.2/models/public/yolo-v4-tiny-tf/
-[ -f coco.names ] || wget https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
+[ -f coco.names ] || wget -q https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
 omz_downloader --name yolo-v4-tiny-tf
 DOWNLOAD_DIR=public/yolo-v4-tiny-tf
 python $DOWNLOAD_DIR/keras-YOLOv3-model-set/tools/model_converter/convert.py $DOWNLOAD_DIR/keras-YOLOv3-model-set/cfg/yolov4-tiny.cfg $DOWNLOAD_DIR/yolov4-tiny.weights yolo-v4-tiny.h5
@@ -45,7 +45,9 @@ fi
 
 if [ -f yolo-v4-tiny-tf.vnnx ]; then
     echo "Running Simulation..."
-    python $VBX_SDK/example/python/yoloInfer.py yolo-v4-tiny-tf.vnnx $VBX_SDK/tutorials/test_images/dog.jpg -j yolo-v4-tiny-tf.json -l coco.names -i 0.3 
+    python $VBX_SDK/example/python/yoloInfer.py yolo-v4-tiny-tf.vnnx $VBX_SDK/tutorials/test_images/dog.jpg -j yolo-v4-tiny-tf.json -v 3 -l coco.names -i 0.3 
+    echo "C Simulation Command:"
+    echo '$VBX_SDK/example/sim-c/sim-run-model yolo-v4-tiny-tf.vnnx $VBX_SDK/tutorials/test_images/dog.jpg YOLOV4'
 fi
 
 deactivate

@@ -1,8 +1,8 @@
-# VectorBlox SDK 2.0
+# VectorBlox SDK
 
-VectorBlox 2.0 is an SDK for compiling and running TFLITE INT8 networks on the VectorBlox accelerator.
+VectorBlox is an SDK for compiling and running TFLITE INT8 networks on the VectorBlox accelerator.
 
-The list of the TFLITE INT8 supported operators can be found [here](./docs/OPS.md). We are currently support 68 TFLITE OPS.
+The list of the TFLITE INT8 supported operators can be found [here](./docs/OPS.md) (currently 64 supported).
 
 Networks must be converted via the included scripts.
 
@@ -11,35 +11,17 @@ The networks can then be run via the VectorBlox simulator, or on a physical Vect
 ## Prerequisites
 
 
- To use the VectorBlox SDK, you will need run the SDK in an Ubuntu 20.04 environment with Python 3.8+.
+ To use the VectorBlox SDK, you will need run the SDK in an Ubuntu 20.04, 22.04, or 24.04 environment with Python 3.10+.
 > To check which version of python is on the native Ubuntu OS, type either `python -V` or `python3 -V`
  If using WSL, ensure you are running from your home directory or have permissions set.
 
-## Upgrading Python (if needed)
-
-The base Python version in Ubuntu 20.04 is Python 3.8.
-
-If you need to upgrade your Python version, you can upgrade to Python 3.10 with the following commands:
-```
-sudo add-apt-repository ppa:deadsnakes/ppa
-sudo apt-get update
-sudo apt-get install python3.10 python3.10-venv
-```
 ## Downloading the SDK
 
 There are two options for downloading the sdk:
 
- 1) Download an archive.  
-  Download the zip or tar.gz from https://github.com/Microchip-Vectorblox/VectorBlox-SDK/releases
+ 1) Download an archive (zip or tar.gz) from https://github.com/Microchip-Vectorblox/VectorBlox-SDK/releases
      
- 2) Git clone  
-    In order to clone it is necessary to have [git-lfs](https://git-lfs.github.com/) installed.
-    To install git-lfs run the following commands on ubuntu:
-    ```
-    curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | sudo bash
-    apt update && apt install git-lfs
-    git lfs install
-    ```
+ 2) Clone this repository
      
 ### Install required dependencies (requires sudo permission)
 

@@ -53,6 +53,8 @@ fi
 if [ -f squeezenet1.0.vnnx ]; then
     echo "Running Simulation..."
     python $VBX_SDK/example/python/classifier.py squeezenet1.0.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg 
+    echo "C Simulation Command:"
+    echo '$VBX_SDK/example/sim-c/sim-run-model squeezenet1.0.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg CLASSIFY'
 fi
 
 deactivate

@@ -22,7 +22,8 @@ def transpose_io_to_vnnx(x):
     return x
 
 
-def tflite_to_vnnx(tflite, size_config, output_filename=None, start_layer=0, end_layer=None, inputs=None, mean=0., scale=1., rgb=False, debug=False):
+def tflite_to_vnnx(tflite, size_config, output_filename=None, start_layer=0, end_layer=None, inputs=None, mean=0., scale=1., rgb=False, debug=False,\
+    vbx_version=2):
     include_io_data = 1
     if inputs is None:
         include_io_data = 0
@@ -39,7 +40,9 @@ def tflite_to_vnnx(tflite, size_config, output_filename=None, start_layer=0, end
         tmp_dir_obj = tempfile.TemporaryDirectory()
         tmp_dir = tmp_dir_obj.name
 
-    json_subgraphs = generate_split_graphs(tflite, tmp_dir, split_every_op=False)
+    output_name = os.path.splitext(output_filename)[0]
+    json_subgraphs, engine_graphs_nx = generate_split_graphs(tflite, tmp_dir, split_every_op=False, vbx_version=vbx_version,\
+        output_name=output_name)
     if end_layer is None:
         end_layer = len(json_subgraphs)-1
 
@@ -55,12 +58,16 @@ def tflite_to_vnnx(tflite, size_config, output_filename=None, start_layer=0, end
     # get io and transpose for VNNX (NHWC -> CHW)
     if len(json_graph) == len(json_subgraphs): # no specifications for start layer and end layer, so skip the io of individual layers
         inputs, outputs = get_tflite_io(tflite, inputs, None, mean=mean, rgb=rgb,scale=scale)
-        for i in inputs:
-            inputs[i] = transpose_io_to_vnnx(inputs[i])
-        for o in outputs:
-            outputs[o] = transpose_io_to_vnnx(outputs[o])
+        for i,input in enumerate(inputs):
+            if debug:
+                np.save(os.path.join(tmp_dir, 'tflite.input.{}.npy'.format(i)), inputs[input])
+            inputs[input] = transpose_io_to_vnnx(inputs[input])
+        for o,output in enumerate(outputs):
+            if debug:
+                np.save(os.path.join(tmp_dir, 'tflite.output.{}.npy'.format(o)), outputs[output])
+            outputs[output] = transpose_io_to_vnnx(outputs[output])
 
-        vnnx_graph_binary = generate_vnnx_from_json_subgraphs(json_graph, size_config, inputs, outputs, include_io_data, tmp_dir)
+        vnnx_graph_binary = generate_vnnx_from_json_subgraphs(json_graph, size_config, inputs, outputs, include_io_data, tmp_dir, engine_graphs_nx)
     else:
         graph_inputs, graph_outputs, _ = get_graph_activations(json_graph)
 
@@ -91,7 +98,8 @@ def tflite_to_vnnx(tflite, size_config, output_filename=None, start_layer=0, end
             curr_inputs[i] = transpose_io_to_vnnx(curr_inputs[i])
         for o in outputs:
             outputs[o] = transpose_io_to_vnnx(outputs[o])
-        vnnx_graph_binary = generate_vnnx_from_json_subgraphs(json_graph, size_config, curr_inputs, outputs, include_io_data, tmp_dir)
+        vnnx_graph_binary = generate_vnnx_from_json_subgraphs(json_graph, size_config, curr_inputs, outputs, include_io_data, tmp_dir,\
+            engine_graphs_nx)
 
     if not debug:
         tmp_dir_obj.cleanup()
@@ -116,6 +124,7 @@ def main():
     parser.add_argument('-b', '--bgr', action='store_true')
     #undocumented arguments
     parser.add_argument('-d', '--debug', help=argparse.SUPPRESS,action='store_true')
+    parser.add_argument('-v', '--vbx_version', choices=[2, 3], type=int, default=2, help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     tflite_to_vnnx(args.tflite,
@@ -127,7 +136,8 @@ def main():
                    mean=args.mean,
                    scale=args.scale,
                    rgb=(not args.bgr),
-                   debug=args.debug)
+                   debug=args.debug,
+                   vbx_version=args.vbx_version)
 
 if __name__ == "__main__":
     main()

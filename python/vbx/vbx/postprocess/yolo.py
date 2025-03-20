@@ -22,18 +22,22 @@ class Parser:
 
 
     def logistic(self, x):
-      return 1 / (1 + np.exp(-x))
+        if x > 0:
+            return 1 / (1 + np.exp(-x))
+        else:
+            z = np.exp(x)
+            return z / (1 + z)
 
 
     def softmax(self, x):
         e_x = np.exp(x - np.max(x))
         return e_x / e_x.sum(axis=0)
 
-    def entry_index(self, side, coord, classes, location, entry):
-        side_power_2 = side ** 2
-        n = location // side_power_2
-        loc = location % side_power_2
-        return int(side_power_2 * (n * (coord + classes + 1) + entry) + loc)
+    def entry_index(self, height, width, coord, classes, location, entry):
+        region_size = height * width
+        n = location // region_size
+        loc = location % region_size
+        return int(region_size * (n * (coord + classes + 1) + entry) + loc)
 
     def intersection_over_union(self, box_1, box_2):
         width_of_overlap_area = min(box_1['xmax'], box_2['xmax']) - max(box_1['xmin'], box_2['xmin'])
@@ -60,81 +64,77 @@ class Parser:
                 if self.intersection_over_union(self.objects[i], self.objects[j]) > self.IOU_THRESHOLD:
                     self.objects[j]['confidence'] = 0
 
-    def parse_yolo_region(self, blob: 'np.ndarray', original_shape: list, network_shape: list, params: dict, version=2, apply_activation=False) -> list:
+    def parse_yolo_region(self, blob: 'np.ndarray', original_shape: list, network_shape: list, anchors: list, version='2', apply_activation=False) -> list:
 
-        num = params['num']
-        coords = params['coords']
-        classes = params['classes']
-        # -----------------
-
-        _, _, out_blob_h, out_blob_w = blob.shape
-        assert out_blob_w == out_blob_h, "Invalid size of output blob. It sould be in NCHW layout and height should " \
-                                         "be equal to width. Current height = {}, current width = {}" \
-                                         "".format(out_blob_h, out_blob_w)
-
+        coords = 4
+        num = len(anchors) // 2
+        classes = (blob.shape[1] // num) - (1+coords)
+        height = blob.shape[2]
+        width = blob.shape[3]
+        
         # ------ Extracting layer parameters --
         orig_im_h, orig_im_w = original_shape
         net_h, net_w = original_shape
         predictions = blob.flatten()
-        side_square = params['side'] * params['side']
+        region_size = height * width
 
         # ------ Parsing YOLO Region output --
-        for i in range(side_square):
-            row = i // params['side']
-            col = i % params['side']
+        for i in range(region_size):
+            row = i // width
+            col = i % width
             for n in range(num):
                 # -----entry index calcs------
-                obj_index = self.entry_index(params['side'], coords, classes, n * side_square + i, coords)
+                obj_index = self.entry_index(height, width, coords, classes, n * region_size + i, coords)
                 if apply_activation:
                     predictions[obj_index] = self.logistic(predictions[obj_index])
                 scale = predictions[obj_index]
                 if scale < self.PROB_THRESHOLD:
                     continue
-                box_index = self.entry_index(params['side'], coords, classes, n * side_square + i, 0)
+                box_index = self.entry_index(height, width, coords, classes, n * region_size + i, 0)
 
                 # Network produces location predictions in absolute coordinates of feature maps.
                 # Scale it to relative coordinates.
                 if apply_activation:
-                    predictions[box_index + 0 * side_square] = self.logistic(predictions[box_index + 0 * side_square])
-                    predictions[box_index + 1 * side_square] = self.logistic(predictions[box_index + 1 * side_square])
-                if version > 3:
+                    predictions[box_index + 0 * region_size] = self.logistic(predictions[box_index + 0 * region_size])
+                    predictions[box_index + 1 * region_size] = self.logistic(predictions[box_index + 1 * region_size])
+                if version in ['ultra5', '5']:
                     # ultralytics yolov5 (and master yolov3)
-                    x = (col + predictions[box_index + 0 * side_square] * 2 - 0.5) / params['side'] * net_w
-                    y = (row + predictions[box_index + 1 * side_square] * 2 - 0.5) / params['side'] * net_h
-                    h_exp = (self.logistic(predictions[box_index + 3 * side_square]) * 2) ** 2
-                    w_exp = (self.logistic(predictions[box_index + 2 * side_square]) * 2) ** 2
+                    x = (col + predictions[box_index + 0 * region_size] * 2 - 0.5) / width * net_w
+                    y = (row + predictions[box_index + 1 * region_size] * 2 - 0.5) / height * net_h
+                    h_exp = (self.logistic(predictions[box_index + 3 * region_size]) * 2) ** 2
+                    w_exp = (self.logistic(predictions[box_index + 2 * region_size]) * 2) ** 2
                 else:
-                    x = (col + predictions[box_index + 0 * side_square]) / params['side'] * net_w
-                    y = (row + predictions[box_index + 1 * side_square]) / params['side'] * net_h
+                    x = (col + predictions[box_index + 0 * region_size]) / width * net_w
+                    y = (row + predictions[box_index + 1 * region_size]) / height * net_h
                     # Value for exp is very big number in some cases so following construction is using here
                     try:
-                        h_exp = exp(predictions[box_index + 3 * side_square])
-                        w_exp = exp(predictions[box_index + 2 * side_square])
+                        h_exp = exp(predictions[box_index + 3 * region_size])
+                        w_exp = exp(predictions[box_index + 2 * region_size])
                     except OverflowError:
                         continue
 
-                w = w_exp * params['anchors'][2 * n]
-                h = h_exp * params['anchors'][2 * n + 1]
+                w = w_exp * anchors[2 * n]
+                h = h_exp * anchors[2 * n + 1]
 
                 if apply_activation:
                     activated_classes = []
                     for j in range(classes):
-                        class_index = self.entry_index(params['side'], coords, classes, n * side_square + i,
+                        class_index = self.entry_index(height, width, coords, classes, n * region_size + i,
                                                   coords + 1 + j)
                         activated_classes.append(predictions[class_index])
 
-                    if version < 3:
+                    if version == '2':
                         activated_classes = self.softmax(activated_classes)
                     else:
                         activated_classes = [self.logistic(_) for _ in activated_classes]
 
                     for j in range(classes):
-                        class_index = self.entry_index(params['side'], coords, classes, n * side_square + i,
+                        class_index = self.entry_index(height, width, coords, classes, n * region_size + i,
                                                   coords + 1 + j)
                         predictions[class_index] = activated_classes[j]
 
                 for j in range(classes):
-                    class_index = self.entry_index(params['side'], coords, classes, n * side_square + i,
+                    class_index = self.entry_index(height, width, coords, classes, n * region_size + i,
                                               coords + 1 + j)
                     confidence = scale * predictions[class_index]
                     if confidence < self.PROB_THRESHOLD:
@@ -150,7 +150,7 @@ class Parser:
                                                         w_scale=(orig_im_w/net_w)))
 
 
-def nms_post_process(output, confidence_thres=0.5, iou_thres=0.5, input_width=416, input_height=416, do_nms=True, num_classes=80):
+def nms_post_process(output, confidence_thres=0.5, iou_thres=0.5, input_width=416, input_height=416, do_nms=True, num_classes=80, prescaled=False):
     # Transpose and squeeze the output to match the expected shape
     outputs = np.squeeze(output)
     # if (outputs.shape[0] < outputs.shape[1]): # should be #box, box (8400,84)
@@ -166,8 +166,9 @@ def nms_post_process(output, confidence_thres=0.5, iou_thres=0.5, input_width=41
     class_ids = []
 
     # Calculate the scaling factors for the bounding box coordinates
-    x_factor = input_width
-    y_factor = input_height
+    x_factor, y_factor = input_width, input_height
+    if prescaled:
+        x_factor, y_factor = 1, 1
 
     # Iterate over each row in the outputs array
     for i in range(rows):
@@ -222,7 +223,30 @@ def nms_post_process(output, confidence_thres=0.5, iou_thres=0.5, input_width=41
     return results
 
 
-def ultralytics_process_box(arr, x, y):
+def ultralytics_process_points(arr, x, y, image_height=640, image_width=640):
+    logistic = lambda x: 1 / (1 + np.exp(-x))
+
+    _,bh,bw = arr.shape
+
+    t = arr[:,x,y].reshape(17,3)
+
+    t[:,2] = logistic(t[:,2])
+
+    # x2
+    t[:,:2] *= 2
+
+    # plus offset
+    t[:,0] += y
+    t[:,1] += x
+
+    # scale 
+    t[:,0] *= image_width//bw
+    t[:,1] *= image_height//bh
+
+    return t.reshape((51,))
+
+
+def ultralytics_process_box(arr, x, y, ang=None):
     _,bw,bh = arr.shape
 
     t = arr[:,x,y].reshape(4,16)
@@ -234,32 +258,40 @@ def ultralytics_process_box(arr, x, y):
     v[2] = np.sum(softmax(t[2]) * np.asarray(range(16)))
     v[3] = np.sum(softmax(t[3]) * np.asarray(range(16)))
 
-    v /= [bh,bw,bh,bw] #v *= 1 / np.sqrt(bh*bw)
+    v /= [bh,bw,bh,bw]
 
     cx = 1/bh/2 + y/bh
     cy = 1/bw/2 + x/bw
 
-    r = (cx - v[0])
-    lo = (cy - v[1])
-    l = (cx + v[2])
-    u = (cy + v[3])
+    x = (v[2] - v[0]) / 2
+    y = (v[3] - v[1]) / 2
+    if not ang is None:
+        x0,y0 = x,y
+        x = np.cos(ang)*x0 - np.sin(ang)*y0
+        y = np.sin(ang)*x0 + np.cos(ang)*y0
+    x += cx
+    y += cy
 
-    x = (l + r) / 2
-    y = (lo + u) / 2
-
-    w = (l - r)
-    h = (u - lo)
+    w = v[2] + v[0]
+    h = v[3] + v[1]
 
     return [x,y,w,h]
 
 
-def ultralytics_post_process(conv_outputs, threshold=0.5, num_classes=80):
+def ultralytics_post_process(conv_outputs, input_height, input_width, threshold=0.5, num_classes=80, is_pose=False, is_obb=False, is_seg=False):
 
     conv_outputs = [o.squeeze() for o in conv_outputs]
     # order outputs in classes and boxes of descending size
     classes = []
     boxes = []
+    points = []
+    angles = []
+    seg = []
+
     for o,output in enumerate(conv_outputs):
+        if len(output.shape) == 2:
+            output = np.expand_dims(output, axis=0)
+
         if output.shape[0] == num_classes:
             if len(classes) == 0 or output.shape[1]*output.shape[2] < classes[-1].shape[1]*classes[-1].shape[2]:
                 classes += [output]
@@ -270,11 +302,38 @@ def ultralytics_post_process(conv_outputs, threshold=0.5, num_classes=80):
                 boxes += [output]
             else:
                 boxes = [output] + boxes
-
+        elif is_pose and output.shape[0] == 3*17:
+            if len(points) == 0 or output.shape[1]*output.shape[2] < points[-1].shape[1]*points[-1].shape[2]:
+                points += [output]
+            else:
+                points = [output] + points
+        elif is_obb and output.shape[0] == 1:
+            if len(angles) == 0 or output.shape[1]*output.shape[2] < angles[-1].shape[1]*angles[-1].shape[2]:
+                angles += [output]
+            else:
+                angles = [output] + angles
+        elif is_seg and output.shape[0] == 32:
+            if len(seg) == 0 or output.shape[1]*output.shape[2] < seg[-1].shape[1]*seg[-1].shape[2]:
+                seg += [output]
+            else:
+                seg = [output] + seg
+    
+    size_sort = lambda x: x.shape[-1]*x.shape[-2]
+    classes.sort(reverse=True, key=size_sort)
+    boxes.sort(reverse=True, key=size_sort)
+    if is_pose:
+        points.sort(reverse=True, key=size_sort)
+    if is_obb:
+        angles.sort(reverse=True, key=size_sort)
+    if is_seg:
+        seg.sort(reverse=True, key=size_sort)
 
     processed_boxes = []
     processed_classes = []
-
+    processed_points = []
+    processed_angles = []
+    processed_seg = []
+    processed= []
     valid_count = 0
     valid_coords = []
     logistic = lambda x: 1 / (1 + np.exp(-x))
@@ -289,26 +348,42 @@ def ultralytics_post_process(conv_outputs, threshold=0.5, num_classes=80):
                         valid_count += 1
                         break
                 if valid:
-                    processed_boxes.append(ultralytics_process_box(boxes[c], j, i))
                     processed_classes.append(classes[c][:,j,i].flatten())
+                    if is_obb:
+                        angle = (logistic(angles[c][0,j,i]) - 0.25) * 3.141592741
+                        processed_boxes.append(ultralytics_process_box(boxes[c], j, i, angle))
+                        processed_angles.append([angle])
+                    else:
+                        processed_boxes.append(ultralytics_process_box(boxes[c], j, i))
+                    if is_pose:
+                        processed_points.append(ultralytics_process_points(points[c], j, i, input_height, input_width))
+                    if is_seg:
+                        processed_seg.append(seg[c][:,j, i])
                 else:
                     classes[c][:,j,i] = np.zeros(num_classes)
-    # print('valid', valid_count)
-
-    processed_classes = np.asarray(processed_classes)
-    processed_boxes = np.asarray(processed_boxes)
-    processed = np.concatenate((processed_boxes, processed_classes), axis=1)
-
+    if valid_count>0:
+        processed_classes = np.asarray(processed_classes)
+        processed_boxes = np.asarray(processed_boxes)
+        processed = np.concatenate((processed_boxes, processed_classes), axis=1)
+        if is_obb:
+            processed_angles = np.asarray(processed_angles)
+            processed = np.concatenate((processed_boxes, processed_classes, processed_angles), axis=1)
+        if is_pose:
+            processed_points = np.asarray(processed_points)
+            processed = np.concatenate((processed_boxes, processed_classes, processed_points), axis=1)
+        if is_seg:
+            processed_seg = np.asarray(processed_seg)
+            processed = np.concatenate((processed_boxes, processed_classes, processed_seg), axis=1)
+    
     return processed
 
-def yolo_post_process(blobs, params, height, width, threshold, iou, version=2, do_nms=False, do_activations=False):
+
+def yolo_post_process(arrs, anchors, height, width, threshold, iou, version='2', do_nms=False, do_activations=False):
 
         parser = Parser(threshold, iou)
 
-        for name in params:
-            arr = blobs[name]
-            arr =  np.reshape(arr, params[name]['shape'])
-            parser.parse_yolo_region(arr, (height, width), (height, width), params[name], version, do_activations)
+        for arr,anchor in zip(arrs, anchors):
+            parser.parse_yolo_region(arr, (height, width), (height, width), anchor, version, do_activations)
 
         if do_nms:
             parser.sort_objects()
@@ -330,194 +405,3 @@ def yolo_post_process(blobs, params, height, width, threshold, iou, version=2, d
 
                 results.append(dict(xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax, class_id=label, confidence=obj['confidence']))
         return results
-
-
-yolo_v3_params = {
-        'detector/yolo-v3/Conv_6/BiasAdd/YoloRegion':  {
-            'side': 19,
-            'anchors': [116,90,156,198,373,326],
-            'classes': 80,
-            'num': 3,
-            'coords': 4,
-            'shape': [1, 255, 19, 19],
-            },
-        'detector/yolo-v3/Conv_14/BiasAdd/YoloRegion': {
-            'side': 38,
-            'anchors': [30,61,62,45,59,119],
-            'classes': 80,
-            'num': 3,
-            'coords': 4,
-            'shape': [1, 255, 38, 38],
-            },
-        'detector/yolo-v3/Conv_22/BiasAdd/YoloRegion': {
-            'side': 76, 
-            'anchors': [10,13,16,30,33,23],
-            'classes': 80,
-            'num': 3,
-            'coords': 4,
-            'shape': [1, 255, 76, 76],
-            },
-        }
-
-yolo_v3_voc_params = {
-        'detector/yolo-v3/Conv_6/BiasAdd/YoloRegion':  {
-            'side': 13,
-            'anchors': [116,90,156,198,373,326],
-            'classes': 20,
-            'num': 3,
-            'coords': 4,
-            'shape': [1, 75, 13, 13],
-            },
-        'detector/yolo-v3/Conv_14/BiasAdd/YoloRegion': {
-            'side': 26,
-            'anchors': [30,61,62,45,59,119],
-            'classes': 20,
-            'num': 3,
-            'coords': 4,
-            'shape': [1, 75, 26, 26],
-            },
-        'detector/yolo-v3/Conv_22/BiasAdd/YoloRegion': {
-            'side': 52, 'anchors': [10,13,16,30,33,23],
-            'classes': 20,
-            'num': 3,
-            'coords': 4,
-            'shape': [1, 75, 52, 52],
-            },
-        }
-
-yolo_v3_tiny_params = {
-        'detector/yolo-v3-tiny/Conv_9/BiasAdd/YoloRegion': {
-            'id': '26',
-            'side': 13,
-            'anchors': [81,82,135,169,344,319],
-            'classes': 80,
-            'num': 3,
-            'coords': 4,
-            'shape': [1, 255, 13, 13],
-            'scale': 29.526176,
-            },
-        'detector/yolo-v3-tiny/Conv_12/BiasAdd/YoloRegion': {
-            'id': '34',
-            'side': 26,
-            'anchors': [23,27,37,58,81,82],
-            'classes': 80,
-            'num': 3,
-            'coords': 4,
-            'shape': [1, 255, 26, 26],
-            'scale': 28.07609,
-            },
-        }
-
-yolov2_tiny_voc_params = {
-        'output/YoloRegion':  {
-            'side': 13,
-            'anchors': [_*32 for _ in [1.08, 1.19, 3.42, 4.41, 6.63, 11.38, 9.42, 5.11, 16.62, 10.52]],
-            'classes': 20,
-            'num': 5,
-            'scale': 21.9720645,
-            'coords': 4,
-            'shape': [1, 125, 13, 13],
-            'id': '24',
-            },
-        }
-
-yolov2_voc_params = {
-        'output/YoloRegion':  {
-            'side': 13,
-            'anchors': [_*32 for _ in [1.3221, 1.73145, 3.19275, 4.00944, 5.05587, 8.09892, 9.47112, 4.84053, 11.2364, 10.0071]],
-            'classes': 20,
-            'num': 5,
-            'coords': 4,
-            'shape': [1, 125, 13, 13],
-            },
-        }
-
-yolov2_tiny_params = {
-        'output/YoloRegion':  {
-            'side': 13,
-            'classes': 80,
-            'num': 5,
-            'coords': 4,
-            'shape': [1, 425, 13, 13],
-            'anchors': [_*32 for _ in [0.57273,0.677385,1.87446,2.06253,3.33843,5.47434,7.88282,3.52778,9.77052,9.16828]],
-            },
-        }
-
-yolov2_params = {
-        'output/YoloRegion':  {
-            'side': 19,
-            'classes': 80,
-            'num': 5,
-            'coords': 4,
-            'shape': [1, 425, 19, 19],
-            'anchors': [_*32 for _ in [0.57273,0.677385,1.87446,2.06253,3.33843,5.47434,7.88282,3.52778,9.77052,9.16828]],
-            },
-        }
-
-def get_param_by_output_size(output,parameters):
-    from functools import reduce
-    import operator
-    size = output.flatten().shape[0]
-    for p in parameters:
-        if size == reduce(operator.mul,parameters[p]['shape']):
-            return p
-
-
-def yolov2_coco(outputs, scale_factors, threshold=0.3, iou=0.4, do_activations=True):
-    blobs = {'output/YoloRegion': np.reshape(outputs[0].astype(np.float32)*scale_factors[0], (425, 19, 19))}
-    return yolo_post_process(blobs, yolov2_params, 608, 608, threshold, iou, 2, True, do_activations)
-
-
-def yolov2_voc(outputs, scale_factors, threshold=0.3, iou=0.4, do_activations=True):
-    blobs = {'output/YoloRegion': np.reshape(outputs[0].astype(np.float32)*scale_factors[0], (125, 13, 13))}
-    return yolo_post_process(blobs, yolov2_voc_params, 416, 416, threshold, iou, 2, True, do_activations)
-
-
-def yolov2_tiny_voc(outputs, scale_factors, threshold=0.3, iou=0.4):
-    blobs = {'output/YoloRegion': np.reshape(outputs[0].astype(np.float32)*scale_factors[0], (125, 13, 13))}
-    return yolo_post_process(blobs, yolov2_tiny_voc_params, 416, 416, threshold, iou, 2, True, True)
-
-
-def yolov2_tiny_coco(outputs, scale_factors, threshold=0.3, iou=0.4):
-    blobs = {}
-    params = yolov2_tiny_params
-    for out, scale in zip(outputs,scale_factors):
-        p = get_param_by_output_size(out,params)
-        blobs[p] = out.astype(np.float32).reshape(params[p]['shape']) * scale
-
-    return yolo_post_process(blobs, params, 416, 416, threshold, iou, 3, True, True)
-
-
-def yolov3_tiny_voc(outputs,scale_factors):
-    raise NotImplementedError
-
-
-def yolov3_tiny_coco(outputs, scale_factors, threshold=0.3, iou=0.4):
-
-    blobs = {}
-    params = yolo_v3_tiny_params
-    for out, scale in zip(outputs,scale_factors):
-        p = get_param_by_output_size(out,params)
-        blobs[p] = out.astype(np.float32).reshape(params[p]['shape']) * scale
-    return yolo_post_process(blobs, params, 416, 416, threshold, iou, 3, True, True)
-
-
-def yolov3_coco(outputs, scale_factors, threshold=0.3, iou=0.4):
-    blobs = {}
-    params = yolo_v3_params
-    for out, scale in zip(outputs,scale_factors):
-        p = get_param_by_output_size(out,params)
-        blobs[p] = out.astype(np.float32).reshape(params[p]['shape']) * scale
-
-    return yolo_post_process(blobs, params, 608, 608, threshold, iou, 3, True, True)
-
-
-def demo_post_process(outputs, scale=1, network='tiny_voc', threshold=0.3, iou=0.4, do_nms=True, do_softmax=True):
-
-    if network == 'tiny_voc':
-        params =  yolov2_tiny_voc_params
-        height, width = 416, 416
-        blobs = {'output/YoloRegion': outputs*scale}
-        version = 2
-
-    return yolo_post_process(blobs, params, height, width, version, threshold, iou, do_nms, do_softmax)

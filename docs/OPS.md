@@ -64,7 +64,17 @@
 |TANH||
 |TILE||
 |TRANSPOSE||
+|TRANSPOSE_CONV|**Fused activation function** = [0,NONE,RELU,RELU6],  **Padding** = [SAME,VALID],  |
 |UNPACK|**Axis** = [-4,-3,-2,-1],  |
+|CAST|**Others**: Cast inputs from INT8 or UINT8 to INT32,  |
   
   
 </div>
+  
+  
+<style>   
+  
+</style>  
+  
+<div></div>
+

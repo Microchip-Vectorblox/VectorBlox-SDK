@@ -5,6 +5,7 @@
 
 #define TEST_OUT 0
 #define INT8FLAG 1
+#define WRITE_OUT 0
 extern "C" int read_JPEG_file (const char * filename, int* width, int* height,
 		unsigned char **image, const int grayscale);
 extern "C" int resize_image(uint8_t* image_in,int in_w,int in_h,
@@ -51,7 +52,8 @@ int main(int argc, char** argv){
 		fprintf(stderr,
 		"Usage: %s  MODEL_FILE IMAGE.jpg [POST_PROCESS]\n"
 		"   if using POST_PROCESS to select post-processing, must be one of:\n"
-		"   CLASSIFY, YOLOV2, YOLOV3, YOLOV4, YOLOV5, ULTRALYTICS, ULTRALYTICS_CUT\n"
+		"   CLASSIFY, YOLOV2, YOLOV3, YOLOV4, YOLOV5\n"
+		"   ULTRALYTICS, ULTRALYTICS_FULL, ULTRALYTICS_OBB, ULTRALYTICS_POSE\n"
 		"   BLAZEFACE, SCRFD, RETINAFACE, SSDV2, PLATE, LPD, LPR\n",
 				argv[0]);
 		return 1;
@@ -75,8 +77,13 @@ int main(int argc, char** argv){
 		fprintf(stderr,"Error model file is not correct size %s\n",argv[1]);
 	}
 	int model_allocate_size = model_get_allocate_bytes(model);
+	if (model_check_sanity(model) != 0) {
+		printf("Model %s is not sane\n", argv[1]);
+		exit(1);
+	};
 	model = (model_t*)realloc(model, model_allocate_size);
 	vbx_cnn_io_ptr_t* io_buffers= (vbx_cnn_io_ptr_t*)malloc(sizeof(vbx_cnn_io_ptr_t)*(model_get_num_inputs(model)+model_get_num_outputs(model)));	
+	vbx_cnn_io_ptr_t* output_buffers = (vbx_cnn_io_ptr_t*)malloc(sizeof(vbx_cnn_io_ptr_t)*(model_get_num_outputs(model)));
 	if (argc>2){
 		if(strcmp(argv[2],"TEST_DATA")!=0){
 			for (unsigned i = 0; i < model_get_num_inputs(model); ++i) {
@@ -84,13 +91,6 @@ int main(int argc, char** argv){
 				int* input_shape = model_get_input_shape(model,i);
 				int dims = model_get_input_dims(model,i);
 				io_buffers[i] = (uintptr_t)read_image(argv[2], input_shape[dims-3], input_shape[dims-2], input_shape[dims-1], input_datatype, 0); // don't use_bgr
-#if 0
-				fix16_t scale = (fix16_t)model_get_input_scale_fix16_value(model,i); // input scale * 255 (as inputs are 0-255 not 0-1.
-				printf("%f\n",fix16_to_float(scale));
-				int32_t zero_point = model_get_input_zeropoint(model,i); 
-				int8_t* input = (int8_t*)io_buffers[i];
-				preprocess_inputs((uint8_t*)input, scale, zero_point,(int)model_get_input_length(model, i),0);
-#endif
 			}
 		} else {
 			for (unsigned i = 0; i < model_get_num_inputs(model); ++i) {
@@ -102,9 +102,13 @@ int main(int argc, char** argv){
 			io_buffers[i] = (uintptr_t)model_get_test_input(model,i);
 		}
 	}
+
+	//Initialize individual buffers
 	for (unsigned o = 0; o < model_get_num_outputs(model); ++o) {
 		int output_length = model_get_output_length(model, o);
 		io_buffers[model_get_num_inputs(model) + o] = (uintptr_t)malloc(output_length*sizeof(fix16_t));
+		output_buffers[o] = (uintptr_t)malloc(output_length*sizeof(int8_t));
+		io_buffers[1+o] = (uintptr_t)output_buffers[o];
 	}
 #if TEST_OUT
 	for(unsigned o =0; o<model_get_num_outputs(model); ++o){
@@ -124,8 +128,7 @@ int main(int argc, char** argv){
 	}
 	// data should be available int the output buffers now.
 #endif	
-
-
+	
 
 	fix16_t* fix16_buffers[model_get_num_inputs(model)+model_get_num_outputs(model)];
 	for (int o = 0; o < (int)model_get_num_outputs(model); ++o){
@@ -136,8 +139,9 @@ int main(int argc, char** argv){
 		int8_to_fix16(fix16_buffers[model_get_num_inputs(model)+o], (int8_t*)io_buffers[model_get_num_inputs(model)+o], size, scale, zero_point);
 	}	
 	// users can modify this post-processing function in post_process.c
+	
 #if INT8FLAG
-	if (argc > 3) pprint_post_process(argv[1], argv[3], model, io_buffers,1);
+	if (argc > 3) pprint_post_process(argv[1], argv[3], model, output_buffers,1,0);
 #else
 	if (argc > 3) pprint_post_process(argv[1], argv[3], model, (vbx_cnn_io_ptr_t*)fix16_buffers,0);
 #endif
@@ -147,22 +151,25 @@ int main(int argc, char** argv){
 		checksum ^= fletcher32((uint16_t*)io_buffers[model_get_num_inputs(model)+o], model_get_output_length(model, o)*sizeof(int8_t)/sizeof(uint16_t));
 	}
 	printf("CHECKSUM = 0x%08x\n",checksum);
+	if(WRITE_OUT){
+		print_json(model, io_buffers, INT8FLAG);
+	}
 	if (argc>2){
 		if(std::string(argv[2]) != "TEST_DATA"){
 			for (unsigned i = 0; i < model_get_num_inputs(model); ++i) {
 				if ((void*)io_buffers[i] != NULL) free((void*)io_buffers[i]);
+				if ((void*)output_buffers[i] != NULL) free((void*)output_buffers[i]);
 			}
 		}
 	}
 
-	if(fix16_buffers){
-		for (int o = 0; o < (int)model_get_num_outputs(model); ++o){
-			if(fix16_buffers[model_get_num_inputs(model) + o]){
-				free(fix16_buffers[model_get_num_inputs(model) + o]);
-			}
+	for (int o = 0; o < (int)model_get_num_outputs(model); ++o){
+		if(fix16_buffers[model_get_num_inputs(model) + o]){
+			free(fix16_buffers[model_get_num_inputs(model) + o]);
 		}
 	}
 	free(io_buffers);
+	free(output_buffers);
 	free(model);
 
 	return 0;

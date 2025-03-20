@@ -240,6 +240,8 @@ typedef STRUCT_PACKED {
 	int32_t type;
 	int32_t shape[SHAPE_DIMS];
 	int32_t dims;
+	int32_t external_producer;
+	int32_t external_consumer;
 	float scale;
 	int32_t scale_f16;
 	int32_t zero;
@@ -328,13 +330,13 @@ typedef STRUCT_PACKED vnnx_layer{
 		} Conv2DOptions;
 		STRUCT_PACKED {
 			int32_t axis;
-			int32_t skip;
 		} ConcatOptions;
 		STRUCT_PACKED {
 			obj_off_t input2_multiplier;
 			obj_off_t input2_shift;
 			int32_t input2_offset;
 			obj_off_t bias_data;
+			int32_t swap;
 			int32_t optimized;
 			int32_t isize;
 			int32_t left_shift;
@@ -360,10 +362,13 @@ typedef STRUCT_PACKED vnnx_layer{
 		STRUCT_PACKED {
 			int32_t axis;
 			int32_t arg_max;
+			obj_off_t axis_list;
 		} reduce8;
 		STRUCT_PACKED{ 
 			int32_t value;
-		}PadOptions;
+			int32_t transpose_dilate_w;
+			int32_t transpose_dilate_h;
+		} PadOptions;
 		STRUCT_PACKED{
 			float min;
 			float max;
@@ -432,6 +437,7 @@ typedef STRUCT_PACKED vnnx_layer{
 			int32_t axis_size;
 			int32_t inner_size;
 			int32_t coord_size;
+			int32_t swap_input_order;
 		}GatherOptions;
 		STRUCT_PACKED{
 			obj_off_t block_shape_data;
@@ -454,7 +460,8 @@ typedef STRUCT_PACKED vnnx_layer{
 		}PackOptions;
 		STRUCT_PACKED{
 			float scale[2];
-                        int32_t mode;
+            int32_t mode;
+			int32_t ratio;
 		}ResizeOptions;
 		STRUCT_PACKED{
 			int32_t permutation[3];
@@ -465,6 +472,19 @@ typedef STRUCT_PACKED vnnx_layer{
 			int32_t axis;
 			obj_off_t splits;
 		}SplitOptions;
+		STRUCT_PACKED{
+			int32_t colar_map_dims[2];
+			obj_off_t colar_map_data;
+		}embedding;
+		STRUCT_PACKED{
+			int32_t max;
+			int32_t filter_shape_dims[4];
+            obj_off_t filter_multiplier;
+            obj_off_t filter_shift;
+            int32_t filter_offset;
+            obj_off_t filter_data;
+		}MinMaxOptions;
+		
 	};
 } vnnx_layer_t;
 
@@ -479,6 +499,7 @@ typedef STRUCT_PACKED vnnx_subgraph_node {
 	int32_t type;
 	int32_t input_data_type;
 	int32_t output_data_type;
+	int32_t offloaded;
 	int32_t input_strides[2];
 	int32_t output_strides[2];
 	int32_t channels;
@@ -487,6 +508,7 @@ typedef STRUCT_PACKED vnnx_subgraph_node {
 	int32_t maps;
 	int32_t rows;
 	int32_t cols;
+	int32_t skip;
 	int32_t scratchpad_bytes;
 
 	char input_description[48];
@@ -555,6 +577,7 @@ typedef STRUCT_PACKED vnnx_subgraph_node {
 			obj_off_t input2_shift;
 			int32_t input2_offset;
 			obj_off_t bias_data;
+			int32_t swap;
 			int32_t optimized;
 			int32_t isize;
 			int32_t left_shift;
@@ -573,7 +596,6 @@ typedef STRUCT_PACKED vnnx_subgraph_node {
 		} FullyConnectedOptions;
 		STRUCT_PACKED {
 			int32_t axis;
-			int32_t skip;
 		} ConcatOptions;
 		STRUCT_PACKED{
 			int32_t axis;

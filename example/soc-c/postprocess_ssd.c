@@ -640,9 +640,9 @@ int post_process_ssd_torch(fix16_box *boxes, int max_boxes,
 			    4, num_classes, torch_priors + o);
     }
 
-    fix16_sort_boxes(boxes, box_count);
+    fix16_sort_boxes(boxes, NULL, box_count);
     fix16_do_nms(boxes, box_count, nms_threshold);
-    int clean_box_count = fix16_clean_boxes(boxes, box_count, 320, 320);
+    int clean_box_count = fix16_clean_boxes(boxes, NULL, box_count, 320, 320);
 
     return clean_box_count;
 }
@@ -670,9 +670,9 @@ int post_process_ssd_torch_int8(fix16_box *boxes, int max_boxes,
 			    4, num_classes, torch_priors + o);
     }
 
-    fix16_sort_boxes(boxes, box_count);
+    fix16_sort_boxes(boxes, NULL, box_count);
     fix16_do_nms(boxes, box_count, nms_threshold);
-    int clean_box_count = fix16_clean_boxes(boxes, box_count, 320, 320);
+    int clean_box_count = fix16_clean_boxes(boxes, NULL, box_count, 320, 320);
 
     return clean_box_count;
 }

@@ -45,7 +45,7 @@ openvino2tensorflow --load_dest_file_path_for_the_calib_npy $VBX_SDK/tutorials/i
 cp saved_model/model_full_integer_quant.tflite mobilenet-v1-0.25-128.tflite
 
 if [ -f mobilenet-v1-0.25-128.tflite ]; then
-   tflite_preprocess mobilenet-v1-0.25-128.tflite   -b
+   tflite_preprocess mobilenet-v1-0.25-128.tflite   
 fi
 
 if [ -f mobilenet-v1-0.25-128.pre.tflite ]; then
@@ -56,6 +56,8 @@ fi
 if [ -f mobilenet-v1-0.25-128.vnnx ]; then
     echo "Running Simulation..."
     python $VBX_SDK/example/python/classifier.py mobilenet-v1-0.25-128.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg 
+    echo "C Simulation Command:"
+    echo '$VBX_SDK/example/sim-c/sim-run-model mobilenet-v1-0.25-128.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg CLASSIFY'
 fi
 
 deactivate

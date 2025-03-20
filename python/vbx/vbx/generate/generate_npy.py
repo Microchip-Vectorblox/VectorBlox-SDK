@@ -30,8 +30,8 @@ def read_images(directory_path, num_images, rgb=False, grayscale=False, debug=Fa
         image_path = os.path.join(directory_path, image_file)
         image = cv2.imread(image_path)
         if grayscale:
-            image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-        if rgb:
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        elif rgb:
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         images.append(image)
 
@@ -41,7 +41,7 @@ def preprocess_images(images, shape, grayscale=False, norm=False):
     height = shape[0]
     width = shape[1]
     if grayscale:
-        images_array = np.zeros((len(images), height, width), dtype=np.float32)
+        images_array = np.zeros((len(images), height, width, 1), dtype=np.float32)
     else:
         images_array = np.zeros((len(images), height, width, 3), dtype=np.float32)
 
@@ -49,19 +49,21 @@ def preprocess_images(images, shape, grayscale=False, norm=False):
         resized = cv2.resize(image, dsize=(width, height), interpolation=cv2.INTER_LINEAR).astype(np.float32)
         if norm:
             resized = resized/255.
+        if grayscale:
+            resized = np.expand_dims(resized, axis=-1)
         images_array[i] = resized
     return images_array
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('image_dir')
-    parser.add_argument('--output_name', type=str, default='')
-    parser.add_argument('--count', type=int, default=20)
-    parser.add_argument('--shape', nargs=2, type=int, default=[224,224]) # height width
-    parser.add_argument('--bgr', action='store_true')
-    parser.add_argument('--grayscale', action='store_true')
+    parser.add_argument('-o', '--output-name', type=str, default='')
+    parser.add_argument('-c', '--count', type=int, default=20)
+    parser.add_argument('-s', '--shape', nargs=2, type=int, default=[224,224]) # height width
+    parser.add_argument('-b', '--bgr', action='store_true')
+    parser.add_argument('-g', '--grayscale', action='store_true')
     parser.add_argument('--norm', action='store_true')
-    parser.add_argument('--debug', action='store_true')
+    parser.add_argument('-d', '--debug', action='store_true')
     args = parser.parse_args()
 
     images = read_images(args.image_dir, args.count, (not args.bgr), args.grayscale, args.debug)

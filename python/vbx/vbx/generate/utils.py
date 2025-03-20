@@ -26,7 +26,7 @@ MAP_TF_TO_NUMPY_TYPE = {
 }
 
 
-def create_tensor_data(dtype, shape, min_value=-100, max_value=100):
+def create_tensor_data(dtype, shape, min_value=-100, max_value=100, int8_range=False):
   """Build tensor data spreading the range [min_value, max_value)."""
 
   if dtype in MAP_TF_TO_NUMPY_TYPE:
@@ -40,6 +40,10 @@ def create_tensor_data(dtype, shape, min_value=-100, max_value=100):
     value = real + imag * 1j
   elif dtype in (tf.uint32, tf.int32, tf.uint8, tf.int8, tf.int64, tf.uint16,tf.int16):
     value = np.random.randint(min_value, max_value + 1, shape)
+    if int8_range: #Generate consecutive values uint8
+        arr = np.zeros(np.prod(shape))
+        arr_inc = [arr[0]+ (i%255) for i in range(len(arr))]
+        value = np.array(arr_inc).reshape(shape)
   elif dtype == tf.bool:
     value = np.random.choice([True, False], size=shape)
   elif dtype == np.string_:
@@ -120,6 +124,10 @@ def match_shape(act, ref_shape, to_tfl):
 
 # used in unit tests also
 def calc_diff(src, dst, threshold=1):
+    
+    if len(dst.shape)==3:
+        dst = dst.transpose(1,2,0)
+
     all_within_threshold = np.allclose(src, dst, atol=threshold)
     abs_diff = np.abs(src - dst) 
     diff = src - dst
@@ -185,7 +193,15 @@ def onnx_input_shape(model_file):
             input_shapes.append([d.dim_value for d in tensor_type.shape.dim if d.HasField("dim_value") ])
     return input_shapes
 
+def onnx_output_shape(model_file):
+    model = onnx.load(model_file)
 
+    output_shapes = []
+    for output in model.graph.output:
+        tensor_type = output.type.tensor_type
+        if (tensor_type.HasField("shape")):
+            output_shapes.append([d.dim_value for d in tensor_type.shape.dim if d.HasField("dim_value") ])
+    return output_shapes
 
 def onnx_infer(onnx_model, input_array, flatten=False):
     model = onnx.load(onnx_model)

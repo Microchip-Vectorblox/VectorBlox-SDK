@@ -84,7 +84,7 @@ def main():
     elif '.h5' in args.model: # keras H5
         loaded = tf.keras.models.load_model(args.model)
 
-        if args.shape: # TODO assuming single input
+        if args.shape: # TODO assuming single input tensor
             if type(loaded.input) == list:
                 input = [i.name for i in loaded.input]
             else:
@@ -92,6 +92,12 @@ def main():
             converter = tf.compat.v1.lite.TFLiteConverter.from_keras_model_file(args.model, input_shapes={input[0]:args.shape})
         else:
             converter = tf.lite.TFLiteConverter.from_keras_model(loaded)
+    elif '.keras' in args.model: # keras
+        if args.shape:
+            print("Currently shape can't be specified for '.keras', please save model as '.h5' -- model.save(MODEL, save_format='h5')")
+            sys.exit(0)
+        loaded = tf.keras.models.load_model(args.model)
+        converter = tf.lite.TFLiteConverter.from_keras_model(loaded)
     elif '.pb' in args.model: # keras H5
         graph = load_graph(args.model)
         input, output = analyze_inputs_outputs(graph)

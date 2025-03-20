@@ -7,6 +7,7 @@ import vbx.sim
 import os
 import math
 import sys
+import model_run as mr
 
 from vbx.generate.utils import openvino_infer, openvino_input_shape
 from vbx.generate.utils import onnx_infer, onnx_input_shape
@@ -16,6 +17,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('model')
     parser.add_argument('image')
+    parser.add_argument('-nc', '--num-classes', type=int, default=91)
     parser.add_argument('-t', '--torch', action='store_true')
     parser.add_argument('-b', '--bgr', action='store_true')
     parser.add_argument('--mean', type=float, nargs='+', default=[0.])
@@ -28,101 +30,30 @@ if __name__ == "__main__":
         print('Error: {} could not be read'.format(args.image))
         os._exit(1)
     img = cv2.imread(args.image)
+    scale = args.scale
 
-    if args.model.endswith('.vnnx'):
-        with open(args.model, 'rb') as mf:
-            model = vbx.sim.Model(mf.read())
-        h, w = model.input_shape[0][-2], model.input_shape[0][-1]
+    arr, input_shape = mr.preprocess_img_to_input_array(img, args.model, args.bgr, scale, args.mean)
+    outputs, output_shapes = mr.model_run(arr, args.model)
 
-        iimg = cv2.imread(args.image)
-        resize_shape = (w, h)
-        iimg = cv2.resize(iimg, resize_shape, interpolation=cv2.INTER_LINEAR)
-        iimg = iimg.astype(np.float32)
-        if not args.bgr:
-            iimg = cv2.cvtColor(iimg, cv2.COLOR_BGR2RGB)
-        iimg = (iimg - args.mean) / args.scale
-        iimg = iimg.astype(np.float32)
-        img_scaled = (iimg / model.input_scale_factor[0]) + model.input_zeropoint[0]
-        flattened = img_scaled.swapaxes(1, 2).swapaxes(0, 1).flatten().astype(model.input_dtypes[0])
-        outputs = model.run([flattened])
-        for o, output in enumerate(outputs):
-            outputs[o] = model.output_scale_factor[o] * (outputs[o].astype(np.float32) - model.output_zeropoint[o])
-            outputs[o] = outputs[o].reshape(model.output_shape[o])
-    elif args.model.endswith('.xml'):
-        weights=args.model.replace('.xml', '.bin')
-        input_shape = openvino_input_shape(args.model, weights)[0]
-        input_array = load_input(args.image, 1., input_shape, (not args.bgr))
-        h, w = input_shape[-2], input_shape[-1]
-        outputs = openvino_infer(args.model, input_array)
-    elif args.model.endswith('.onnx'):
-        input_shape = onnx_input_shape(args.model)[0]
-        h,w = input_shape[-2], input_shape[-1]
-        iimg = cv2.imread(args.image)
-        resize_shape = (w, h)
-        iimg = cv2.resize(iimg, resize_shape, interpolation=cv2.INTER_LINEAR)
-        if not args.bgr:
-            iimg = cv2.cvtColor(iimg, cv2.COLOR_BGR2RGB)
-        iimg = iimg.astype(np.float32)
-        iimg = (iimg - args.mean) / args.scale
-        iimg = np.expand_dims(iimg, axis=0)
-        iimg = iimg.transpose((0,3,1,2))
-        iimg = iimg.astype(np.float32)
-        outputs = onnx_infer(args.model, iimg)
-
-    elif args.model.endswith('.tflite'):
-        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-        import tensorflow as tf
-        interpreter= tf.lite.Interpreter(model_path=args.model)
-        interpreter.allocate_tensors()
-
-        input_details = interpreter.get_input_details()
-        output_details = interpreter.get_output_details()
-
-        input_shape = tuple(input_details[0]["shape"])
+    channels_last = input_shape[-1] < input_shape[-3]
+    h, w = input_shape[-2], input_shape[-1]
+    if channels_last:
         h, w = input_shape[-3], input_shape[-2]
-        if img.shape != input_shape:
-            img_resized = cv2.resize(img, (w, h))
-        else:
-            img_resized = img
-        if not args.bgr:
-            img_resized = cv2.cvtColor(img_resized, cv2.COLOR_BGR2RGB)
-        img_resized = img_resized.astype(np.float32)
-        img_resized = (img_resized - args.mean) / args.scale
-        img_resized = np.expand_dims(img_resized, axis=0)
-        img_resized = img_resized.astype(np.float32)
-        input_scale, input_zero_point = input_details[0].get('quantization', (0.0, 0))
-        if  input_scale != 0.0:
-            img_resized = (img_resized / input_scale) + input_zero_point
-        img_resized = img_resized.astype(input_details[0]['dtype'])
-        interpreter.set_tensor(input_details[0]['index'], img_resized)
-        interpreter.invoke()
-        outputs = []
-        for o in range(len(output_details)):
-            output_scale, output_zero_point = output_details[o].get('quantization', (0.0, 0))
-            output = interpreter.get_tensor(output_details[o]['index'])
-            if  output_scale != 0.0:
-                # output = output_scale * (output.astype(output_details[o]['dtype']) - output_zero_point)
-                output = output_scale * (output.astype(np.float32) - output_zero_point)
-            output = output.transpose((0,3,1,2))
-            outputs.append(output)
+        outputs=mr.transpose_outputs(outputs)
 
-    if '.vnnx' in args.model or '.tflite' in args.model:
-        #shuffle outputs
-        _outputs = outputs.copy()
-        if args.modification is not None:
-            modification = args.modification
-        elif args.torch:
-            modification = [9,4,1,7,5,3,0,2,8,11,10,6] 
-        else:
-            modification = [5,11,0,8,1,3,9,2,6,10,7,4]
-
-        for o in range(len(outputs)):
-            outputs[o] = _outputs[modification.index(o)]
+    # outputs should be sorted in descending sets of coords and classes w/ size NxN
+    reordered_outputs = []
+    for box_size in [20,10,5,3,2,1]:
+        for class_size in [2*3*4, 2*3*args.num_classes]:
+            for output in outputs:
+                if output.shape[-1] == box_size and output.shape[-3] == class_size:
+                    reordered_outputs.append(output)
+    outputs = reordered_outputs
 
     # scaling occurs in _infer methods
     output_scale_factor = len(outputs) * [1.0]
     if args.torch:
-        predictions = ssd.ssd_torch_predictions(outputs, output_scale_factor, confidence_threshold=0.5, nms_threshold=0.4, top_k=1)
+        predictions = ssd.ssd_torch_predictions(outputs, output_scale_factor, confidence_threshold=0.5, nms_threshold=0.4, top_k=1, num_classes=args.num_classes)
     else:
         predictions = ssd.ssdv2_predictions(outputs, output_scale_factor, confidence_threshold=0.5, nms_threshold=0.4, top_k=1)
     
@@ -130,7 +61,9 @@ if __name__ == "__main__":
     output_scale_x = 1024. / w
     output_scale_y = 1024. / h
 
-    classes = ssd.coco91
+    classes = [str(_) for _ in range(args.num_classes)]
+    if args.num_classes == 91:
+        classes = ssd.coco91
     colors = dataset.coco91_colors
     for p in predictions:
         print("{}\t{}\t({}, {}, {}, {})".format(classes[p['class_id']],

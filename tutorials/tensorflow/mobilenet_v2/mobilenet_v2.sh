@@ -35,7 +35,7 @@ EOF
 echo "Generating TF Lite..."
 tflite_quantize saved_model mobilenet_v2.tflite -d $VBX_SDK/tutorials/imagenetv2_rgb_20x224x224x3.npy \
 --mean 127.5 \
---scale 127.5 
+--scale 127.5 --shape 1 224 224 3
 
 if [ -f mobilenet_v2.tflite ]; then
    tflite_preprocess mobilenet_v2.tflite  --mean 127.5 --scale 127.5
@@ -49,6 +49,8 @@ fi
 if [ -f mobilenet_v2.vnnx ]; then
     echo "Running Simulation..."
     python $VBX_SDK/example/python/classifier.py mobilenet_v2.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg 
+    echo "C Simulation Command:"
+    echo '$VBX_SDK/example/sim-c/sim-run-model mobilenet_v2.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg CLASSIFY'
 fi
 
 deactivate

@@ -185,7 +185,8 @@
   "GATHER": {
     "type": [
       "INT8",
-      "UINT8"
+      "UINT8",
+      "INT32"
     ],
     "axis": [
       -4,
@@ -355,8 +356,7 @@
   },
   "NEG": {
     "type": [
-      "INT8",
-      "UINT8"
+      "INT32"
     ],
     "vectorized": [2]
   },
@@ -486,7 +486,8 @@
   "RESHAPE": {
     "type": [
       "INT8",
-      "UINT8"
+      "UINT8",
+      "INT32"
     ],
     "vectorized": [1]
   },
@@ -662,7 +663,7 @@
       "RELU",
       "RELU6"
     ],
-    "vectorized": [0]
+    "vectorized": [2]
   },
 
   "UNIDIRECTIONAL_SEQUENCE_LSTM": {
@@ -684,5 +685,14 @@
       -1
     ],
     "vectorized": [2]
+  },  
+  "CAST": {
+    "type": [
+      "INT8",
+      "UINT8",
+      "INT32"
+    ],
+    "vectorized": [2],
+    "others": ["Cast inputs from INT8 or UINT8 to INT32"]
   }
 }

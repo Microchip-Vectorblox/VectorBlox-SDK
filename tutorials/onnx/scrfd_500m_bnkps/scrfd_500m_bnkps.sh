@@ -31,7 +31,7 @@ echo "Downloading scrfd_500m_bnkps..."
 # download SCRFD_500M_KPS https://github.com/deepinsight/insightface/tree/master/detection/scrfd#pretrained-models
 # python tools/scrfd2onnx.py configs/scrfd/scrfd_500m_bnkps.py scrfd_500m_bnkps.pth --input-img garden_512x288.jpg --output-file scrfd_500m_bnkps.onnx
 
-[ -f scrfd_500m_bnkps.onnx ] || wget https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/Releases/ModelZoo/scrfd_500m_bnkps.onnx
+[ -f scrfd_500m_bnkps.onnx ] || wget -q https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/Releases/ModelZoo/scrfd_500m_bnkps.onnx
 if [ ! -f calibration_image_sample_data_20x128x128x3_float32.npy ]; then
     wget https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/EAP/calib_npy/calibration_image_sample_data_20x128x128x3_float32.npy
 fi
@@ -57,6 +57,8 @@ fi
 if [ -f scrfd_500m_bnkps.vnnx ]; then
     echo "Running Simulation..."
     python $VBX_SDK/example/python/scrfdInfer.py scrfd_500m_bnkps.vnnx $VBX_SDK/tutorials/test_images/garden.jpg 
+    echo "C Simulation Command:"
+    echo '$VBX_SDK/example/sim-c/sim-run-model scrfd_500m_bnkps.vnnx $VBX_SDK/tutorials/test_images/garden.jpg SCRFD'
 fi
 
 deactivate

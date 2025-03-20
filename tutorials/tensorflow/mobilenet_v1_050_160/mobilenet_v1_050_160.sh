@@ -25,7 +25,7 @@ fi
 
 echo "Downloading mobilenet_v1_050_160..."
 # model details @ https://tfhub.dev/google/imagenet/mobilenet_v1_050_160/classification/5
-wget https://tfhub.dev/google/imagenet/mobilenet_v1_050_160/classification/5?tf-hub-format=compressed -O mobilenet_v1_050_160.tar.gz
+wget -q https://tfhub.dev/google/imagenet/mobilenet_v1_050_160/classification/5?tf-hub-format=compressed -O mobilenet_v1_050_160.tar.gz
 mkdir -p mobilenet_v1_050_160
 tar -xzf mobilenet_v1_050_160.tar.gz -C mobilenet_v1_050_160
 python ../../saved_model_signature.py mobilenet_v1_050_160
@@ -46,6 +46,8 @@ fi
 if [ -f mobilenet_v1_050_160.vnnx ]; then
     echo "Running Simulation..."
     python $VBX_SDK/example/python/classifier.py mobilenet_v1_050_160.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg 
+    echo "C Simulation Command:"
+    echo '$VBX_SDK/example/sim-c/sim-run-model mobilenet_v1_050_160.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg CLASSIFY'
 fi
 
 deactivate

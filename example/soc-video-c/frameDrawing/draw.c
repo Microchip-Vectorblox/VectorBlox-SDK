@@ -56,6 +56,38 @@ void draw_dma_memset(int cols,int rows,
   //draw_wait_for_draw();
 
 }
+
+void draw_line(int start_col, int start_row,
+               int end_col, int end_row, uint32_t colour,
+               uint32_t* f_buf,int f_width,int f_height, int thickness, int alpha)
+{
+  int16_t slope = (end_row-start_row)/(end_col-start_col);
+  uint16_t abs_slope = slope;
+
+  if(slope < 0){
+    abs_slope = 0 - slope;
+  }
+
+  for(int i = 1; i <= thickness; i++) {
+   
+    if(abs_slope >= 1){
+      draw_assist_draw_line(draw_assist_base_address,
+            start_col+i, start_row, end_col+i, end_row, f_buf, f_width, colour, alpha);
+      draw_assist_draw_line(draw_assist_base_address,
+            start_col-i, start_row, end_col-i, end_row, f_buf, f_width, colour, alpha);
+    } else {
+      draw_assist_draw_line(draw_assist_base_address,
+            start_col, start_row+i, end_col, end_row+i, f_buf, f_width, colour, alpha);
+      draw_assist_draw_line(draw_assist_base_address,
+            start_col, start_row-i, end_col, end_row-i, f_buf, f_width, colour, alpha);
+    }
+
+  }  
+    draw_assist_draw_line(draw_assist_base_address,
+             start_col, start_row, end_col, end_row, f_buf, f_width, colour, 0);
+}
+
+
 void draw_wait_for_draw(){
 	while(draw_assist_not_done(draw_assist_base_address));
 }
@@ -74,7 +106,6 @@ void draw_rectangle(int x,int y,int w,int h,uint32_t colour,
 
 }
 
-
 void draw_box(int x,int y,int w,int h,int thickness,uint32_t colour,
 			  uint32_t* f_buf,int f_width,int f_height)
 {
@@ -92,6 +123,43 @@ void draw_box(int x,int y,int w,int h,int thickness,uint32_t colour,
 				 f_buf,f_width,f_height);
 
 }
+
+void draw_circle(int r, int x_offset, int y_offset, uint32_t colour, 
+			  uint32_t* f_buf,int f_width,int f_height, uint32_t* f_buf2)
+{
+
+  int x = r;
+  int y = 0;
+  int t1, t2 = 0;
+  while(x >= y) {
+
+    draw_assist_draw_line_pp(x_offset+x, y_offset+y, x_offset-x, y_offset-y,f_buf, f_width, colour, 1, 100);
+    draw_assist_draw_line_pp(x_offset+x, y_offset-y, x_offset-x, y_offset+y,f_buf, f_width, colour, 1, 100);
+    draw_assist_draw_line_pp(x_offset+y, y_offset+x, x_offset-y, y_offset-x,f_buf, f_width, colour, 1, 100);
+    draw_assist_draw_line_pp(x_offset+y, y_offset-x, x_offset-y, y_offset+x,f_buf, f_width, colour, 1, 100);
+
+    // draw_assist_plot_pixel(x_offset+x, y_offset+y, 1.0, f_buf, f_width, colour );
+    // draw_assist_plot_pixel(x_offset-x, y_offset+y, 1.0, f_buf, f_width, colour );
+    // draw_assist_plot_pixel(x_offset+x, y_offset-y, 1.0, f_buf, f_width, colour );
+    // draw_assist_plot_pixel(x_offset-x, y_offset-y, 1.0, f_buf, f_width, colour );
+    // draw_assist_plot_pixel(x_offset+y, y_offset+x, 1.0, f_buf, f_width, colour );
+    // draw_assist_plot_pixel(x_offset-y, y_offset+x, 1.0, f_buf, f_width, colour );
+    // draw_assist_plot_pixel(x_offset+y, y_offset-x, 1.0, f_buf, f_width, colour );
+    // draw_assist_plot_pixel(x_offset-y, y_offset-x, 1.0, f_buf, f_width, colour );
+
+
+    
+    y++;
+    t1 += y;
+    t2 = t1 - x;
+    if(t2 >= 0) {
+      t1 = t2;
+      x--;
+    }
+  }
+  
+}
+
 void initialize_characters();
 
 // x,y == bottom left_corner
@@ -122,6 +190,7 @@ void draw_label(const char* label,int x,int y,
 	x+=letter.width;
   }
 }
+
 uint32_t get_colour_modulo(int i){
 
   static uint32_t voc_colors[] = { GET_COLOUR(128,   0,   0,255),

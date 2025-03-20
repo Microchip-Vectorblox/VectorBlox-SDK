@@ -9,6 +9,7 @@ import vbx.sim
 import pprint
 import shutil
 import json
+
 from .utils import match_shape, calc_diff, create_tensor_data
 from .split_tflite import generate_split_graphs, generate_join_graphs 
 
@@ -42,6 +43,14 @@ def get_input_data(input_file, width, height, channels, mean, scale, rgb):
     img = np.expand_dims(img, axis=0)
     return img
 
+
+def default_input_arr(shape, dtype, seed=42):
+    np.random.seed(seed)
+    # arr = np.zeros(shape, dtype=np.uint8)+128
+    arr = np.random.randint(256, size=shape)
+    return arr.astype(dtype)
+
+
 def get_tflite_io(tflite_model, input_files, subdir, mean=0., scale=1., rgb=False):
 
     interpreter= tf.lite.Interpreter(
@@ -67,8 +76,7 @@ def get_tflite_io(tflite_model, input_files, subdir, mean=0., scale=1., rgb=Fals
                 input_file = input_files[i]
 
                 if input_file is None:
-                    arr = np.zeros(shape, dtype=np.uint8)+128
-                    arr = arr.astype(dtype)
+                    arr = default_input_arr(shape, dtype)
                 elif '.npy' in input_file:
                     arr = np.load(input_file)
                     if 'vnnx_activations' in input_file:
@@ -84,8 +92,7 @@ def get_tflite_io(tflite_model, input_files, subdir, mean=0., scale=1., rgb=Fals
                         arr = (arr / input_scale) + input_zero_point
                     arr = arr.astype(dtype)
         else:
-            arr = np.zeros(shape, dtype=np.uint8)+128
-            arr = arr.astype(dtype)
+            arr = default_input_arr(shape, dtype)
 
         interpreter.set_tensor(input_detail['index'], arr)
         # inputs[input_detail['index']] = interpreter.get_tensor(input_detail['index'])
@@ -139,11 +146,11 @@ def get_vnnx_io(vnnx_model, tflite_keys, input_files, tfin, subdir, mean=0., sca
                 elif type(input_file) is np.ndarray:
                     arr = input_file
                 else: #type input file is None
-                    arr = np.zeros(shape, dtype=np.uint8)+128
+                    arr = default_input_arr(shape, dtype)
             elif os.path.exists(vnnx_inp_path):
                 arr = np.load(vnnx_inp_path)
             else:
-                arr = np.zeros(shape, dtype=np.uint8)+128
+                arr = default_input_arr(shape, dtype)
         arr = arr.astype(model.input_dtypes[i])
         inputs.append(arr)
         flattened.append(arr.flatten())
@@ -178,6 +185,8 @@ def generate_inputs_outputs(tflite_model_binary):
     interpreter.allocate_tensors()
     input_details = interpreter.get_input_details()
     input_values = {}
+    min_value = 0
+    max_value = 20
     for i,input_detail in enumerate(input_details):
         if input_detail["dtype"] == np.float32:
             min_value = -1
@@ -192,7 +201,8 @@ def generate_inputs_outputs(tflite_model_binary):
                 input_detail["dtype"],
                 input_detail["shape"],
                 min_value=min_value,
-                max_value=max_value)
+                max_value=max_value,
+                int8_range=False)
         interpreter.set_tensor(input_detail["index"], input_value)
         input_values.update({"i{}".format(i): input_value})
     interpreter.invoke()
@@ -211,6 +221,7 @@ def compare_tflite(tflite_graph_name, size_conf='V1000', error_rate_threshold=0,
         tflite_model_binary = f.read()
         # run tflite with tf inputs to get tflite outputs
         baseline_input_map_tfl, baseline_output_map_tfl = generate_inputs_outputs(tflite_model_binary)
+        
         example = { "inputs": baseline_input_map_tfl, "outputs": baseline_output_map_tfl }
 
         tfl_in_files = []
@@ -219,6 +230,10 @@ def compare_tflite(tflite_graph_name, size_conf='V1000', error_rate_threshold=0,
             np.save(npy_input_name, inp)
             tfl_in_files.append(npy_input_name)
         tfl_in_files = ' '.join(tfl_in_files)
+        if verbose:
+            for (outp_name, outp) in example['outputs'].items():
+                npy_output_name = tflite_graph_name.replace('.tflite', '.' + outp_name + '.npy')
+                np.save(npy_output_name, outp)
         vnnx_graph_name = tflite_graph_name.replace('.tflite', '.vnnx')
         cmd = 'vnnx_compile -c {} -t {} -i {} -o {}'.format(size_conf, tflite_graph_name, tfl_in_files, vnnx_graph_name)
         log = []
@@ -230,10 +245,17 @@ def compare_tflite(tflite_graph_name, size_conf='V1000', error_rate_threshold=0,
             return
         if not os.path.exists(vnnx_graph_name):
             return
+        cmd = 'python -m vbx.sim {} -d'.format(vnnx_graph_name)
+        log = []
+        try:
+            res = subprocess.run(cmd, shell=True, capture_output=True)
+            log.append(res.stderr)
+        except:
+            print(log)
+            return
 
         with open(vnnx_graph_name, "rb") as vnnx_bin:
-            vnnx_binary = vnnx_bin.read()
-            vnnx_model = vbx.sim.Model(vnnx_binary)
+            vnnx_model = vbx.sim.Model(vnnx_bin.read())
             flattened = []
             outputs = []
             vnnx_io = {'inputs':{}, 'outputs':{}}
@@ -243,22 +265,27 @@ def compare_tflite(tflite_graph_name, size_conf='V1000', error_rate_threshold=0,
                 flattened.append(vnnx_i.flatten())
 
             outputs = vnnx_model.run(flattened)
+            # outputs = vnnx_model.run(vnnx_model.test_input)
 
             for (out_name,tfl_out), idx in zip(example['outputs'].items(), range(vnnx_model.num_outputs)):
                 output = outputs[idx]
                 output = output.reshape(vnnx_model.output_shape[idx])
-                outputs.append(output)
                 vnnx_io['outputs'][out_name] = output
-
-            if DEBUG:
-                print("tfl_out = ", tfl_out.transpose(0,3,1,2))
-                print("vnn_out = ", output)
+                if verbose:
+                    npy_output_name = tflite_graph_name.replace('.tflite', '.' + out_name + '.vnnx.npy')
+                    np.save(npy_output_name, output)
+                #TODO use vbx.sim outputs
+                output = np.load(os.path.join(os.path.dirname(tflite_graph_name), 'vnnx.output.{}.npy'.format(idx)))
 
             tfl_out = match_shape(tfl_out, vnnx_model.output_shape[idx], to_tfl=False) # from tfl shape to vnnx
+            
             all_within_threshold, abs_diff, total_vals_diff, counter = calc_diff(output, tfl_out, error_threshold)
             error_rate = total_vals_diff / np.prod(output.shape) * 100
             if not all_within_threshold and error_rate > error_rate_threshold:
                 print('\n{} #diff > {}: {} ({:3.2f}%), max_diff: {}'.format(os.path.basename(tflite_graph_name), error_threshold, total_vals_diff, error_rate, np.max(abs_diff)))
+                if verbose:
+                    pprint.pprint([("Diff", "Count"), sorted(counter.items())], width=20, sort_dicts=True)
+
                 heatmap = np.abs(output-tfl_out)
                 heatmap_name = tflite_graph_name.replace('.tflite','.heatmap.npy')
                 if len(heatmap.shape) == 4 and heatmap.shape[0] == 1:

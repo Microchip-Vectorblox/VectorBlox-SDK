@@ -9,6 +9,8 @@ from contextlib import contextmanager
 import sys, shutil, glob, tempfile
 from tqdm import tqdm 
 import numpy as np
+import cv2
+import vbx.postprocess.dataset as rgb_color
 
 #LUT related optimizations options
 OPTIMIZED_WITH_LUT = 1
@@ -123,7 +125,7 @@ def get_cuts(jname, cuts, include_outputs=True):
                     modified = True
 
         if not modified:
-            splits.append(list(cut_groups.pop(k0)))
+            splits.append(sorted(list(cut_groups.pop(k0))))
 
     return splits
 
@@ -262,6 +264,10 @@ def lut_pattern(operators, codes, tensors, buffers, idx, opcode):
         if idx < max_idx -1:
             next_op = operators[idx+1]
             next_opcode = codes[next_op['opcode_index']]
+        next_next_op, next_next_opcode = None, ''
+        if idx < max_idx -2:
+            next_next_op = operators[idx+2]
+            next_next_opcode = codes[next_next_op['opcode_index']]
 
         connected = True
         if prev_op != None:
@@ -281,6 +287,13 @@ def lut_pattern(operators, codes, tensors, buffers, idx, opcode):
             patterns.append(idx+1)
             idx += 1
 
+        elif opcode == "CAST" and next_opcode == "RESHAPE" and next_next_opcode == "GATHER": 
+            patterns.append(idx)
+            patterns.append(idx+1)
+            patterns.append(idx+2)
+            lut_count = 4 #for RGBA uint32
+            idx += 2
+
         elif forked:
             break
         
@@ -292,16 +305,17 @@ def lut_pattern(operators, codes, tensors, buffers, idx, opcode):
           
         elif opcode in ["MUL", "ADD", "SUB"] and len(filters) == 1:
             weight_tensor = tensors[filters[0]]
-            if 'shape' in weight_tensor and len(weight_tensor['shape'])> 0 :
-                weight_shape = weight_tensor['shape']
-                lut_count = weight_shape[-1] #channels last
-            else:
-                lut_count = 1
+            if np.prod(weight_tensor['shape']) <=4:
+                if 'shape' in weight_tensor and len(weight_tensor['shape'])>0 :
+                    weight_shape = weight_tensor['shape']
+                    lut_count = weight_shape[-1] #channels last
+                else:
+                    lut_count = 1
 
-            if lut_count <= MAX_LUTs:
-                patterns.append(idx)
-            else:
-                break
+                if lut_count <= MAX_LUTs:
+                    patterns.append(idx)
+                else:
+                    break
         else:
             break
 
@@ -313,7 +327,78 @@ def lut_pattern(operators, codes, tensors, buffers, idx, opcode):
         
     return patterns
 
-def get_splits(jname, split_every_op=False):
+
+# Check for case of Non-NX -> Pad -> Conv, where current op is the Pad
+def fuse_pad_into_next_op(engine_op_types, prev_op, curr_op, next_op):
+    # Make sure this is a PAD
+    if curr_op != 'PAD':
+        return False
+
+    # If the previous op is already on NX then this isn't relevant
+    if prev_op in engine_op_types.nx_op_types:
+        return False
+
+    # If next is Conv, split at the Pad so it can be combined into the next Conv
+    if next_op == 'CONV_2D' and 'CONV_2D' in engine_op_types.nx_op_types:
+        return True
+
+    return False
+
+
+# Whether to force a split because two ops must run on different engines
+def force_split_due_to_engine(engine_op_types, prev_op, curr_op, next_op) -> bool:
+    # If this op is agnostic, it might be between 2 ops which are on separate engines.
+    # These cases are checked below. Otherwise, this op is agnostic so there is no need
+    # to force a split.
+    if curr_op in engine_op_types.agnostic_op_types:
+        if fuse_pad_into_next_op(engine_op_types, prev_op, curr_op, next_op):
+            return True
+        return False
+
+    # Otherwise, this op is not agnostic, so split if the previous op is on a different
+    # engine than this op. If the previous op is agnostic, do not force a split since
+    # those cases were handled above.
+    if prev_op in engine_op_types.agnostic_op_types:
+        return False
+    prev_offloaded = prev_op in engine_op_types.nx_op_types
+    curr_offloaded = curr_op in engine_op_types.nx_op_types
+    if prev_offloaded != curr_offloaded:
+        return True
+    return False
+
+
+def get_input_dtype(op, tensor):
+    op_inputs = [_ for _ in op['inputs'] if _ != -1]
+    dtype = tensor[op_inputs[0]]['type']
+
+    return dtype
+
+
+def get_output_dtype(op, tensor):
+    op_outputs = [_ for _ in op['outputs'] if _ != -1]
+    dtype = tensor[op_outputs[0]]['type']
+
+    return dtype
+
+
+def channels_first_shape(shape):
+    s = list(shape)
+    # if len(shape) > 3 or (s[0] > 1 and len(shape) == 3):
+    if len(shape) >= 3:
+        axis = 3
+        s = s[:-axis] + s[-1:] + s[-axis:-1]
+    return tuple(s), len(s)
+
+
+def is_singleton(shapes):
+    for shape in shapes:
+        _shape, dims = channels_first_shape(shape)
+        if len(_shape) > 1 and _shape[-1] == 1 and _shape[-2] == 1:
+            return True
+    return False
+
+
+def get_splits(jname, split_every_op=False, engine_op_types=None):
     valid_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),'supported_ops.json') 
     with open(valid_path) as f:
         valid = json.load(f)
@@ -349,11 +434,18 @@ def get_splits(jname, split_every_op=False):
             next_op = operators[i+1]
             next_opcode = codes[next_op['opcode_index']]
 
+        next_next_op, next_next_opcode = None, ''
+        if i < len(operators)-2:
+            next_next_op = operators[i+2]
+            next_next_opcode = codes[next_next_op['opcode_index']]
+
         op_inputs = [_ for _ in op['inputs'] if _ != -1]
         op_outputs = [_ for _ in op['outputs'] if _ != -1]
         
+        input_shapes = [tensors[_]['shape'] for _ in op_inputs]
         input_buffers = [buffers[tensors[_]['buffer']] for _ in op_inputs]
         multi_input = len(input_buffers) > 1 and not any(['data' in _ for _ in input_buffers]) 
+        output_shapes = [tensors[_]['shape'] for _ in op_outputs]
         output_buffers = [buffers[tensors[_]['buffer']] for _ in op_outputs]
 
         connected = True
@@ -363,7 +455,14 @@ def get_splits(jname, split_every_op=False):
         forked = False
         if prev_op != None:
             forked = forks(prev_op, prev_inputs, prev_outputs, operators, tensors)
-            
+
+        # If using another engine with limited op support, force a split when the current and prev
+        # op mismatch in which engine supports them.
+        # Example: Conv -> Pool would normally be 1 subgraph, but not in 3.0.
+        engine_split = False
+        if engine_op_types and prev_op != None:
+            engine_split = force_split_due_to_engine(engine_op_types, prev_opcode, opcode, next_opcode)
+
         valid_op, error_param, param_value, input_param = check_valid(valid, opcode, op, tensors)
 
         if not valid_op:
@@ -398,6 +497,14 @@ def get_splits(jname, split_every_op=False):
             # update outputs to be from last op in pattern
             op = operators[i]
             op_outputs = [_ for _ in op['outputs'] if _ != -1]
+        elif opcode == 'CAST' and next_opcode == 'RESHAPE' and next_next_opcode == 'GATHER' and len(lut_pattern(operators, codes, tensors, buffers, i, opcode)):
+            patterns = lut_pattern(operators, codes, tensors, buffers, i, opcode) 
+
+            current += patterns
+            i += len(patterns) - 1
+            # update outputs to be from last op in pattern
+            op = operators[i]
+            op_outputs = [_ for _ in op['outputs'] if _ != -1]
         elif forked:
             if len(current):
                 splits.append(current)
@@ -409,7 +516,7 @@ def get_splits(jname, split_every_op=False):
             current = []
             current.append(i)
             # @TODO: Maybe inject an identity if we can fit full map  --> suppose to be only FIA layers
-        elif opcode in ['CONV_2D', 'TRANSPOSE_CONV', 'FULLY_CONNECTED', 'RESIZE_BILINEAR', ' UNIDIRECTIONAL_SEQUENCE_LSTM', 'SOFTMAX', 'ARG_MAX', 'TILE', 'SPLIT', 'SPLIT_V', 'PACK', 'UNPACK', 'RESHAPE','TRANSPOSE', 'AVERAGE_POOL_2D', 'MEAN']: # start a new graph before key subgraph OP
+        elif opcode in ['CONV_2D', 'TRANSPOSE_CONV', 'FULLY_CONNECTED', 'RESIZE_BILINEAR', ' UNIDIRECTIONAL_SEQUENCE_LSTM', 'SOFTMAX', 'ARG_MAX', 'CAST', 'TILE', 'SPLIT', 'SPLIT_V', 'PACK', 'UNPACK', 'RESHAPE','TRANSPOSE', 'AVERAGE_POOL_2D', 'MEAN']: # start a new graph before key subgraph OP
             if len(current):
                 splits.append(current)
             current = []
@@ -435,7 +542,13 @@ def get_splits(jname, split_every_op=False):
             current = []
             current.append(i)
 
-        elif opcode in ['MUL', 'SUB', 'DIV', 'GREATER', 'GREATER_EQUAL', 'LESS', 'LESS_EQUAL', 'EQUAL', 'NOT_EQUAL', 'MINIMUM', 'MAXIMUM'] and multi_input: # start a new graph before multi input subgraph OPS
+        elif opcode in ['ADD', 'SUB', 'MUL', 'DIV', "GREATER", "GREATER_EQUAL", "LESS", "LESS_EQUAL", "EQUAL", "NOT_EQUAL"] and multi_input and is_singleton(input_shapes): #split if singleton channelwise input
+            if len(current):
+                splits.append(current)
+            current = []
+            current.append(i)
+
+        elif engine_split:
             if len(current):
                 splits.append(current)
             current = []
@@ -454,6 +567,245 @@ def get_splits(jname, split_every_op=False):
     splits.append(current)
     return splits, errors, specials
 
+# Enum to represent engine types
+from enum import Enum
+class Engine(Enum):
+    MXP = 0
+    NX = 1
+    Agnostic = 2
+
+# Iterate over all of the ops in this split to get the split's target engine
+# Assert every op in this split is for one engine
+def get_engine_from_split_ops(split, operators, codes, engine_op_types) -> Engine:
+    current_split_target = None
+
+    # Special case: Pad nodes are usually done as subnodes. However, if there
+    # is a case of [Non-NX] -> Pad -> Conv, the Pad is currently done on the NX
+    # as part of the Conv. This means there would be a split before the Pad. But
+    # Conv also always makes a new split, resulting in a split with Pad on its own.
+    # In such cases, put the split on NX.
+    if len(split) == 1 and codes[operators[split[0]]['opcode_index']] == 'PAD':
+        return Engine.NX
+
+    for op_idx in split:
+        op = operators[op_idx]
+        opcode = codes[op['opcode_index']]
+
+        # Check where this op will be executed and assign it for the
+        # first op, or assert it for the remaining.
+        # For ops on either engine (e.g., ADD), do not set the target yet.
+        if opcode in engine_op_types.agnostic_op_types:
+            pass
+        elif opcode in engine_op_types.nx_op_types:
+            if current_split_target == None:
+                current_split_target = Engine.NX
+            else:
+                assert current_split_target == Engine.NX
+        else:
+            if current_split_target == None:
+                current_split_target = Engine.MXP
+            else:
+                assert current_split_target == Engine.MXP
+
+    # Sometimes, every op in the split is agnostic (can run on either engine),
+    # e.g., a single Concat or a Pad at the beginning of the graph.
+    # These can run on the same engine as the previous or next engine.
+    if current_split_target == None:
+        return Engine.Agnostic
+    return current_split_target
+
+# Simple class to store which operation types are on each engine
+class EngineOpTypes:
+    def __init__(self, nx_op_types, agnostic_op_types):
+        self.nx_op_types = nx_op_types
+        self.agnostic_op_types = agnostic_op_types
+
+# Returns 2 lists specifying which splits go on each engine (NX and MXP).
+# These are lists of lists with indices that reference into the subgraphs in splits.
+#
+# Example:
+#   Consider a Conv -> SiLU -> Conv -> ReLU -> MaxPool -> MaxPool
+#   Assume the Pools will be in separate subgraphs, e.g. because of forked outputs (like in YOLOv5).
+#   The splits would be [ [0, 1, 2], [0], [0], [0] ], meaning there are 4 MXP/FIA subgraphs.
+#   The engine graphs would be NX = [ [0, 1] ] and MXP = [ [2, 3] ], so 1 engine graph on each.
+#   The first 2 Conv are on NX, and 2 Pool on MXP (assumes NX can do SiLU).
+def get_splits_per_engine(jname: str, splits: list, engine_op_types: EngineOpTypes) -> (list, list):
+
+    # Read graph from JSON file
+    with open(jname) as f:
+        graph = json.load(f)
+    assert(len(graph['subgraphs']) == 1)
+
+    # Get graph information
+    subgraph = graph['subgraphs'][0]
+    operators = subgraph['operators']
+    tensors = subgraph['tensors']
+    codes = [_['builtin_code'] for _ in graph['operator_codes']]
+
+    # Initialize data structures
+    engine_graphs_nx = []
+    engine_graphs_mxp = []
+    current_engine_graph = []
+    current_engine_graph_target = None
+
+    # Iterate over all of the splits and assign them to an engine graph
+    for split_idx, split in enumerate(splits):
+
+        # Get the target engine for this split
+        current_split_target = get_engine_from_split_ops(split, operators, codes, engine_op_types)
+
+        # If Agnostic is returned, it could run on either engine (e.g., PAD, CONCATENATION)
+        if current_split_target == Engine.Agnostic:
+            # If there is a current engine, put it in that one too
+            if current_engine_graph_target:
+                current_split_target = current_engine_graph_target
+            # If there is no current target (e.g., this is the first split, such as a Pad at the
+            # beginning of the graph), decide on the next iteration
+            else:
+                current_engine_graph.append(split_idx)
+                continue
+
+        assert current_split_target in [Engine.NX, Engine.MXP]
+
+        # Assign this split to the correct graph
+        if current_engine_graph_target == None:
+            current_engine_graph_target = current_split_target
+        # If current engine graph type matches current split, add it to current graph
+        if current_engine_graph_target == current_split_target:
+            current_engine_graph.append(split_idx)
+        # Otherwise, end the current engine graph and start a new one
+        else:
+            if current_engine_graph_target == Engine.NX:
+                engine_graphs_nx.append(current_engine_graph)
+            else:
+                engine_graphs_mxp.append(current_engine_graph)
+            current_engine_graph = [split_idx]
+            # Update the current graph type
+            current_engine_graph_target = current_split_target
+
+    # Add whatever is remaining to the correct graph
+    assert current_engine_graph_target == current_split_target
+    if current_engine_graph_target == Engine.NX:
+        engine_graphs_nx.append(current_engine_graph)
+    else:
+        engine_graphs_mxp.append(current_engine_graph)
+
+    return engine_graphs_nx, engine_graphs_mxp
+
+# Given a split index and list of engine graphs, check whether this split is
+# in one of the engine graphs
+def is_split_idx_in_engine_graphs(split_idx, engine_graphs) -> bool:
+    for engine_graph in engine_graphs:
+        if split_idx in engine_graph:
+            return True
+    return False
+
+# Given a split index, return which engine it is in
+def get_engine_from_split_idx(split_idx, engine_graphs_nx, engine_graphs_mxp) -> Engine:
+    nx  = is_split_idx_in_engine_graphs(split_idx, engine_graphs_nx)
+    mxp = is_split_idx_in_engine_graphs(split_idx, engine_graphs_mxp)
+    assert(nx != mxp) # Must be in exactly one
+    return Engine.NX if nx else Engine.MXP
+
+# Helper function for combine_nx_splits
+def merge_splits(splits, indices_to_merge):
+    # Assert indices are sorted and no duplicates
+    assert indices_to_merge == sorted(indices_to_merge)
+    assert len(indices_to_merge) == len(set(indices_to_merge))
+
+    # Iterate over splits and extend the merged split while copying the unmerged ones
+    new_splits = []
+    merged_split = []
+    for i, split in enumerate(splits):
+        if i in indices_to_merge:
+            merged_split.extend(split)  # Extend the merged split
+        else:
+            new_splits.append(split)    # Copy the unmerged splits
+
+    # Insert the merged split at the index where the merge started
+    new_splits.insert(indices_to_merge[0], merged_split)
+    return new_splits
+
+# Helper function for combine_nx_splits
+def renumber_splits(engine_graphs, merged_split_idx, removed_split_idxs, num_splits_removed):
+    for egi in range(len(engine_graphs)):
+        for si in range(len(engine_graphs[egi])):
+            # Assert the recently removed splits are not in the graph
+            assert engine_graphs[egi][si] not in removed_split_idxs
+            # Update the split number
+            if engine_graphs[egi][si] > merged_split_idx:
+                engine_graphs[egi][si] -= num_splits_removed
+    return engine_graphs
+
+# For NX, there is no need to make a separate JSON for each subgraph, can combine all the
+# NX subgraphs into 2 subgraph and update the splits to reflect this.
+#
+# Example input:
+#   splits = [ [0, 1], [2], [3, 4, 5], [6, 7], [8], [9], [10, 11], [12, 13, 14, 15], [16, 17], [18] ]
+#   engine_graphs_nx  = [ [0, 1], [3, 4], [7] ]
+#   engine_graphs_mxp = [ [2], [5, 6], [8, 9] ]
+# Example output:
+#   splits = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [9], [10, 11], [12, 13, 14, 15], [16, 17], [18]]
+#   engine_graphs_nx  = [[0], [2], [5]]
+#   engine_graphs_mxp = [[1], [3, 4], [6, 7]]
+def combine_nx_splits(splits, engine_graphs_nx, engine_graphs_mxp):
+    split_idx = -1
+    while True:
+        split_idx += 1
+        if split_idx >= len(splits):
+            break
+        split = splits[split_idx]
+
+        # Check if this split is in NX or MXP
+        engine = get_engine_from_split_idx(split_idx, engine_graphs_nx, engine_graphs_mxp)
+
+        # If on MXP, keep the numbering the same
+        if engine == Engine.MXP:
+            continue
+        assert engine == Engine.NX
+
+        # Get the engine graph containing this split
+        engine_graph = None
+        engine_graph_idx = None
+        for egi, eg in enumerate(engine_graphs_nx):
+            if split_idx in eg:
+                engine_graph_idx = egi
+                engine_graph = eg.copy()
+                break
+        assert engine_graph
+
+        # If it contains only one split, then keep numbering the same (like MXP case)
+        if len(engine_graph) == 1:
+            continue
+
+        # Merge all the splits into one split
+        # Example:
+        #   engine_graph = [0, 1, 2], meaning this engine graph contains splits 0, 1, 2
+        #   If splits = [ [0, 1], [2, 3], [4], [5, 6] ], then after the merge,
+        #   splits = [ [0, 1, 2, 3, 4], [5, 6] ]
+        num_splits_before = len(splits)
+        splits = merge_splits(splits, engine_graph)
+
+        # Some sanity checks
+        num_splits_after = len(splits)
+        assert num_splits_after < num_splits_before
+        num_splits_removed = num_splits_before - num_splits_after
+        assert num_splits_removed == len(engine_graph) - 1
+
+        # Update this NX engine graph
+        merged_split_idx = engine_graph[0]
+        removed_split_idxs = engine_graph[1:]
+        engine_graphs_nx[engine_graph_idx] = [merged_split_idx]
+
+        # Update the NX and MXP engine graphs to renumber all later splits
+        engine_graphs_nx  = renumber_splits(engine_graphs_nx,  merged_split_idx, removed_split_idxs, num_splits_removed)
+        engine_graphs_mxp = renumber_splits(engine_graphs_mxp, merged_split_idx, removed_split_idxs, num_splits_removed)
+
+    # Final check that every NX engine graph is 1 split now
+    for eg in engine_graphs_nx:
+        assert len(eg) == 1
+
+    return splits, engine_graphs_nx, engine_graphs_mxp
 
 def gen_subgraph(idir, odir, jname, splits, vnnx, forced_shape=None):
 
@@ -496,9 +848,6 @@ def gen_subgraph(idir, odir, jname, splits, vnnx, forced_shape=None):
         output_ops = selected_operators[-1]['outputs']
 
         
-        input_ops = selected_operators[0]['inputs']
-        output_ops = selected_operators[-1]['outputs']
-
         all_input_ops = []
         all_output_ops = []
 
@@ -516,8 +865,9 @@ def gen_subgraph(idir, odir, jname, splits, vnnx, forced_shape=None):
                 t = tensors[io]
                 buf = buffers[t['buffer']]
                 if 'data' not in buf:
-                    input_names.append(t['name'])
-                    input_tensors.append(io)
+                    if t['name'] not in input_names:
+                        input_names.append(t['name'])
+                        input_tensors.append(io)
 
         output_names = []
         output_tensors = []
@@ -526,8 +876,9 @@ def gen_subgraph(idir, odir, jname, splits, vnnx, forced_shape=None):
                 t = tensors[io]
                 buf = buffers[t['buffer']]
                 if 'data' not in buf:
-                    output_names.append(t['name'])
-                    output_tensors.append(io)
+                    if t['name'] not in output_names:
+                        output_names.append(t['name'])
+                        output_tensors.append(io)
 
         # remove unused buffers/tensors
         
@@ -591,8 +942,404 @@ def gen_subgraph(idir, odir, jname, splits, vnnx, forced_shape=None):
 
     return json_subgraphs
 
+# Given list of subgraphs, and engine graphs for nx and mxp,
+# write the nx engine graphs to json files
+def write_nx_engine_graphs(json_subgraphs, nx_dirname, engine_graphs_nx, engine_graphs_mxp) -> None:
 
-def generate_split_graphs(tflite_model, dir, split_every_op=False, cuts=None, vnnx=False):
+    # Remove previous nx_engine dir and create a new one
+    nx_engine_graphs = 0
+
+    # Iterate over all splits
+    assert os.path.isdir(nx_dirname)
+    for split_idx, j in enumerate(json_subgraphs):
+        # Check if this split is on NX or MXP
+        engine = get_engine_from_split_idx(split_idx, engine_graphs_nx, engine_graphs_mxp)
+
+        # If MXP, do not write JSON for this engine graph
+        if engine == Engine.MXP:
+            continue
+
+        # For NX, write subgraphs to disk for now so NX can use later
+        # Eventually can call NX directly
+        assert engine == Engine.NX
+        with open(j) as f:
+            split = json.load(f)
+        engine_graph_fname = os.path.join(nx_dirname, str(nx_engine_graphs) + ".json")
+        nx_engine_graphs += 1
+        with open(engine_graph_fname, 'w') as json_file:
+            json.dump(split, json_file, indent=4)
+
+# Write the graph to a .json file as well as a list of which ops are on MXP
+def write_json_graph_and_mxp_ops_for_nx(jname: str, nx_dirname: str, engine_graphs_mxp: list[list],\
+    splits: list[list]) -> None:
+
+    # Read full graph from JSON
+    with open(jname) as f:
+        graph = json.load(f)
+
+    # Write the JSON graph to a file
+    assert os.path.isdir(nx_dirname)
+    graph_fname = os.path.join(nx_dirname, "graph.json")
+    with open(graph_fname, 'w') as json_file:
+        json.dump(graph, json_file, indent=4)
+
+    # Write all the MXP ops to a file
+    mxp_ops_fname = os.path.join(nx_dirname, "mxp_op_idx.txt")
+    with open(mxp_ops_fname, 'w') as txt_file:
+        for eg in engine_graphs_mxp:
+            for split_idx in eg:
+                for op in splits[split_idx]:
+                    txt_file.write(str(op) + "\n")
+
+def write_json_per_nx_engine_graph(jname, tmp_dir, splits, nx_dirname,\
+    engine_graphs_nx, engine_graphs_mxp):
+
+    # For separate JSON, work on copies because these are modified in place below
+    splits_copy  = copy.deepcopy(splits)
+    engine_graphs_nx_copy  = copy.deepcopy(engine_graphs_nx)
+    engine_graphs_mxp_copy = copy.deepcopy(engine_graphs_mxp)
+
+    # For NX, combine all splits in an engine graph to a single split, so each NX engine graph
+    # is one split instead of multiple. This is used to make one JSON per engine graph for NX.
+    #
+    # Note that the MXP compiler will not see these merged subgraphs for NX, it will still see the
+    # original smaller subgraphs. This is because merging into larger subgraphs results in
+    # set_io_nodes failing to find graph output tensors inside the merged NX subgraphs.
+    merged_splits, merged_engine_graphs_nx, merged_engine_graphs_mxp = combine_nx_splits(splits_copy,
+        engine_graphs_nx_copy, engine_graphs_mxp_copy)
+
+    # Write temporary NX files like previous calls to gen_subgraph
+    nx_subdir = os.path.join(tmp_dir, 'subgraphs_nx_merged')
+    if not os.path.exists(nx_subdir):
+        os.mkdir(nx_subdir)
+    json_subgraphs_merged_nx = gen_subgraph(nx_subdir, nx_subdir, jname, merged_splits, vnnx=False)
+
+    # Write the JSON for each graph engine
+    # It might be possible to do this more efficiently. E.g., instead of load and write the
+    # NX JSON files, just copy them from their location in json_subgraphs_merged_nx.
+    nx_unused_dir = os.path.join(nx_dirname, 'partitions')
+    os.mkdir(nx_unused_dir)
+    write_nx_engine_graphs(json_subgraphs_merged_nx, nx_unused_dir, merged_engine_graphs_nx, merged_engine_graphs_mxp)
+
+def get_op_list_from_engine_graphs(splits, engine_graphs_mxp):
+    mxp_ops = []
+    for eg in engine_graphs_mxp:
+        for split_idx in eg:
+            for op_idx in splits[split_idx]:
+                mxp_ops.append(op_idx)
+    return mxp_ops
+
+def get_op_list_from_splits(splits):
+    all_ops = []
+    for split in splits:
+        for op_idx in split:
+            all_ops.append(op_idx)
+    return all_ops
+
+# Get a list of tflite op indexes which are on the MXP and are part of
+# pre-processing (at the inputs of the graph).
+#
+# Note: Currently this assumes that MXP ops processing the graph inputs are part
+# of the pre-processing, i.e., there is not an MXP subgraph later in the graph
+# which has inputs from both NX as well as a graph input. If this is not the
+# case, this DFS can be updated to search in both directions (see implementation
+# in get_mxp_postprocessing_ops_forwards_backwards)
+def get_mxp_preprocessing_ops(jname, mxp_ops):
+    # Read the graph from JSON
+    with open(jname) as f:
+        graph = json.load(f)
+    subgraph = graph['subgraphs'][0]
+
+    # Start with the ops that consume the graph inputs
+    visited = []
+    input_tensors = subgraph['inputs']
+    for input_tensor_idx in input_tensors:
+        for op_idx, op in enumerate(subgraph['operators']):
+            if input_tensor_idx in op['inputs']:
+                if op_idx in mxp_ops:
+                    visited.append(op_idx)
+
+    # Search forwards until no nodes left to visit
+    mxp_preprocessing_ops = set()
+    while visited:
+        op_idx = visited.pop()
+        if op_idx in mxp_preprocessing_ops:
+            continue
+        mxp_preprocessing_ops.add(op_idx)
+
+        # For each output, find its consumer ops and add them to visited if on MXP
+        outputs = subgraph['operators'][op_idx]['outputs']
+        for output_tensor_idx in outputs:
+            for consumer_op_idx, consumer_op in enumerate(subgraph['operators']):
+                if output_tensor_idx in consumer_op['inputs']:
+                    if consumer_op_idx in mxp_ops and consumer_op_idx not in mxp_preprocessing_ops:
+                        visited.append(consumer_op_idx)
+                    else:
+                        break # Stop tracing if op not on MXP
+
+    return list(mxp_preprocessing_ops)
+
+# Get a list of tflite op indexes which are on the MXP and are part of
+# post-processing (at the outputs of the graph).
+def get_mxp_postprocessing_ops(jname, mxp_ops):
+    # Read the graph from JSON
+    with open(jname) as f:
+        graph = json.load(f)
+    subgraph = graph['subgraphs'][0]
+
+    # Start with the ops that produce the graph outputs
+    visited = []
+    output_tensors = subgraph['outputs']
+    for output_tensor_idx in output_tensors:
+        for op_idx, op in enumerate(subgraph['operators']):
+            if output_tensor_idx in op['outputs']:
+                if op_idx in mxp_ops:
+                    visited.append(op_idx)
+
+    # Search backwards until no nodes left to visit
+    mxp_postprocessing_ops = set()
+    while visited:
+        op_idx = visited.pop()
+        if op_idx in mxp_postprocessing_ops:
+            continue
+        mxp_postprocessing_ops.add(op_idx)
+
+        # For each input, find its producer op and add it to visited if on MXP
+        inputs = subgraph['operators'][op_idx]['inputs']
+        for input_tensor_idx in inputs:
+            for producer_op_idx, producer_op in enumerate(subgraph['operators']):
+                if input_tensor_idx in producer_op['outputs']:
+                    if producer_op_idx in mxp_ops and producer_op_idx not in mxp_postprocessing_ops:
+                        visited.append(producer_op_idx)
+                    else:
+                        break # Stop tracing if op not on MXP
+
+    return list(mxp_postprocessing_ops)
+
+# Get a list of tflite op indexes which are on the MXP and are part of
+# post-processing (at the outputs of the graph).
+#
+# Note this DFS searches in both directions to find cases like this:
+#
+#               ...
+#                │
+#              ┌─▼─┐
+#              │MXP│
+#              └─┬─┘
+#         ┌──────┤
+#         │      │
+#       ┌─▼─┐    │
+#       │NX │    │
+#       └┬──┘    │
+#        │ ┌─────┘
+#        │ │
+#       ┌▼─▼┐
+#       │MXP│
+#       └─┬─┘
+#         │
+#         ▼
+#       Output
+#
+# Here the bottom MXP op is part of post-processing and does not need to be sent
+# to NX, but the top MXP op produces an output used by NX so it is not part of
+# the post-processing.
+#
+# This was originally added for YOLOv8/9 where the final nodes in the graph
+# contain a Conv2D which creates this pattern, and Conv2D is usually done on NX.
+# But that Conv2D is actually very simple (1x1 and single-channel output) so it
+# is better to do on the RISC-V where there is conditional execution and it can
+# be pipelined with the next input. Therefore, currently there is no example
+# where the DFS in both directions is needed, although it may be in the future.
+def get_mxp_postprocessing_ops_forwards_backwards(jname, mxp_ops):
+    # Read the graph from JSON
+    with open(jname) as f:
+        graph = json.load(f)
+    subgraphs = graph['subgraphs']
+    operators = subgraphs[0]['operators']
+    tensors = subgraphs[0]['tensors']
+
+    # Mapping from tensor index to the operator producing it
+    tensor_to_producer = {}
+    for idx, op in enumerate(operators):
+        for tensor_idx in op['outputs']:
+            tensor_to_producer[tensor_idx] = idx
+
+    # Mapping from tensor index to the list of operators consuming it
+    tensor_to_consumers = {}
+    for idx, op in enumerate(operators):
+        for tensor_idx in op['inputs']:
+            if tensor_idx not in tensor_to_consumers:
+                tensor_to_consumers[tensor_idx] = []
+            tensor_to_consumers[tensor_idx].append(idx)
+
+    # Forward DFS to check if any path leads to a non-mxp operator
+    def forward_dfs(tensor_idx, visited_tensors):
+        if tensor_idx in visited_tensors:
+            return True  # Already visited
+        visited_tensors.add(tensor_idx)
+
+        if tensor_idx in tensor_to_consumers:
+            for consumer_op_idx in tensor_to_consumers[tensor_idx]:
+                if consumer_op_idx not in mxp_ops:
+                    return False  # Found a non-mxp operator
+                # Check further downstream tensors
+                for output_tensor_idx in operators[consumer_op_idx]['outputs']:
+                    if not forward_dfs(output_tensor_idx, visited_tensors):
+                        return False
+        return True
+
+    # Backward DFS to find valid mxp operators
+    def backward_dfs(tensor_idx, visited_ops):
+        if tensor_idx not in tensor_to_producer:
+            return True  # No producer, continue
+        producer_op_idx = tensor_to_producer[tensor_idx]
+
+        if producer_op_idx in visited_ops or producer_op_idx not in mxp_ops:
+            return True  # Already visited or not a mxp op
+
+        # Check all forward paths from this operator's outputs
+        for output_tensor_idx in operators[producer_op_idx]['outputs']:
+            if not forward_dfs(output_tensor_idx, set()):
+                return False  # Found an invalid path
+
+        visited_ops.add(producer_op_idx)
+
+        # Continue DFS for all inputs of the current operator
+        for input_tensor_idx in operators[producer_op_idx]['inputs']:
+            if not backward_dfs(input_tensor_idx, visited_ops):
+                return False  # Stop if any input path is invalid
+
+        return True
+
+    # Search backwards from the graph outputs
+    visited_ops = set()
+    for tensor_idx in set(subgraphs[0]['outputs']):
+        backward_dfs(tensor_idx, visited_ops)
+
+    return list(visited_ops)
+
+def update_mxp_ops_with_removed_ops(mxp_ops, removed_ops):
+    num_removed = 0
+    num_to_remove = len(removed_ops)
+    while num_removed < num_to_remove:
+        # Pop the next one from the front
+        removed_op_idx = removed_ops.pop(0)
+        # If this is on MXP, remove it from MXP ops
+        if removed_op_idx in mxp_ops:
+            mxp_ops.remove(removed_op_idx)
+        # Now renumber the remaining ops that come after this one
+        # by subtracting 1 from their op index
+        for i in range(len(removed_ops)):
+            if removed_ops[i] > removed_op_idx:
+                removed_ops[i] -= 1
+        for i in range(len(mxp_ops)):
+            if mxp_ops[i] > removed_op_idx:
+                mxp_ops[i] -= 1
+        num_removed += 1
+
+# Write the graph to JSON without MXP nodes for pre and post processing
+# Also write a .txt file of the op IDs inside the remaining graph which are on MXP
+#
+# Note: Another way of removing these nodes for NX would be to send the entire graph,
+# and then remove the pre/post-processing in the NX TFLite parser before creating NX IR.
+# This solution of truncating the graph before sending was chosen instead because it
+# makes more sense that the handoff from MXP -> NX compiler should not include extra
+# nodes which NX does not care about. But it requires the ops on MXP to be renumbered
+# to match the new graph (done below). If this is too complicated, then this node removal
+# can be done in the NX TFLite parser, although then other changes will be needed to not
+# use the TFLite graph inputs/outputs as the IR inputs/outputs but instead the new tensors
+# that become inputs/outputs after the pre/post-processing nodes are removed.
+def write_json_graph_without_mxp_pre_post_processing(jname, tmp_dir, splits, nx_dirname,\
+    engine_graphs_mxp, output_name):
+
+    # Get a list of all ops and all ops on MXP
+    # The engine graph concept (list of lists) is not useful and can be removed.
+    mxp_ops = get_op_list_from_engine_graphs(splits, engine_graphs_mxp)
+    all_ops = get_op_list_from_splits(splits)
+
+    # Get a list of ops to remove which are from MXP preprocessing
+    removed_ops = get_mxp_preprocessing_ops(jname, mxp_ops)
+
+    # Also get MXP post-processing ops.
+    # Note this is usually not needed because the graph is cut for the RISC-V.
+    removed_ops += get_mxp_postprocessing_ops_forwards_backwards(jname, mxp_ops)
+
+    # If nothing to remove, no need to update files
+    if not removed_ops:
+        return
+
+    # For every removed op, remove it from all_ops
+    for removed_op_idx in removed_ops:
+        if removed_op_idx in all_ops:
+            all_ops.remove(removed_op_idx)
+
+    # For every removed op, remove it from mxp_ops too,
+    # but also renumber the ops to match the new graph
+    update_mxp_ops_with_removed_ops(mxp_ops, removed_ops)
+
+    # Use gen_subgraph to write a new .json for the truncated graph
+    nx_subdir = os.path.join(tmp_dir, 'subgraphs_no_mxp_pre_post_proc')
+    if not os.path.exists(nx_subdir):
+        os.mkdir(nx_subdir)
+
+    # If the graph is entirely on MXP, no need to write JSON for NX
+    if all_ops:
+        json_subgraphs_no_pre_post = gen_subgraph(nx_subdir, nx_subdir, jname, [all_ops], vnnx=False)
+        assert len(json_subgraphs_no_pre_post) == 1
+        jname_truncated = json_subgraphs_no_pre_post[0]
+
+        # Read graph from JSON and write it to a file.
+        # It might be possible to do this more efficiently. E.g., instead of load and write the
+        # NX JSON files, just copy them from their location in json_subgraphs_merged_nx.
+        with open(jname_truncated) as f:
+            graph = json.load(f)
+        assert os.path.isdir(nx_dirname)
+        assert output_name != None
+        output_name = output_name.replace('-', '_').replace('.', '_')
+        graph_fname = os.path.join(nx_dirname, f"{output_name}.json")
+        with open(graph_fname, 'w') as json_file:
+            json.dump(graph, json_file, indent=4)
+
+    # Write all the MXP ops to a file too
+    mxp_ops_fname = os.path.join(nx_dirname, "mxp_op_idx.txt")  # mxp_op_idx_truncated.txt
+    with open(mxp_ops_fname, 'w') as txt_file:
+        for op in mxp_ops:
+            txt_file.write(str(op) + "\n")
+
+def delete_and_remake_dir(dirname):
+    import shutil
+    if os.path.isdir(dirname):
+        shutil.rmtree(dirname)
+    os.mkdir(dirname)
+
+def write_json_for_nx(jname, tmp_dir, splits, engine_graphs_nx, engine_graphs_mxp, output_name):
+
+    # Make an nx_dir for the final engine graph JSON files
+    nx_dirname = "nx_engine"
+    delete_and_remake_dir(nx_dirname)
+
+    # Also make a sync dir
+    nx_sync_dir = os.path.join(nx_dirname, 'sync')
+    os.mkdir(nx_sync_dir)
+
+    # Write the entire graph to JSON, along with a list of which ops are on MXP.
+    write_json_graph_and_mxp_ops_for_nx(jname, nx_dirname, engine_graphs_mxp, splits)
+
+    # Write the JSON graph without the pre and post processing ops (on MXP).
+    write_json_graph_without_mxp_pre_post_processing(jname, tmp_dir, splits, nx_dirname,\
+        engine_graphs_mxp, output_name)
+
+    # This next function is unused and can be deleted, along with the helper functions
+    # it calls. It writes each individual NX engine graph to a separete JSON file.
+    # This may be useful for testing, but saving the entire graph as a single JSON and
+    # also including a list of ops on MXP is more accurate because there can be connections
+    # from one NX engine graph to another, e.g., two NX engine graphs does not mean two
+    # completely separate graphs.
+    write_json_per_nx_engine_graph(jname, tmp_dir, splits, nx_dirname,\
+        engine_graphs_nx, engine_graphs_mxp)
+
+def generate_split_graphs(tflite_model, dir, split_every_op=False, cuts=None, vnnx=False, vbx_version=2,\
+    output_name=None):
     schema_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),'schema.fbs') 
     jname = os.path.join(dir, os.path.basename(tflite_model).replace('.tflite','.json'))
 
@@ -617,7 +1364,16 @@ def generate_split_graphs(tflite_model, dir, split_every_op=False, cuts=None, vn
         os.mkdir(subdir)
 
     # errors.append([i,op,opcode])
-    splits, error_ops, special_ops = get_splits(jname, split_every_op)
+    if vbx_version == 3:
+        nx_op_types = ['CONV_2D', ]
+        agnostic_op_types = ['QUANTIZE', 'RESIZE_NEAREST_NEIGHBOR', 'PAD', 'ADD', 'CONCATENATION',\
+                             'STRIDED_SLICE', ]
+        engine_op_types = EngineOpTypes(nx_op_types, agnostic_op_types)
+
+        # Pass in nx_op_types in case need to add additional splits at engine graph boundaries
+        splits, error_ops, special_ops = get_splits(jname, split_every_op, engine_op_types)
+    else:
+        splits, error_ops, special_ops = get_splits(jname, split_every_op)
     # print(splits)
     # sys.stderr.write('splits: {} not implemented\n'.format(splits))
     if len(error_ops)>0: 
@@ -644,10 +1400,27 @@ def generate_split_graphs(tflite_model, dir, split_every_op=False, cuts=None, vn
         if not os.path.exists(special_dir):
             os.makedirs(special_dir)
         gen_subgraph(subdir, special_dir, jname, special_ops, False) #, [256,])
-    return gen_subgraph(subdir, subdir, jname, splits, vnnx)
+    json_subgraphs = gen_subgraph(subdir, subdir, jname, splits, vnnx)
+
+    if vbx_version == 3:
+        # Map each split to an engine
+        # TODO: Currently these are only being used as lists of splits. The engine graph concept
+        # (list of lists) is not used anywhere. If it will never be needed, can simplify this.
+        engine_graphs_nx, engine_graphs_mxp = get_splits_per_engine(jname, splits, engine_op_types)
+
+        # For NX, write the required engine graphs to JSON files
+        write_json_for_nx(jname, dir, splits, engine_graphs_nx, engine_graphs_mxp, output_name)
+
+        # For MXP, return all subgraphs but also which are on NX.
+        # It may be possible to just return the subgraphs which are on MXP, rather than return all
+        # subgraphs. But currently this would result in set_io_nodes failing to find the graph
+        # input and output tensors which are only in the NX subgraphs.
+        return json_subgraphs, engine_graphs_nx
+
+    return json_subgraphs, None
 
 
-def generate_cut_graphs(tflite_model, cuts=None):
+def generate_cut_graphs(tflite_model, cuts=None, vnnx=False):
     schema_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),'schema.fbs') 
     dir = os.path.dirname(tflite_model)
     if dir == '':
@@ -673,7 +1446,7 @@ def generate_cut_graphs(tflite_model, cuts=None):
     subprocess.run(shlex.split(cmd))
 
     cuts = get_cuts(jname, cuts)
-    return gen_subgraph(dir, dir, jname, cuts, False)
+    return gen_subgraph(dir, dir, jname, cuts, vnnx)
 
 
 def join_graph(graphs):
@@ -718,12 +1491,18 @@ def generate_join_graphs(tflite_model, dir, debug=False):
 
     return graph
 
-def get_output_scale(scale_factor):
-    q_min = -128
-    q_max = 127
 
-    min_output_fp = (q_min +128)*(1/scale_factor)
-    max_output_fp = (q_max +128)*(1/scale_factor)
+def get_output_scale(scale_factor, dtype='INT8'):
+    if dtype.upper()=='UINT8':
+        q_min = 0
+        q_max = 255
+        min_output_fp = (q_min)*(1/scale_factor)
+        max_output_fp = (q_max)*(1/scale_factor)
+    else:
+        q_min = -128
+        q_max = 127
+        min_output_fp = (q_min +128)*(1/scale_factor)
+        max_output_fp = (q_max +128)*(1/scale_factor)
 
     output_scale = (max_output_fp-min_output_fp)/255
 
@@ -732,28 +1511,36 @@ def get_output_scale(scale_factor):
     return output_scale, output_zero_point
 
 
-def get_details_from_constants(var_factor):
-    
+def get_details_from_constants(var_factor, dtype='INT8'):
     max_value = max(var_factor)
     min_value = min(var_factor)
     if max_value > 0 :
-        zero_point =  -128
-        q_value = 127
+        if dtype.upper()=='UINT8':
+            zero_point =  0
+            q_value = 255
+
+        else:
+            zero_point =  -128
+            q_value = 127
         fp_value = max_value
     else:
-        zero_point = 127
-        q_value = -128
+        if dtype.upper()=='UINT8':
+            zero_point = 255
+            q_value = 0
+        else:
+            zero_point = 127
+            q_value = -128
         fp_value = min_value
 
     scale = fp_value/(q_value-zero_point)
 
     q_value = [round((i/scale) + zero_point) for i in var_factor]
+    # print(q_value)
     
     return scale, zero_point, q_value
 
 
-def get_quantize_values(scale, mean):
-
+def get_quantize_values(scale, mean, dtype='INT8'):
     if isinstance(mean, list) and isinstance(scale, list):
         #scaling mean and scale inputs
         scale_factor = [1 / j for j in scale]
@@ -767,31 +1554,38 @@ def get_quantize_values(scale, mean):
         return [scale, scale_zero_point, scale_q_value], [mean_scale, mean_zero_point, mean_q_value]
 
     elif isinstance(scale, list) and mean ==0.0:
-        scale_q_value = 127
+        if dtype.upper()=='UINT8':
+            scale_q_value = 255
+            scale_zero_point = 254
+        else:
+            scale_q_value = 127
+            scale_zero_point = 126
         scale = [1 / j for j in scale]
-        scale_zero_point = 126
 
         return [scale, scale_zero_point, scale_q_value], []
+    
 
+def inject_preprocess(i, o0, t0, opcodes, tensors, buffers, graph_inputs, inputs, operators, scale, mean, dtype='INT8'):
 
-def inject_preprocess(i, o0, t0, opcodes, tensors, buffers, graph_inputs, inputs, operators, scale, mean):
+    # add QUANTIZE only for
+    ops_num = i
+    if dtype.upper() != "UINT8":
+        buffers.append({'offset': 0, 'size': 0})
+        tensors.append({'shape': t0['shape'],
+            'type': 'UINT8',
+            'buffer': len(buffers)-1,
+            'name': 'preprocess_data:{}'.format(i),
+            'quantization': {'scale': [1.0], 'zero_point': [0], 'details_type': 'NONE', 'quantized_dimension': 0},
+            'is_variable': False,
+            'has_rank': True})
+        graph_inputs[i]['tensor_index'] = len(tensors)-1
+        inputs[i] = len(tensors)-1 
 
-    # add QUANTIZE
-    buffers.append({'offset': 0, 'size': 0})
-    tensors.append({'shape': t0['shape'],
-        'type': 'UINT8',
-        'buffer': len(buffers)-1,
-        'name': 'preprocess_data:{}'.format(i),
-        'quantization': {'scale': [1.0], 'zero_point': [0], 'details_type': 'NONE', 'quantized_dimension': 0},
-        'is_variable': False,
-        'has_rank': True})
-    graph_inputs[i]['tensor_index'] = len(tensors)-1
-    inputs[i] = len(tensors)-1 
-
-    inject_op = {'opcode_index': opcodes.index('QUANTIZE'),
-                 'inputs': [len(tensors)-1],
-                 'outputs': [o0]}
-    operators = operators[:i] + [inject_op] + operators[i:]
+        inject_op = {'opcode_index': opcodes.index('QUANTIZE'),
+                    'inputs': [len(tensors)-1],
+                    'outputs': [o0]}
+        operators = operators[:ops_num] + [inject_op] + operators[ops_num:]
+        ops_num += 1
 
     do_mul = isinstance(scale, list) or (scale != 1.0)
     do_add = isinstance(mean, list) or (mean != 0.0)
@@ -802,7 +1596,7 @@ def inject_preprocess(i, o0, t0, opcodes, tensors, buffers, graph_inputs, inputs
 
     if do_mul:
         mul_offset = 1
-        scale_details, shift_details = get_quantize_values(scale, mean)
+        scale_details, shift_details = get_quantize_values(scale, mean, dtype)
         scale_factor = max(scale)
         scale = scale_details[0]
         scale_zero_point = scale_details[1]
@@ -816,25 +1610,32 @@ def inject_preprocess(i, o0, t0, opcodes, tensors, buffers, graph_inputs, inputs
 
         scale_q_value = scale_q_value.tolist()
 
-        output_scale, output_zeropoint = get_output_scale(scale_factor)
+        output_scale, output_zeropoint = get_output_scale(scale_factor, dtype)
         output_zeropoint = round(output_zeropoint)
 
         if isinstance(scale, list):
             scale = scale[0]
-
+        if dtype.upper() == "UINT8":
+            mul_zp = 0
+        else:
+            mul_zp = -128
         buffers.append({'offset': 0, 'size': 0})
         tensors.append({'shape': t0['shape'],
-            'type': 'INT8',
+            'type': dtype.upper(),
             'buffer': len(buffers)-1,
             'name': 'scale_data:{}'.format(i),
-            'quantization': {'scale': [1.0], 'zero_point': [-128], 'details_type': 'NONE', 'quantized_dimension': 0},
+            'quantization': {'scale': [1.0], 'zero_point': [mul_zp], 'details_type': 'NONE', 'quantized_dimension': 0},
             'is_variable': False,
             'has_rank': True})
-
-        operators[i]['outputs'] = [len(tensors)-1]
+        
+        if dtype.upper() != "UINT8":
+            operators[i]['outputs'] = [len(tensors)-1]
+        else:
+            graph_inputs[i]['tensor_index'] = len(tensors)-1
+            inputs[i] = len(tensors)-1 
         buffers.append({'data': scale_q_value, 'offset': 0, 'size': 0})
         tensors.append({'shape': [1,1,1,channel],
-            'type': 'INT8',
+            'type': dtype.upper(),
             'buffer': len(buffers)-1,
             'name': 'mul_data:{}'.format(i),
             'quantization': {'scale': [scale], 'zero_point': [scale_zero_point], 'details_type': 'NONE', 'quantized_dimension': 0},
@@ -849,13 +1650,14 @@ def inject_preprocess(i, o0, t0, opcodes, tensors, buffers, graph_inputs, inputs
                     'inputs': [len(tensors)-2, len(tensors)-1], 
                     'outputs': [o0]}
 
-        operators = operators[:i+1] + [inject_op] + operators[i+1:]
+        operators = operators[:ops_num] + [inject_op] + operators[ops_num:]
+        ops_num = ops_num+mul_offset
 
     if do_add:
         # add ADD
         buffers.append({'offset': 0, 'size': 0})
         tensors.append({'shape': t0['shape'],
-            'type': 'INT8',
+            'type': dtype.upper(),
             'buffer': len(buffers)-1,
             'name': 'shift_data:{}'.format(i),
             'quantization': {'scale': [output_scale], 'zero_point': [output_zeropoint], 'details_type': 'NONE', 'quantized_dimension': 0},
@@ -882,7 +1684,7 @@ def inject_preprocess(i, o0, t0, opcodes, tensors, buffers, graph_inputs, inputs
         
         buffers.append({'data': mean_q_value, 'offset': 0, 'size': 0})
         tensors.append({'shape': [channel],
-            'type': 'INT8',
+            'type': dtype.upper(),
             'buffer': len(buffers)-1,
             'name': 'add_data:{}'.format(i),
             # 'quantization': {'scale': [1/255*(1/scale * 128/127)], 'zero_point': [-128], 'details_type': 'NONE', 'quantized_dimension': 0},
@@ -898,7 +1700,7 @@ def inject_preprocess(i, o0, t0, opcodes, tensors, buffers, graph_inputs, inputs
                     'inputs': [len(tensors)-2, len(tensors)-1],
                     'outputs': [o0]}
 
-        operators = operators[:i+mul_offset+1] + [inject_op] + operators[i+mul_offset+1:]
+        operators = operators[:ops_num] + [inject_op] + operators[ops_num:]
 
     return tensors, buffers, graph_inputs, inputs, operators
 
@@ -933,7 +1735,7 @@ def preprocess_graphs(tflite_model, scale=1.0, mean=0):
         inputs = subgraph['inputs']
         
         buffers = graph['buffers']
-        if graph['signature_defs']:
+        if 'signature_defs' in graph and len(graph['signature_defs']) > 0:
             graph_inputs = graph['signature_defs'][0]['inputs'] 
         else:
             input_ops = operators[0]['inputs']
@@ -971,16 +1773,29 @@ def preprocess_graphs(tflite_model, scale=1.0, mean=0):
             graph['signature_defs'][0]['inputs'] = graph_inputs
             graph['signature_defs'][0]['outputs'] = graph_outputs
 
-        for i, idx in enumerate(inputs[:1]):
-            op = subgraph['operators'][idx]
+            inputs = []
+            for t in input_tensors:
+                for i,op in enumerate(operators):
+                    if t in op['inputs']:
+                        inputs.append(i)
+                        break
+            subgraph['inputs'] = inputs
 
+        for i, idx in enumerate(inputs[:1]):
+            if len(subgraph['operators']) < idx:
+                for ops in subgraph['operators']:
+                    if idx in ops['inputs']:
+                        op = ops
+                        break
+            else:
+                op = subgraph['operators'][idx]
+            dtype = get_input_dtype(op, tensors)
             for o, o0 in enumerate(op['inputs']):
                 t0 = subgraph['tensors'][o0]
                 if 'buffer' in t0 and not ('data' in buffers[t0['buffer']]):
                     b0 = buffers[t0['buffer']]
                     q0 = t0['quantization']
-
-                    tensors, buffers, graph_inputs, inputs, operators = inject_preprocess(i, o0, t0, opcodes, tensors, buffers, graph_inputs, inputs, operators, scale, mean)
+                    tensors, buffers, graph_inputs, inputs, operators = inject_preprocess(i, o0, t0, opcodes, tensors, buffers, graph_inputs, inputs, operators, scale, mean, dtype)
 
         graph['signature_defs'][0]['inputs'] = graph_inputs
         graph['buffers'] = buffers
@@ -1015,10 +1830,233 @@ def preprocess():
     tmp_dir_obj.cleanup()
 
 
+def inject_post_process(i, op_idx, o0, t0, opcodes, tensors, buffers, graph_outputs, outputs, operators, dataset):
+  
+    tx = tensors[outputs[0]].copy()
+    current_output = outputs[0]
+
+    #inject CAST if
+    if tx['type'] != 'INT32':
+        buffers.append({'offset': 0, 'size': 0})
+        tensors.append({'shape': tx['shape'],
+                'type': 'INT32',
+                'buffer': len(buffers)-1,
+                'name': 'cast_{}'.format(i),
+                'quantization': {'details_type': 'NONE', 'quantized_dimension': 0},
+                'is_variable': False,
+                'has_rank': True})
+        inject_op = {'opcode_index': opcodes.index('CAST'),
+                    'inputs': [current_output],
+                    'outputs': [len(tensors)-1]}
+        operators = operators + [inject_op]
+        current_output = len(tensors)-1
+
+    #inject RESHAPE, adding back channels TODO remove if alread NHWC
+    shape = tx['shape']
+    if len(shape) == 3:
+        shape = shape + [1]
+    data = np.frombuffer(np.asarray(shape).astype(np.int32).tobytes(), dtype=np.uint8).tolist()
+    buffers.append({'data': data, 'offset': 0, 'size': 0})
+    tensors.append({'shape': [4],
+            'type': 'INT32',
+            'buffer': len(buffers)-1,
+            'name': 'expand_shape_{}'.format(i),
+            'quantization': {'details_type': 'NONE', 'quantized_dimension': 0},
+            'is_variable': False,
+            'has_rank': True})
+
+    buffers.append({'offset': 0, 'size': 0})
+    tensors.append({'shape': shape,
+            'type': 'INT32',
+            'buffer': len(buffers)-1,
+            'name': 'expand_{}'.format(i),
+            'quantization': {'details_type': 'NONE', 'quantized_dimension': 0},
+            'is_variable': False,
+            'has_rank': True})
+
+    inject_op = {'opcode_index': opcodes.index('RESHAPE'),
+                'builtin_options_type': 'ReshapeOptions',
+                'inputs': [current_output, len(tensors)-2], 
+                'outputs': [len(tensors)-1]}
+    operators = operators + [inject_op]
+    current_output = len(tensors)-1
+
+    colors = []
+    if dataset == "VOC":
+        colors = [[0,0,0]] + rgb_color.voc_colors
+    elif dataset == "COCO":
+        colors = [[0,0,0]] + rgb_color.coco_colors
+    elif dataset == "depth":
+        colors = cv2.applyColorMap(np.arange(256).astype('uint8'), cv2.COLORMAP_PLASMA).reshape((256,3))
+
+    # covert to RGB
+    colors = np.array([_[0]*(2**16) + _[1]*(2**8) + _[2]*(2**0) for _ in colors]).astype(np.uint32)
+    # add alpha
+    colors += 128*(2**24)
+
+    #inject Gather
+    buffers.append({'data': np.frombuffer(colors.tobytes(), dtype=np.uint8).tolist(), 'offset': 0, 'size': 0})
+    tensors.append({'shape':[len(colors)],
+            'type': 'INT32',
+            'buffer': len(buffers)-1,
+            'name': 'class_rgba_{}'.format(i),
+            'quantization': {'details_type': 'NONE', 'quantized_dimension': 0},
+            'is_variable': False,
+            'has_rank': True})
+    
+    buffers.append({'offset': 0, 'size': 0})
+    tensors.append({'shape': shape,
+            'type': 'INT32',
+            'buffer': len(buffers)-1,
+            'name': 'output_{}'.format(i),
+            'quantization': {'details_type': 'NONE', 'quantized_dimension': 0},
+            'is_variable': False,
+            'has_rank': True})
+    
+    inject_op = {'opcode_index': opcodes.index('GATHER'),
+                    'builtin_options_type': 'GatherOptions',
+                    "builtin_options": {
+                        "axis": 0,
+                        "batch_dims": 0
+                    },
+                    "custom_options_format": "FLEXBUFFERS",
+                    "large_custom_options_offset": 0,
+                    "large_custom_options_size": 0,
+                    'inputs': [len(tensors)-2, current_output],
+                    'outputs': [len(tensors)-1]}
+    operators = operators + [inject_op]
+
+    current_output = len(tensors)-1
+    outputs[i] = len(tensors)-1
+    graph_outputs[i]['tensor_index'] = len(tensors)-1
+    graph_outputs[i]['name'] = tensors[-1]['name']
+    
+
+    return tensors, buffers, graph_outputs, outputs, operators
+
+
+def post_processing_graphs(tflite_model, datatset):
+    schema_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),'schema.fbs') 
+    dir = os.path.dirname(tflite_model)
+    if dir == '':
+        dir = './'
+    jname = os.path.join(dir, os.path.basename(tflite_model).replace('.tflite','.json'))
+    cmd = 'flatc -t --strict-json --defaults-json -o {} {} -- {}'.format(dir, schema_path, tflite_model)
+    subprocess.run(shlex.split(cmd))
+    jname = os.path.join(os.path.dirname(tflite_model), os.path.basename(tflite_model).replace('.tflite','.json'))
+
+    with open(jname) as f:
+        graph = json.load(f)
+
+        assert(len(graph['subgraphs']) == 1)
+        subgraph = graph['subgraphs'][0]
+        operators = subgraph['operators']
+        tensors = subgraph['tensors']
+
+        opcodes = [_['builtin_code'] for _ in graph['operator_codes']]
+        if not 'GATHER' in opcodes:
+            graph['operator_codes'].append({'deprecated_builtin_code': 36, 'version': 2, 'builtin_code': 'GATHER'})
+        if not 'CAST' in opcodes:
+            graph['operator_codes'].append({'deprecated_builtin_code': 53, 'version': 2, 'builtin_code': 'CAST'})
+        if not 'RESHAPE' in opcodes:
+            graph['operator_codes'].append({'deprecated_builtin_code': 22, 'version': 2, 'builtin_code': 'RESHAPE'})
+
+        opcodes = [_['builtin_code'] for _ in graph['operator_codes']]
+        inputs = subgraph['inputs']
+        outputs = subgraph['outputs']
+        
+        buffers = graph['buffers']
+        if 'signature_defs' in graph: # graph['signature_defs']:
+            graph_inputs = graph['signature_defs'][0]['inputs'] 
+            graph_outputs = graph['signature_defs'][0]['outputs'] 
+        else:
+            input_ops = operators[0]['inputs']
+            output_ops = operators[-1]['outputs']
+            all_input_ops = []
+            all_output_ops = []
+
+            for op in operators:
+                all_input_ops += op['inputs']
+                all_output_ops += op['outputs']
+
+            input_ops = [_ for _ in all_input_ops if _ not in all_output_ops]
+            output_ops = [_ for _ in all_output_ops if _ not in all_input_ops]
+            input_names = []
+            input_tensors = []
+            for io in input_ops:
+                if io != -1:
+                    t = tensors[io]
+                    buf = buffers[t['buffer']]
+                    if 'data' not in buf:
+                        input_names.append(t['name'])
+                        input_tensors.append(io)
+            output_names = []
+            output_tensors = []
+            for io in output_ops:
+                if io != -1:
+                    t = tensors[io]
+                    buf = buffers[t['buffer']]
+                    if 'data' not in buf:
+                        output_names.append(t['name'])
+                        output_tensors.append(io)
+            graph_inputs = [{'name': n, 'tensor_index': i} for n, i in zip(input_names, input_tensors)]
+            graph_outputs = [{'name': n, 'tensor_index': i} for n, i in zip(output_names, output_tensors)]
+            graph['signature_defs'] = [{'inputs':None, 'outputs':None, 'signature_key':'serving_default', 'subgraph_index':0}]
+            graph['signature_defs'][0]['inputs'] = graph_inputs
+            graph['signature_defs'][0]['outputs'] = graph_outputs
+
+        for i, idx in enumerate(outputs[:1]):
+            if len(subgraph['operators']) < idx:
+                for op_idx,ops in enumerate(subgraph['operators']):
+                    if idx in ops['outputs']:
+                        op = ops
+                        break
+            else:
+                op = subgraph['operators'][idx]
+                op_idx = idx
+            dtype = get_output_dtype(op, tensors)
+            for o, o0 in enumerate(op['outputs']):
+                t0 = subgraph['tensors'][o0]
+                if 'buffer' in t0 and not ('data' in buffers[t0['buffer']]):
+                    b0 = buffers[t0['buffer']]
+                    q0 = t0['quantization']
+                    tensors, buffers, graph_outputs, outputs, operators = inject_post_process(i, op_idx, o0, t0, opcodes, tensors, buffers, graph_outputs, outputs, operators, datatset)
+
+        graph['signature_defs'][0]['outputs'] = graph_outputs
+        graph['buffers'] = buffers
+        subgraph['outputs'] = outputs
+        subgraph['operators'] = operators
+        subgraph['tensors'] = tensors
+        # print(graph)
+        jname = os.path.join(os.path.dirname(tflite_model), os.path.basename(tflite_model).replace('.tflite','.post.json'))
+        with open(jname, 'w') as f:
+            json.dump(graph, f)
+        cmd = 'flatc -b --strict-json --defaults-json -o {} {} {}'.format('./', schema_path, jname)
+        subprocess.run(shlex.split(cmd))
+
+def postprocess():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("tflite")
+    parser.add_argument("-d", "--dataset", choices=['VOC', 'COCO', 'depth'], default='VOC')
+    args = parser.parse_args()
+
+    tmp_dir_obj = tempfile.TemporaryDirectory()
+    tmp_dir = tmp_dir_obj.name
+    tmp_tflite = os.path.join(tmp_dir, os.path.basename(args.tflite))
+    shutil.copyfile(args.tflite, tmp_tflite)
+    post_processing_graphs(tmp_tflite, args.dataset)
+    graphs = glob.glob(os.path.join(tmp_dir, "*.tflite"))
+    for src in graphs:
+        if src != tmp_tflite:
+            dst = os.path.join(os.path.dirname(args.tflite),os.path.basename(src))
+            shutil.copyfile(src, dst)
+    tmp_dir_obj.cleanup()
+
 def cut():
     parser = argparse.ArgumentParser()
     parser.add_argument("tflite")
     parser.add_argument("-c", "--cuts", type=int, nargs='*')
+    parser.add_argument("--vnnx", action='store_true')
     args = parser.parse_args()
 
     tmp_dir_obj = tempfile.TemporaryDirectory()
@@ -1026,8 +2064,9 @@ def cut():
     tmp_tflite = os.path.join(tmp_dir, os.path.basename(args.tflite))
     shutil.copyfile(args.tflite, tmp_tflite)
 
-    generate_cut_graphs(tmp_tflite, args.cuts)
-    graphs = glob.glob(os.path.join(tmp_dir, "*.tflite"))
+    generate_cut_graphs(tmp_tflite, args.cuts, args.vnnx)
+    graphs = list(glob.glob(os.path.join(tmp_dir, "*.tflite")))
+    graphs += list(glob.glob(os.path.join(tmp_dir, "*.vnnx")))
     for src in graphs:
         if src != tmp_tflite:
             dst = os.path.join(os.path.dirname(args.tflite),os.path.basename(src))

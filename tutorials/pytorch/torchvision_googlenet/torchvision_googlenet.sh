@@ -49,6 +49,8 @@ fi
 if [ -f torchvision_googlenet.vnnx ]; then
     echo "Running Simulation..."
     python $VBX_SDK/example/python/classifier.py torchvision_googlenet.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg 
+    echo "C Simulation Command:"
+    echo '$VBX_SDK/example/sim-c/sim-run-model torchvision_googlenet.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg CLASSIFY'
 fi
 
 deactivate

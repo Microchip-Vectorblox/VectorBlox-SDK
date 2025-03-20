@@ -6,126 +6,64 @@ import cv2
 import json
 import vbx.postprocess.scrfd
 import sys
-from vbx.generate.utils import openvino_infer, openvino_input_shape
-from vbx.generate.utils import load_input
+
+import model_run as mr
+
 np.set_printoptions(threshold=sys.maxsize)
-def get_vnnx_io_shapes(vnxx):
-    with open(vnxx, 'rb') as mf:
-        model = vbx.sim.Model(mf.read())
-    return model.input_shape[0], model.output_shape
-
-def vnnx_infer(vnnx_model, input_array):
-    with open(vnnx_model, 'rb') as mf:
-        model = vbx.sim.Model(mf.read())
-
-    inputs_resized = (input_array / model.input_scale_factor[0]) + model.input_zeropoint[0]
-
-    flattened = inputs_resized.swapaxes(1, 2).swapaxes(0, 1).flatten().astype(model.input_dtypes[0])
-
-    outputs = model.run([flattened])
-    for idx, o in enumerate(outputs):
-        out_scaled = model.output_scale_factor[idx] * (o.astype(np.float32) - model.output_zeropoint[idx])
-        outputs[idx] = out_scaled
-
-    bw = model.get_bandwidth_per_run()
-    print("Bandwidth per run = {} Bytes ({:.3} MB/s at 100MHz)".format(bw,bw/100E6))
-    print("Estimated {} seconds at 100MHz".format(model.get_estimated_runtime(100E6)))
-    print("If running at another frequency, scale these numbers appropriately")
-
-    return outputs
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('model')
     parser.add_argument('image')
+    parser.add_argument('-sc', '--scale', type=float, nargs='+', default=[1.])
+    parser.add_argument('-m', '--mean', type=float, nargs='+', default=[0.])
     parser.add_argument('-b', '--bgr', action='store_true')
-    parser.add_argument('--norm', action='store_true')
     parser.add_argument('-t', '--threshold', type=float, default=0.8)
     parser.add_argument('-nms', '--nms-threshold', type=float, default=0.4)
-    parser.add_argument('--modification', '-m', default=None, type=int,  nargs="+")
+    
+    
 
     args = parser.parse_args()
     img = cv2.imread(args.image)
-    if '.vnnx' in args.model:
-        input_shape, output_shapes = get_vnnx_io_shapes(args.model)
+    scale = args.scale
 
-        with open(args.model, 'rb') as mf:
-            model = vbx.sim.Model(mf.read())
-        
-        h, w = model.input_shape[0][-2], model.input_shape[0][-1]
-        if img.shape != (h, w, 3):
-            img = cv2.resize(img, (w, h)).clip(0, 255)
-        img_resized = img.astype(np.float32)
-        if not args.bgr:
-            img_resized = cv2.cvtColor(img_resized, cv2.COLOR_BGR2RGB)
-        if args.norm:
-            img_resized /= 255.
-        outputs = vnnx_infer(args.model, img_resized)
-        
-    elif '.xml' in args.model:
-        weights=args.model.replace('.xml', '.bin')
-        input_shape = openvino_input_shape(args.model, weights)[0]
-        input_array = load_input(args.image, 1., input_shape, (not args.bgr))
-        h, w = input_shape[-2], input_shape[-1]
-        outputs = openvino_infer(args.model, input_array)
-        outputs = [outputs[0],outputs[3],outputs[6],outputs[1],outputs[4],outputs[7],outputs[2],outputs[5],outputs[8]]
+    arr, input_shape = mr.preprocess_img_to_input_array(img, args.model, args.bgr, scale, args.mean)
+    outputs, _ = mr.model_run(arr, args.model)
+    channels_last = input_shape[-1] < input_shape[-3]
+    h, w = input_shape[-2], input_shape[-1]
+    if channels_last:
+        h, w = input_shape[-3], input_shape[-2]
+        outputs=mr.transpose_outputs(outputs)
 
-    elif args.model.endswith('.tflite'):
-        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-        import tensorflow as tf
-        interpreter= tf.lite.Interpreter(model_path=args.model)
-        interpreter.allocate_tensors()
+    #sort the outputs for preprocessing
+    # Sort total outputs(9) first Map_Channel by ascending order and Stride by descending order for each Map Channel
+    # output_shapes: [1, Map_Channel, Stride, Predetect]
+    # This is an example output order (idx can vary depending on outputs, but output_shapes should be the same order):
+        #   (idx, output_shapes)
+        #   (5, [1, 2, 36, 64])
+        #   (4, [1, 2, 18, 32])
+        #   (0, [1, 2, 9, 16])
+        #   (3, [1, 8, 36, 64])
+        #   (1, [1, 8, 18, 32])
+        #   (7, [1, 8, 9, 16])
+        #   (2, [1, 20, 36, 64])
+        #   (8, [1, 20, 18, 32])
+        #   (6, [1, 20, 9, 16])       
+    ordered_outputs=[]
 
-        input_details = interpreter.get_input_details()
-        output_details = interpreter.get_output_details()
+    if '.vnnx' in args.model or '.tflite' in args.model :
+        idx = sorted(enumerate(_.shape for _ in outputs), key = lambda x: (x[1][-3],-x[1][-2]))           
+    elif '.onnx' in args.model:
+        idx = sorted(enumerate(_.shape for _ in outputs), key = lambda x: (x[1][-1], -x[1][-2]))
 
-        input_shape = tuple(input_details[0]["shape"][-3:])
-        h, w = input_shape[0], input_shape[1]
-        img = cv2.imread(args.image)
-        if img.shape != input_shape:
-            img_resized = cv2.resize(img, (w, h))
-        else:
-            img_resized = img
-        img_resized = img_resized.astype(np.float32)
-        if not args.bgr:
-            img_resized = cv2.cvtColor(img_resized, cv2.COLOR_BGR2RGB)
-        if args.norm:
-            img_resized /= 255.
-        img_resized = np.expand_dims(img_resized, axis=0)
-        input_scale, input_zero_point = input_details[0].get('quantization', (0.0, 0))
-        if  input_scale != 0.0:
-            img_resized = (img_resized / input_scale) + input_zero_point
-        img_resized = img_resized.astype(input_details[0]['dtype'])
-        interpreter.set_tensor(input_details[0]['index'], img_resized)
-        interpreter.invoke()
-        outputs = []
-        output_shapes =[]
-        for o in range(len(output_details)):
-            output_scale, output_zero_point = output_details[o].get('quantization', (0.0, 0))
-            output = interpreter.get_tensor(output_details[o]['index'])
-            if  output_scale != 0.0:
-                # output = output_scale * (output.astype(output_details[o]['dtype']) - output_zero_point)
-                output = output_scale * (output.astype(np.float32) - output_zero_point)
-            output = output.transpose((0,3,1,2))
-            output_shapes.append(output.shape[1:])
-            outputs.append(output.flatten())
+    for i,l in enumerate(idx):
+        ordered_outputs.append(outputs[idx[i][0]].flatten().squeeze())
 
-    if '.vnnx' in args.model or '.tflite' in args.model:
-        _outputs = outputs.copy()
-        idx=sorted(enumerate(output_shapes), key = lambda x: (x[1][-3],-x[1][-2]))
-        outputs=[]
-        for i,l in enumerate(idx):
-            outputs.append(_outputs[idx[i][0]])
-
-    faces = vbx.postprocess.scrfd.scrfd(outputs, w, h ,args.threshold, args.nms_threshold)
-    img = cv2.imread(args.image)
+    faces = vbx.postprocess.scrfd.scrfd(ordered_outputs, w, h ,args.threshold, args.nms_threshold)
     if img.shape != input_shape:
         img = cv2.resize(img,(w,h))
-    with open('vnnx_output.txt', 'w') as f:
-        #for line in outputs:
-        for line in outputs:
-            f.write(str(line))
+
 
     for f in faces:
         text = "{:.4f}".format(f['score'])

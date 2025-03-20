@@ -3,6 +3,7 @@ import numpy as np
 from enum import  IntEnum
 import time
 import os
+import json
 
 
 def Fletcher32(data):
@@ -131,9 +132,10 @@ class Model:
             return cycles/Hz
         else :
             return cycles
-def main(model_bytes,expected_checksum,verbose=True):
+def main(model_file,expected_checksum,debug=False,verbose=True):
 
 
+    model_bytes = open(model_file, 'rb').read()
     m = Model(model_bytes)
     # c.vbxsim_reset_stats()
     odata = m.run(m.test_input)
@@ -144,6 +146,30 @@ def main(model_bytes,expected_checksum,verbose=True):
         print("DMA_BYTES = {}".format(m.get_bandwidth_per_run()))
         print("INSTR_CYCLES = {}".format(m.get_estimated_runtime()))
         print("CHECKSUM = {:08x}".format(checksum))
+
+    if debug:
+        data = {'inputs': [], 'outputs': [], 'test_outputs': []}
+        for i,(arr,shape,zero,scale,dtype) in enumerate(zip(m.test_input,m.input_shape,m.input_zeropoint,m.input_scale_factor,m.input_dtypes)):
+            np.save(os.path.join(os.path.dirname(model_file),'vnnx.input.{}.npy'.format(i)), arr.reshape(shape))
+            data['inputs'].append({'data': arr.tolist(), 'shape': shape, 'zero': zero, 'scale': scale, 'dtype': dtype.name.upper()})
+        for o,(arr,test_arr,shape,zero,scale,dtype) in enumerate(zip(odata,m.test_output,m.output_shape,m.output_zeropoint,m.output_scale_factor,m.output_dtypes)):
+            np.save(os.path.join(os.path.dirname(model_file),'vnnx.output.{}.npy'.format(o)), arr.reshape(shape))
+            data['outputs'].append({'data': arr.tolist(), 'shape': shape, 'zero': zero, 'scale': scale, 'dtype': dtype.name.upper()})
+            np.save(os.path.join(os.path.dirname(model_file),'test.output.{}.npy'.format(o)), test_arr.reshape(shape))
+            data['test_outputs'].append({'data': test_arr.tolist(), 'shape': shape, 'zero': zero, 'scale': scale, 'dtype': dtype.name.upper()})
+            heat = arr - test_arr
+            while len(heat.shape) < 3:
+                heat = np.expand_dims(heat, axis=0)
+            np.save("heatmap.{}.npy".format(o), heat)
+
+            print('\nTotal absdiff between VNNX and test outputs', np.sum(np.abs(heat)))
+            for c,channel in enumerate(np.squeeze(heat, axis=0)):
+                absdiff = np.sum(np.abs(channel))
+                if absdiff != 0:
+                    print('\tChannel', c, absdiff)
+
+        with open('io.json', 'w') as f:
+            json.dump(data, f)
 
     if expected_checksum is not None:
         if checksum != expected_checksum:

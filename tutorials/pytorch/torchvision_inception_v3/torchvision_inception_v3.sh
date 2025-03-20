@@ -49,6 +49,8 @@ fi
 if [ -f torchvision_inception_v3.vnnx ]; then
     echo "Running Simulation..."
     python $VBX_SDK/example/python/classifier.py torchvision_inception_v3.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg 
+    echo "C Simulation Command:"
+    echo '$VBX_SDK/example/sim-c/sim-run-model torchvision_inception_v3.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg CLASSIFY'
 fi
 
 deactivate

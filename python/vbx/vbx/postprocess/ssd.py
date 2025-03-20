@@ -454,13 +454,13 @@ def ssdv2_predictions(outputs, output_scale_factor, confidence_threshold=0.3, nm
         outputs.reverse()
         elem = int(math.sqrt(outputs[0].size/12))
         outputs[0] = np.reshape(outputs[0], (1,12,elem,elem))
-    elem = int(math.sqrt(outputs[1].size/273))
-    outputs[1] = np.reshape(outputs[1], (1,273,elem,elem))
+    elem = int(math.sqrt(outputs[1].size/(3*num_classes)))
+    outputs[1] = np.reshape(outputs[1], (1,(3*num_classes),elem,elem))
     for i in range(1,6):
-        elem = int(math.sqrt(outputs[2*i].size/24))
-        outputs[2*i] = np.reshape(outputs[2*i], (1,24,elem,elem))
-        elem = int(math.sqrt(outputs[2*i+1].size/546))
-        outputs[2*i+1] = np.reshape(outputs[2*i+1], (1,546,elem,elem))
+        elem = int(math.sqrt(outputs[2*i].size/(2*3*4)))
+        outputs[2*i] = np.reshape(outputs[2*i], (1,(2*3*4),elem,elem))
+        elem = int(math.sqrt(outputs[2*i+1].size/(2*3*num_classes)))
+        outputs[2*i+1] = np.reshape(outputs[2*i+1], (1,(2*3*num_classes),elem,elem))
 
     # scale factor 
     for i in range(12):
@@ -485,13 +485,13 @@ def ssd_torch_predictions(outputs, output_scale_factor, confidence_threshold=0.3
         outputs.reverse()
         elem = int(math.sqrt(outputs[0].size/(12*2)))
         outputs[0] = np.reshape(outputs[0], (1,(12*2),elem,elem))
-    elem = int(math.sqrt(outputs[1].size/(273*2)))
-    outputs[1] = np.reshape(outputs[1], (1,(273*2),elem,elem))
+    elem = int(math.sqrt(outputs[1].size/((3*num_classes)*2)))
+    outputs[1] = np.reshape(outputs[1], (1,((3*num_classes)*2),elem,elem))
     for i in range(1,6):
-        elem = int(math.sqrt(outputs[2*i].size/24))
-        outputs[2*i] = np.reshape(outputs[2*i], (1,24,elem,elem))
-        elem = int(math.sqrt(outputs[2*i+1].size/546))
-        outputs[2*i+1] = np.reshape(outputs[2*i+1], (1,546,elem,elem))
+        elem = int(math.sqrt(outputs[2*i].size/(2*3*4)))
+        outputs[2*i] = np.reshape(outputs[2*i], (1,(2*3*4),elem,elem))
+        elem = int(math.sqrt(outputs[2*i+1].size/(2*3*num_classes)))
+        outputs[2*i+1] = np.reshape(outputs[2*i+1], (1,(2*3*num_classes),elem,elem))
 
     # scale factor 
     for i in range(12):

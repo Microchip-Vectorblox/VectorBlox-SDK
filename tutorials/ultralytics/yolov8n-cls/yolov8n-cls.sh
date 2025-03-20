@@ -25,12 +25,6 @@ fi
 
 echo "Downloading yolov8n-cls..."
 # model details @ https://github.com/ultralytics/ultralytics/
-# This currently has worse accuracy
-#if [ ! -f yolov8n-cls.tflite ]; then
-#    yolo export model=yolov8n-cls.pt format=tflite int8 || true
-#    cp yolov8n-cls_saved_model/yolov8n-cls_full_integer_quant.tflite yolov8n-cls.tflite
-#fi
-#
 if [ ! -f yolov8n-cls.onnx ]; then
     yolo export model=yolov8n-cls.pt format=onnx
 fi
@@ -57,6 +51,8 @@ fi
 if [ -f yolov8n-cls.vnnx ]; then
     echo "Running Simulation..."
     python $VBX_SDK/example/python/classifier.py yolov8n-cls.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg 
+    echo "C Simulation Command:"
+    echo '$VBX_SDK/example/sim-c/sim-run-model yolov8n-cls.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg CLASSIFY'
 fi
 
 deactivate

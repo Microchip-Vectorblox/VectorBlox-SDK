@@ -22,15 +22,43 @@ extern "C" {
 //#define fix16_exp fix16_exp_lut
 fix16_t fix16_logistic_activate(fix16_t x);
 
+typedef unsigned char uchar;
+
+#define NAME_LENGTH 12
+typedef struct {
+    fix16_t box[4];
+    fix16_t points[6][2];
+    fix16_t detect_score;
+    fix16_t recognition_score;
+    char name[NAME_LENGTH];
+    short track_val;
+} object_t;
+
+typedef struct {
+    fix16_t keypoints[17][2];
+    fix16_t scores[17];
+    fix16_t poseScore;
+} poses_t;
+
+typedef struct {
+    int points[2];
+    fix16_t scores;
+    int id;
+} queue_element_t;
 
 typedef struct {
     int xmin;
     int xmax;
     int ymin;
     int ymax;
+    int x;
+    int y;
+    int w;
+    int h;
+    fix16_t angle;
     fix16_t confidence;
     int class_id;
-	const char* class_name;
+    const char* class_name;
 } fix16_box;
 
 typedef struct {
@@ -48,56 +76,35 @@ typedef struct {
 
 void reverse(fix16_t* output_buffer[], int len);
 uint32_t fletcher32(const uint16_t *data, size_t len);
+void print_json(model_t* model,vbx_cnn_io_ptr_t* io_buffers,int use_int8);
 void preprocess_inputs(uint8_t* input, fix16_t scale, int32_t zero_point, int input_length,int int8_flag);
 typedef void (*file_write)(const char*,int);
 extern char *imagenet_classes[];
 void post_process_classifier(fix16_t *outputs, const int output_size, int16_t* output_index, int topk);
 void post_process_classifier_int8(int8_t *outputs, const int output_size, int16_t* output_index, int topk);
-//int post_process_ultra_nms_uint8(uint8_t *output, int input_h, int input_w,fix16_t f16_scale, int32_t zero_point, fix16_t thresh, fix16_t overlap, fix16_box fix16_boxes[], int max_boxes);
-int post_process_ultra_nms_int8(int8_t *output, int output_boxes, int input_h, int input_w,fix16_t f16_scale, int32_t zero_point, fix16_t thresh, fix16_t overlap, fix16_box fix16_boxes[], int boxes_len);
-int post_process_ultra_nms(fix16_t *output, int output_boxes, int input_h, int input_w, fix16_t thresh, fix16_t overlap, fix16_box fix16_boxes[], int boxes_len);
-int post_process_ultra_int8(int8_t **outputs, int* outputs_shape[], fix16_t *post, fix16_t thresh, int zero_points[], fix16_t scale_outs[], const int max_boxes);
+//int post_process_ultra_nms_uint8(uint8_t *output, int input_h, int input_w,fix16_t f16_scale, int32_t zero_point, fix16_t thresh, fix16_t overlap, fix16_box fix16_boxes[], int max_boxes, const int num_classes);
+int post_process_ultra_nms_int8(int8_t *output, int output_boxes, int input_h, int input_w,fix16_t f16_scale, int32_t zero_point, fix16_t thresh, fix16_t overlap, fix16_box fix16_boxes[], int boxes_len, const int num_classes);
+int post_process_ultra_nms(fix16_t *output, int output_boxes, int input_h, int input_w, fix16_t thresh, fix16_t overlap, fix16_box fix16_boxes[], poses_t poses[], int boxes_len, const int num_classes, const int is_obb, const int is_pose);
+int post_process_ultra_int8(int8_t **outputs, int* outputs_shape[], fix16_t *post, fix16_t thresh, int zero_points[], fix16_t scale_outs[], const int max_boxes, const int is_obb, const int is_pose);
 //int post_process_ultra(fix16_t **outputs, fix16_t *post, fix16_t thresh);
 int post_process_yolo_int8(int8_t **outputs, const int num_outputs, int zero_points[], fix16_t scale_outs[], 
 	 yolo_info_t *cfg, fix16_t thresh, fix16_t overlap, fix16_box fix16_boxes[], int max_boxes);
 int post_process_yolo(fix16_t **outputs, const int num_outputs, yolo_info_t *cfg,
                       fix16_t thresh, fix16_t overlap, fix16_box fix16_boxes[], int max_boxes);
 
+extern char *dota_classes[15];
 extern char *imagenet_classes[1000];
 extern char *voc_classes[20];
 extern char *coco_classes[80];
 extern char* coco91_classes[92];
 extern char* vehicle_classes[3];
 
-typedef unsigned char uchar;
-
-#define NAME_LENGTH 12
-typedef struct {
-    fix16_t box[4];
-    fix16_t points[6][2];
-    fix16_t detect_score;
-    fix16_t recognition_score;
-    char name[NAME_LENGTH];
-    short track_val;
-} object_t;
-typedef struct {
-    fix16_t keypoints[17][2];
-    fix16_t scores[17];
-    fix16_t poseScore;
-} poses_t;
-
-typedef struct {
-    int points[2];
-    fix16_t scores;
-    int id;
-} queue_element_t;
-
 fix16_t calcIou_LTRB(fix16_t* A, fix16_t* B);
 fix16_t calcIou_XYWH(fix16_t* A, fix16_t* B);
 void fix16_softmax(fix16_t *input, int n, fix16_t *output);
 void fix16_do_nms(fix16_box *boxes, int total, fix16_t iou_thresh);
-int fix16_clean_boxes(fix16_box *boxes, int total, int width, int height);
-void fix16_sort_boxes(fix16_box *boxes, int total);
+int fix16_clean_boxes(fix16_box *boxes, poses_t *poses, int total, int width, int height);
+void fix16_sort_boxes(fix16_box *boxes, poses_t *poses, int total);
 
 int post_process_blazeface(object_t faces[],fix16_t* scores,fix16_t* points,int scoresLength,int max_faces, fix16_t anchorsScale);
 int post_process_retinaface(object_t faces[],int max_faces, fix16_t *network_outputs[9],int image_width,int image_height,
@@ -132,7 +139,7 @@ int post_process_vehicles(fix16_box *boxes, int max_boxes,
                        fix16_t confidence_threshold, fix16_t nms_threshold);   
 int decodeMultiplePoses(poses_t poses[],fix16_t *scores, fix16_t *offsets,fix16_t *displacementsFwd, fix16_t *displacementsBwd, int outputStride,int maxPoseDetections, fix16_t scoreThreshold,int nmsRadius,fix16_t minPoseScore,int height, int width);
 int decodeMultiplePoses_int8(poses_t poses[],int8_t *scores, int8_t *offsets,int8_t *displacementsFwd, int8_t *displacementsBwd, int outputStride,int maxPoseDetections, fix16_t scoreThreshold,int nmsRadius, fix16_t minPoseScore,int height, int width, int zero_points[], fix16_t scale_outs[]);
-int pprint_post_process(const char *name, const char *str, model_t *model, vbx_cnn_io_ptr_t *io_buffers, int int8_flag);
+int pprint_post_process(const char *name, const char *pptype, model_t *model, vbx_cnn_io_ptr_t *o_buffers,int int8_flag, int fps);
 
 #ifdef __cplusplus
 }

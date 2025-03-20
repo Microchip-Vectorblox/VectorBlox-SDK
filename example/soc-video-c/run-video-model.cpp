@@ -22,10 +22,10 @@
 
 
 struct model_descr_t models[] = {
-		{"Yolo v8n", "/home/root/samples_V1000_2.0/yolov8n_512x288_cut.vnnx", 0, "ULTRALYTICS_CUT"},		
-		{"SCRFD", "/home/root/samples_V1000_2.0/scrfd_500m_bnkps.vnnx", 0, "SCRFD"},
-		{"mobileface-arcface", "/home/root/samples_V1000_2.0/mobilefacenet-arcface.vnnx", 0, "ARCFACE"},
-		{"MobileNet V2", "/home/root/samples_V1000_2.0/mobilenet-v2.vnnx", 0, "IMAGENET"},	
+		{"Yolo v8n", "/home/root/samples_V1000_2.0.1/yolov8n_512x288.vnnx", 0, "ULTRALYTICS"},		
+		{"SCRFD", "/home/root/samples_V1000_2.0.1/scrfd_500m_bnkps.vnnx", 0, "SCRFD"},
+		{"mobileface-arcface", "/home/root/samples_V1000_2.0.1/mobilefacenet-arcface.vnnx", 0, "ARCFACE"},
+		{"MobileNet V2", "/home/root/samples_V1000_2.0.1/mobilenet-v2.vnnx", 0, "CLASSIFY"},	
 };
 
 #define UIO_DMA_LIMIT 512*1024*1024*2
@@ -262,7 +262,7 @@ int update_Classifier = 1;
 const int CLASSIFIER_FPS = 10;					  
 const int FPS_LIM = 60;
 uint32_t* swap_draw_frame(){
-	draw_wait_for_draw();
+	//draw_wait_for_draw();
 	*SAVED_FRAME_SWAP=1;
 	return (uint32_t*)(intptr_t)(*PROCESSING_FRAME_ADDRESS);
 }

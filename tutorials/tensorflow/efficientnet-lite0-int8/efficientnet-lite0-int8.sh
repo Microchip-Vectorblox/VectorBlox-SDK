@@ -26,7 +26,7 @@ fi
 echo "Downloading efficientnet-lite0-int8..."
 # model details @ https://www.kaggle.com/models/google/efficientnet/tensorFlow1/b0-classification/1
 if [ ! -f efficientnet-lite0.tar.gz ]; then
-    wget --no-check-certificate https://storage.googleapis.com/cloud-tpu-checkpoints/efficientnet/lite/efficientnet-lite0.tar.gz
+    wget -q --no-check-certificate https://storage.googleapis.com/cloud-tpu-checkpoints/efficientnet/lite/efficientnet-lite0.tar.gz
 fi
 tar -xzf efficientnet-lite0.tar.gz
 cp efficientnet-lite0/efficientnet-lite0-int8.tflite .
@@ -47,6 +47,8 @@ fi
 if [ -f efficientnet-lite0-int8.vnnx ]; then
     echo "Running Simulation..."
     python $VBX_SDK/example/python/classifier.py efficientnet-lite0-int8.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg 
+    echo "C Simulation Command:"
+    echo '$VBX_SDK/example/sim-c/sim-run-model efficientnet-lite0-int8.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg CLASSIFY'
 fi
 
 deactivate

@@ -49,6 +49,8 @@ fi
 if [ -f torchvision_wide_resnet50_2.vnnx ]; then
     echo "Running Simulation..."
     python $VBX_SDK/example/python/classifier.py torchvision_wide_resnet50_2.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg 
+    echo "C Simulation Command:"
+    echo '$VBX_SDK/example/sim-c/sim-run-model torchvision_wide_resnet50_2.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg CLASSIFY'
 fi
 
 deactivate

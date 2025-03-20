@@ -25,12 +25,19 @@ extern "C" {
   //
   //The line is centered on the start/end pixels.
   void draw_assist_draw_line(volatile void *draw_assist_base_address,
-                             uint32_t *dst, int dst_stride,
-                             int dst_width, int dst_height,
                              int start_column, int start_row,
                              int end_column, int end_row,
-                             uint32_t colour);
-  
+                             uint32_t *dst, int dst_stride,
+                             uint32_t colour, int alpha);
+
+  void draw_assist_draw_line_pp(//volatile void *draw_assist_base_address,
+                              int start_column, int start_row,
+                              int end_column, int end_row,
+                              uint32_t *dst, int dst_stride,
+                              uint32_t colour, int thickness, int alpha);
+
+  void draw_assist_plot_pixel(int x, int y, float brightness, uint32_t *dst, int dst_stride,
+                              uint32_t colour );
 #ifdef __cplusplus
 }
 #endif //#ifdef __cplusplus

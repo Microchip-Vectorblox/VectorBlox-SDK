@@ -25,8 +25,8 @@ fi
 
 echo "Downloading yolo-v3-tf..."
 # model details @ https://github.com/openvinotoolkit/open_model_zoo/tree/2021.4.2/models/public/yolo-v3-tf/
-[ -f coco.names ] || wget https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
-[ -f yolov3.weights ] || wget http://web.archive.org/web/20210225040312/https://pjreddie.com/media/files/yolov3.weights
+[ -f coco.names ] || wget -q https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
+[ -f yolov3.weights ] || wget -q http://web.archive.org/web/20210225040312/https://pjreddie.com/media/files/yolov3.weights
 omz_downloader --name yolo-v3-tf
 rm -rf keras-YOLOv3-model-set && git clone https://github.com/david8862/keras-YOLOv3-model-set
 cd keras-YOLOv3-model-set && git checkout 56bcc2e && cd ..
@@ -47,7 +47,9 @@ fi
 
 if [ -f yolo-v3-tf.vnnx ]; then
     echo "Running Simulation..."
-    python $VBX_SDK/example/python/yoloInfer.py yolo-v3-tf.vnnx $VBX_SDK/tutorials/test_images/dog.jpg -j yolo-v3-tf.json -l coco.names 
+    python $VBX_SDK/example/python/yoloInfer.py yolo-v3-tf.vnnx $VBX_SDK/tutorials/test_images/dog.jpg -j yolo-v3-tf.json -v 3 -l coco.names 
+    echo "C Simulation Command:"
+    echo '$VBX_SDK/example/sim-c/sim-run-model yolo-v3-tf.vnnx $VBX_SDK/tutorials/test_images/dog.jpg YOLOV3'
 fi
 
 deactivate

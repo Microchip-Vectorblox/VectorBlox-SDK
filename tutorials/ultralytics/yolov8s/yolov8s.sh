@@ -20,11 +20,14 @@ source $VBX_SDK/vbx_env/bin/activate
 
 echo "Downloading yolov8s..."
 # model details @ https://github.com/ultralytics/ultralytics/
-[ -f coco.names ] || wget https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
+[ -f coco.names ] || wget -q https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
 if [ ! -f yolov8s.tflite ]; then
     yolo export model=yolov8s.pt format=tflite int8 || true
-    cp yolov8s_saved_model/yolov8s_full_integer_quant.tflite yolov8s.tflite
 fi
+cp yolov8s_saved_model/yolov8s_full_integer_quant.tflite yolov8s.tflite
+
+tflite_cut yolov8s.tflite -c 190 197 207 214 224 231
+mv yolov8s.0.tflite yolov8s.tflite
 
 if [ -f yolov8s.tflite ]; then
    tflite_preprocess yolov8s.tflite  --scale 255
@@ -38,6 +41,8 @@ fi
 if [ -f yolov8s.vnnx ]; then
     echo "Running Simulation..."
     python $VBX_SDK/example/python/yoloInfer.py yolov8s.vnnx $VBX_SDK/tutorials/test_images/dog.jpg -v 8 -l coco.names 
+    echo "C Simulation Command:"
+    echo '$VBX_SDK/example/sim-c/sim-run-model yolov8s.vnnx $VBX_SDK/tutorials/test_images/dog.jpg ULTRALYTICS'
 fi
 
 deactivate

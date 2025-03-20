@@ -25,7 +25,7 @@ fi
 
 echo "Downloading onnx_squeezenet1.1..."
 # model details @ https://github.com/onnx/models/tree/main/validated/vision/classification/squeezenet
-wget --no-check-certificate https://media.githubusercontent.com/media/onnx/models/main/validated/vision/classification/squeezenet/model/squeezenet1.1-7.onnx
+wget -q --no-check-certificate https://media.githubusercontent.com/media/onnx/models/main/validated/vision/classification/squeezenet/model/squeezenet1.1-7.onnx
 if [ ! -f calibration_image_sample_data_20x128x128x3_float32.npy ]; then
     wget https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/EAP/calib_npy/calibration_image_sample_data_20x128x128x3_float32.npy
 fi
@@ -49,6 +49,8 @@ fi
 if [ -f onnx_squeezenet1.1.vnnx ]; then
     echo "Running Simulation..."
     python $VBX_SDK/example/python/classifier.py onnx_squeezenet1.1.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg 
+    echo "C Simulation Command:"
+    echo '$VBX_SDK/example/sim-c/sim-run-model onnx_squeezenet1.1.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg CLASSIFY'
 fi
 
 deactivate
