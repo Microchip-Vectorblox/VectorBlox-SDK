@@ -8,10 +8,10 @@
 
     unzip samples_V1000_2.0.1.zip
     ```
-- Download and unzip the [VectorBlox SDK](https://github.com/Microchip-Vectorblox/VectorBlox-SoC-Video-Kit-Demo/archive/refs/tags/release-v2.0.1.zip), and navigate to this example
+- Download and unzip the [VectorBlox SDK](https://github.com/Microchip-Vectorblox/VectorBlox-SDK/archive/refs/tags/release-v2.0.1.zip), and navigate to this example
 
     ```
-    wget --no-check-certificate https://github.com/Microchip-Vectorblox/VectorBlox-SoC-Video-Kit-Demo/archive/refs/tags/release-v2.0.1.zip 
+    wget --no-check-certificate https://github.com/Microchip-Vectorblox/VectorBlox-SDK/archive/refs/tags/release-v2.0.1.zip 
 
     unzip release-v2.0.1.zip
     cd release-v2.0.1.zip/example/soc-video-c
