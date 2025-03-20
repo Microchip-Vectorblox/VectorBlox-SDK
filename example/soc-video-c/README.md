@@ -14,7 +14,7 @@
     wget --no-check-certificate https://github.com/Microchip-Vectorblox/VectorBlox-SDK/archive/refs/tags/release-v2.0.1.zip 
 
     unzip release-v2.0.1.zip
-    cd release-v2.0.1.zip/example/soc-video-c
+    cd VectorBlox-SDK-release-v2.0.1.zip/example/soc-video-c
     ```
 
 ## Starting the VectorBlox HDMI demo on the PolarFire SoC Video Kit
