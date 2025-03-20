@@ -17,7 +17,7 @@
     wget --no-check-certificate https://github.com/Microchip-Vectorblox/VectorBlox-SDK/archive/refs/tags/release-v2.0.1.zip 
 
     unzip release-v2.0.1.zip
-    cd VectorBlox-SDK-release-v2.0.1.zip/example/soc-video-c
+    cd VectorBlox-SDK-release-v2.0.1/example/soc-video-c
     ```
  ## Using `run-model` to benchmark networks
 - Run `make overlay` to add the VectorBlox instance to the device tree (required every boot)
