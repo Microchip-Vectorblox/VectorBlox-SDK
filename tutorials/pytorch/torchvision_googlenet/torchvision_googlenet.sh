@@ -20,15 +20,12 @@ source $VBX_SDK/vbx_env/bin/activate
 
 echo "Checking for Numpy calibration data file..."
 if [ ! -f $VBX_SDK/tutorials/imagenetv2_rgb_norm_20x224x224x3.npy ]; then
-    wget -P $VBX_SDK/tutorials/ https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/EAP/calib_npy/imagenetv2_rgb_norm_20x224x224x3.npy
+    generate_npy $VBX_SDK/tutorials/imagenetv2_rgb_20x224x224x3.npy -o $VBX_SDK/tutorials/imagenetv2_rgb_norm_20x224x224x3.npy -s 224 224  --norm 
 fi
 
 echo "Downloading torchvision_googlenet..."
 # model details @ https://pytorch.org/vision/0.14/models/googlenet.html
 python $VBX_SDK/tutorials/torchvision_to_onnx.py googlenet
-if [ ! -f calibration_image_sample_data_20x128x128x3_float32.npy ]; then
-    wget https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/EAP/calib_npy/calibration_image_sample_data_20x128x128x3_float32.npy
-fi
 
 echo "Running ONNX2TF..."
 onnx2tf -cind input.1 $VBX_SDK/tutorials/imagenetv2_rgb_norm_20x224x224x3.npy [[[[0.485,0.456,0.406]]]] [[[[0.229,0.224,0.225]]]] \

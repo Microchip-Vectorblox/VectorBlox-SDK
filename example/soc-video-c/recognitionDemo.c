@@ -548,7 +548,7 @@ int runRecognitionDemo(struct model_descr_t* models, vbx_cnn_t* the_vbx_cnn, uin
 						for (int e = 0; e < EMBEDDING_LENGTH; e++) {
 							db_embeddings[db_end_idx][e] = (int16_t)embedding[e];
 						}
-						db_nameStr[db_end_idx] = (char*)malloc(NAME_LENGTH);
+						db_nameStr[db_end_idx] = (char*)malloc(TRACK_NAME_LENGTH);
 						sprintf(db_nameStr[db_end_idx], "FACE_%03d", face_count);
 
 						if(fix16_to_int(100*confidence)>40) printf("Warning: Similar embedding already exists (%s)\n\n",name);

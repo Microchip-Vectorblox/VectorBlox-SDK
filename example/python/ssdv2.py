@@ -18,7 +18,9 @@ if __name__ == "__main__":
     parser.add_argument('model')
     parser.add_argument('image')
     parser.add_argument('-nc', '--num-classes', type=int, default=91)
-    parser.add_argument('-t', '--torch', action='store_true')
+    parser.add_argument('-t', '--threshold', type=float, default=0.5)
+    parser.add_argument('-i', '--iou', type=float, default=0.4)
+    parser.add_argument('--torch', action='store_true')
     parser.add_argument('-b', '--bgr', action='store_true')
     parser.add_argument('--mean', type=float, nargs='+', default=[0.])
     parser.add_argument('-sc', '--scale', type=float, nargs='+', default=[1.])
@@ -39,23 +41,13 @@ if __name__ == "__main__":
     h, w = input_shape[-2], input_shape[-1]
     if channels_last:
         h, w = input_shape[-3], input_shape[-2]
-        outputs=mr.transpose_outputs(outputs)
+        outputs = mr.transpose_outputs(outputs)
 
-    # outputs should be sorted in descending sets of coords and classes w/ size NxN
-    reordered_outputs = []
-    for box_size in [20,10,5,3,2,1]:
-        for class_size in [2*3*4, 2*3*args.num_classes]:
-            for output in outputs:
-                if output.shape[-1] == box_size and output.shape[-3] == class_size:
-                    reordered_outputs.append(output)
-    outputs = reordered_outputs
+    # outputs should be sorted in descending sets of classes and coords w/ size NxN
+    outputs = sorted(outputs, key=lambda x: (x.shape[-1], x.shape[-3]))
+    outputs.reverse()
 
-    # scaling occurs in _infer methods
-    output_scale_factor = len(outputs) * [1.0]
-    if args.torch:
-        predictions = ssd.ssd_torch_predictions(outputs, output_scale_factor, confidence_threshold=0.5, nms_threshold=0.4, top_k=1, num_classes=args.num_classes)
-    else:
-        predictions = ssd.ssdv2_predictions(outputs, output_scale_factor, confidence_threshold=0.5, nms_threshold=0.4, top_k=1)
+    predictions = ssd.ssdv2_predictions(outputs, args.threshold, args.iou, top_k=1, size=w, torch=args.torch)
     
     output_img = cv2.resize(img, (1024, 1024), interpolation=cv2.INTER_NEAREST)
     output_scale_x = 1024. / w

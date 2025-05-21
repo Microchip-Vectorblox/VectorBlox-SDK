@@ -20,7 +20,7 @@ source $VBX_SDK/vbx_env/bin/activate
 
 echo "Checking for Numpy calibration data file..."
 if [ ! -f $VBX_SDK/tutorials/face_rgb_norm_20x288x512x3.npy ]; then
-    wget -P $VBX_SDK/tutorials/ https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/EAP/calib_npy/face_rgb_norm_20x288x512x3.npy
+    generate_npy $VBX_SDK/tutorials/face_rgb_20x273x481x3.npy -o $VBX_SDK/tutorials/face_rgb_norm_20x288x512x3.npy -s 288 512  --norm 
 fi
 
 echo "Downloading scrfd_500m_bnkps..."
@@ -31,10 +31,7 @@ echo "Downloading scrfd_500m_bnkps..."
 # download SCRFD_500M_KPS https://github.com/deepinsight/insightface/tree/master/detection/scrfd#pretrained-models
 # python tools/scrfd2onnx.py configs/scrfd/scrfd_500m_bnkps.py scrfd_500m_bnkps.pth --input-img garden_512x288.jpg --output-file scrfd_500m_bnkps.onnx
 
-[ -f scrfd_500m_bnkps.onnx ] || wget -q https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/Releases/ModelZoo/scrfd_500m_bnkps.onnx
-if [ ! -f calibration_image_sample_data_20x128x128x3_float32.npy ]; then
-    wget https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/EAP/calib_npy/calibration_image_sample_data_20x128x128x3_float32.npy
-fi
+[ -f scrfd_500m_bnkps.onnx ] || wget -q --no-check-certificate https://github.com/Microchip-Vectorblox/assets/releases/download/assets/scrfd_500m_bnkps.onnx
 
 echo "Running ONNX2TF..."
 onnx2tf -cind input.1 $VBX_SDK/tutorials/face_rgb_norm_20x288x512x3.npy [[[[0.5,0.5,0.5]]]] [[[[0.502,0.502,0.502]]]] \

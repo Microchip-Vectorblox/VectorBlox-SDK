@@ -3,6 +3,7 @@ import silence_tensorflow.auto
 import tensorflow as tf
 import numpy as np
 import argparse
+from .utils import existing_file, existing_dir
 import cv2
 import tqdm
 import subprocess
@@ -61,9 +62,9 @@ def convert_tflite_model(converter):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('model')
+    parser.add_argument('model', type=existing_file)
     parser.add_argument('tflite')
-    parser.add_argument('-d', '--data')
+    parser.add_argument('-d', '--data', type=existing_file)
     parser.add_argument('-c', '--count', type=int, default=128)
     parser.add_argument('-s', '--shape', type=int, nargs='+')
     parser.add_argument('-u', '--unsigned', action='store_true')

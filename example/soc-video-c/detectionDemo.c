@@ -14,7 +14,6 @@
 extern int update_Classifier;
 extern volatile uint32_t*  PROCESSING_FRAME_ADDRESS;
 extern volatile uint32_t*  PROCESSING_NEXT_FRAME_ADDRESS;
-
 extern volatile uint32_t*  SAVED_FRAME_SWAP;
 extern int fps;
 
@@ -194,7 +193,7 @@ int runDetectionDemo(struct model_descr_t* models, vbx_cnn_t* the_vbx_cnn, uint8
 	if(status < 0) {
 		return status;
 	} else if (status == 0) { // When  model is completed
-	
+
 		//Swap set of pipelined output buffers
 		offset = (*PROCESSING_NEXT_FRAME_ADDRESS) - 0x70000000;
 		object_model->model_input_buffer = (uint8_t*)(uintptr_t)(SCALER_FRAME_ADDRESS + offset);
@@ -214,31 +213,24 @@ int runDetectionDemo(struct model_descr_t* models, vbx_cnn_t* the_vbx_cnn, uint8
 		gettimeofday(&m_run2, NULL);
 		m_run_fps = 1000/ (gettimediff_us_2(m_run1, m_run2) / 1000);
 
-#if PDMA
-	vbx_cnn_io_ptr_t pdma_buffer[model_get_num_outputs(object_model->model)];
-	int output_offset=0;
-	for(int o =0; o<(int)model_get_num_outputs(object_model->model);o++){
-		int output_length = model_get_output_length(object_model->model, o);
-		pdma_ch_transfer(pdma_out,(void*)object_model->pipelined_output_buffers[object_model->buf_idx][o],output_offset,model_get_output_length(object_model->model, o),the_vbx_cnn,pdma_channel);
-		pdma_buffer[o] = (vbx_cnn_io_ptr_t)(pdma_mmap_t + output_offset);
-		output_offset+= output_length;
-	}
-	//draw_post_process(object_model, fps,1,the_vbx_cnn,(vbx_cnn_io_ptr_t*)pdma_buffer); // Post process and draw previous 
-	if (!strcmp(object_model->post_process_type, "PIXEL")){
-		int odims = model_get_output_dims(object_model->model,0);
-		int *oshape = model_get_output_shape(object_model->model,0);
-		int ow = oshape[odims-1];
-		int oh = oshape[odims-2];
-		//uint32_t* output=(uint32_t*)(uintptr_t)output_buffers[0];
-		uint32_t* output=(uint32_t*)(uintptr_t)model_get_test_output(object_model->model,0);
-		draw_dma_memcpy(oh,ow, overlay_draw_frame+(1080-oh)*2048, 2048, virt_to_phys(the_vbx_cnn,output), ow);
+
+	if (PDMA && strcmp(object_model->post_process_type, "PIXEL")){
+		vbx_cnn_io_ptr_t pdma_buffer[model_get_num_outputs(object_model->model)];
+		int output_offset=0;
+		for(int o =0; o<(int)model_get_num_outputs(object_model->model);o++){
+			int output_length = model_get_output_length(object_model->model, o);
+			pdma_ch_transfer(pdma_out,(void*)object_model->pipelined_output_buffers[object_model->buf_idx][o],output_offset,model_get_output_length(object_model->model, o),the_vbx_cnn,pdma_channel);
+			pdma_buffer[o] = (vbx_cnn_io_ptr_t)(pdma_mmap_t + output_offset);
+			output_offset+= output_length;
+		}
+		pprint_post_process(object_model->name, object_model->post_process_type, object_model->model, (vbx_cnn_io_ptr_t*)pdma_buffer,1,fps,the_vbx_cnn);
+	}else if(!strcmp(object_model->post_process_type, "PIXEL")){
+		pixel_draw(object_model->model, (vbx_cnn_io_ptr_t*)object_model->pipelined_output_buffers[object_model->buf_idx],the_vbx_cnn);
+		pprint_post_process(object_model->name, object_model->post_process_type, object_model->model, (vbx_cnn_io_ptr_t*)object_model->pipelined_output_buffers[object_model->buf_idx],1,fps,the_vbx_cnn);
 	}
 	else{
-		pprint_post_process(object_model->name, object_model->post_process_type, object_model->model, (vbx_cnn_io_ptr_t*)pdma_buffer,1,fps);
+		pprint_post_process(object_model->name, object_model->post_process_type, object_model->model, (vbx_cnn_io_ptr_t*)object_model->pipelined_output_buffers[object_model->buf_idx],1,fps,the_vbx_cnn);
 	}
-#else
-	ppost_process(object_model, fps,1,the_vbx_cnn,(vbx_cnn_io_ptr_t*)object_model->pipelined_output_buffers[object_model->buf_idx]);
-#endif	
 	object_model->buf_idx = !object_model->buf_idx;
 		
 	}

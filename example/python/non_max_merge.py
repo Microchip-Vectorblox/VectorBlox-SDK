@@ -42,16 +42,33 @@ def group_overlapping_boxes(predictions, iou_threshold = 0.5):
     merge_groups = []
 
     scores = predictions[:, 4]
-    order = scores.argsort()
+    order = scores.argsort() #least -> most 
 
     while len(order) > 0:
-        idx = int(order[-1])
+        idx = int(order[-1]) #top confident
 
-        order = order[:-1]
+        order = order[:-1] #most -> least 
         if len(order) == 0:
             merge_groups.append([idx])
             break
 
+        ious = []
+        rorder = np.flip(order) #least -> most
+
+        merge_group = [idx]
+        for r,prediction in zip(rorder, predictions[rorder]):
+            if calc_box_iou(prediction[:4], predictions[idx][:4]) > iou_threshold:
+                merge_group.append(r)
+
+        remaining = []
+        for o in order:
+            if o not in merge_group:
+                remaining.append(o)
+
+        merge_groups.append(merge_group)
+        order = remaining
+
+        '''
         merge_candidate = np.expand_dims(predictions[idx], axis=0)
         ious = box_iou_batch(predictions[order][:, :4], merge_candidate[:, :4])
         ious = ious.flatten()
@@ -59,7 +76,9 @@ def group_overlapping_boxes(predictions, iou_threshold = 0.5):
         above_threshold = ious >= iou_threshold
         merge_group = [idx, *np.flip(order[above_threshold]).tolist()]
         merge_groups.append(merge_group)
+
         order = order[~above_threshold]
+        '''
     return merge_groups
 
 

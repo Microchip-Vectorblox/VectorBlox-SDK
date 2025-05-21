@@ -1,4 +1,5 @@
 import argparse
+from .utils import existing_file, existing_dir
 import tempfile
 import os
 import json
@@ -58,14 +59,30 @@ def tflite_to_vnnx(tflite, size_config, output_filename=None, start_layer=0, end
     # get io and transpose for VNNX (NHWC -> CHW)
     if len(json_graph) == len(json_subgraphs): # no specifications for start layer and end layer, so skip the io of individual layers
         inputs, outputs = get_tflite_io(tflite, inputs, None, mean=mean, rgb=rgb,scale=scale)
+
+        if debug:
+            data = {'inputs': [], 'outputs': []}
+            import tensorflow as tf
+            interpreter= tf.lite.Interpreter(model_path=tflite)
+            input_details, output_details = interpreter.get_input_details(), interpreter.get_output_details()
+
         for i,input in enumerate(inputs):
             if debug:
                 np.save(os.path.join(tmp_dir, 'tflite.input.{}.npy'.format(i)), inputs[input])
+                scale,zero = input_details[i].get('quantization', (0.0, 0))
+                data['inputs'].append({'data': inputs[input].tolist(), 'shape': inputs[input].shape, 'zero': zero, 'scale': scale, 'dtype': inputs[input].dtype.name.upper()})
+
+
             inputs[input] = transpose_io_to_vnnx(inputs[input])
         for o,output in enumerate(outputs):
             if debug:
                 np.save(os.path.join(tmp_dir, 'tflite.output.{}.npy'.format(o)), outputs[output])
+                scale,zero = output_details[o].get('quantization', (0.0, 0))
+                data['outputs'].append({'data': outputs[output].tolist(), 'shape': outputs[output].shape, 'zero': zero, 'scale': scale, 'dtype': outputs[output].dtype.name.upper()})
             outputs[output] = transpose_io_to_vnnx(outputs[output])
+        if debug:
+            with open(os.path.join(tmp_dir, 'tflite.io.json'), 'w') as f:
+                json.dump(data, f)
 
         vnnx_graph_binary = generate_vnnx_from_json_subgraphs(json_graph, size_config, inputs, outputs, include_io_data, tmp_dir, engine_graphs_nx)
     else:
@@ -112,13 +129,13 @@ def tflite_to_vnnx(tflite, size_config, output_filename=None, start_layer=0, end
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-t', '--tflite', help='tflite I8 model description (.tflite)', required=True)
+    parser.add_argument('-t', '--tflite', help='tflite I8 model description (.tflite)', required=True, type=existing_file)
     parser.add_argument('-c', '--size-conf', help='size configuration to build model for',
                         choices = ['V250','V500','V1000'], required=True)
     parser.add_argument('-o','--output', help="Name of vnnx output file",required=True)
     parser.add_argument('-s', '--start_layer', type=int, default=0)
     parser.add_argument('-e', '--end_layer', type=int)
-    parser.add_argument('-i', '--inputs', nargs='*', help='provide test inputs for model')
+    parser.add_argument('-i', '--inputs', nargs='*', help='provide test inputs for model', type=existing_file)
     parser.add_argument('-m', '--mean', type=float, nargs='+', default=0.)
     parser.add_argument('-sc', '--scale', type=float, nargs='+', default=1.)
     parser.add_argument('-b', '--bgr', action='store_true')

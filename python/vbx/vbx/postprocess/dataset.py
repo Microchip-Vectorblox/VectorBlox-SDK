@@ -23,6 +23,60 @@ voc_classes = [
 "tvmonitor"
 ]
 
+city_groups = [
+                    {"name": "road", "trainID": 7, "group": "flat", "color": (55, 38, 58)},
+                    {"name": "sidewalk", "trainID": 8, "group": "flat", "color": (127, 67, 142)},
+                    {"name": "building", "trainID": 11, "group": "construction", "color": (230, 182, 226)},
+                    {"name": "wall", "trainID": 12, "group": "construction", "color": (230, 182, 226)},
+                    {"name": "fence", "trainID": 13, "group": "construction", "color": (230, 182, 226)},
+                    {"name": "pole", "trainID": 17, "group": "object", "color": (103, 188, 59)},
+                    {"name": "traffic light", "trainID": 19, "group": "object", "color": (103, 188, 59)},
+                    {"name": "traffic sign", "trainID": 20, "group": "object", "color": (103, 188, 59)},
+                    {"name": "vegetation", "trainID": 21, "group": "nature", "color": (37, 84, 61)},
+                    {"name": "terrain", "trainID": 22, "group": "nature", "color": (37, 84, 61)},
+                    {"name": "sky", "trainID": 23, "group": "sky", "color": (70, 130, 180)},
+                    {"name": "person", "trainID": 24, "group": "human", "color": (255, 103, 41)},
+                    {"name": "rider", "trainID": 25, "group": "human", "color": (255, 103, 41)},
+                    {"name": "car", "trainID": 26, "group": "vehicle", "color": (116, 216, 248)},
+                    {"name": "truck", "trainID": 27, "group": "vehicle", "color": (116, 216, 248)},
+                    {"name": "bus", "trainID": 28, "group": "vehicle", "color": (116, 216, 248)},
+                    {"name": "train", "trainID": 31, "group": "vehicle", "color": (116, 216, 248)},
+                    {"name": "motorcycle", "trainID": 32, "group": "vehicle", "color": (116, 216, 248)},
+                    {"name": "bicycle", "trainID": 33, "group": "vehicle", "color": (116, 216, 248)}
+]
+
+city_categories = [
+                    {"name": "road", "trainID": 7, "group": "flat", "color": (128, 64, 128)},
+                    {"name": "sidewalk", "trainID": 8, "group": "flat", "color": (244, 35, 232)},
+                    {"name": "building", "trainID": 11, "group": "construction", "color": (70, 70, 70)},
+                    {"name": "wall", "trainID": 12, "group": "construction", "color": (102, 102, 156)},
+                    {"name": "fence", "trainID": 13, "group": "construction", "color": (190, 153, 153)},
+                    {"name": "pole", "trainID": 17, "group": "object", "color": (153, 153, 153)},
+                    {"name": "traffic light", "trainID": 19, "group": "object", "color": (250, 170, 30)},
+                    {"name": "traffic sign", "trainID": 20, "group": "object", "color": (220, 220, 0)},
+                    {"name": "vegetation", "trainID": 21, "group": "nature", "color": (107, 142, 35)},
+                    {"name": "terrain", "trainID": 22, "group": "nature", "color": (152, 251, 152)},
+                    {"name": "sky", "trainID": 23, "group": "sky", "color": (70, 130, 180)},
+                    {"name": "person", "trainID": 24, "group": "human", "color": (220, 20, 60)},
+                    {"name": "rider", "trainID": 25, "group": "human", "color": (255, 0, 0)},
+                    {"name": "car", "trainID": 26, "group": "vehicle", "color": (0, 0, 142)},
+                    {"name": "truck", "trainID": 27, "group": "vehicle", "color": (0, 0, 70)},
+                    {"name": "bus", "trainID": 28, "group": "vehicle", "color": (0, 60, 100)},
+                    {"name": "train", "trainID": 31, "group": "vehicle", "color": (0, 80, 100)},
+                    {"name": "motorcycle", "trainID": 32, "group": "vehicle", "color": (0, 0, 230)},
+                    {"name": "bicycle", "trainID": 33, "group": "vehicle", "color": (119, 11, 32)}
+]
+
+emotion_classes = [
+  "neutral",
+  "happiness",
+  "surprise",
+  "sadness",
+  "anger",
+  "disgust",
+  "fear",
+  "contempt",
+]
 
 coco_classes = [
 "person",

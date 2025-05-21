@@ -22,8 +22,8 @@ echo "Downloading yolov8n-relu..."
 # model details @ https://github.com/ultralytics/ultralytics/
 [ -f coco.names ] || wget -q https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
 if [ ! -f yolov8n-relu.pt ]; then
-    wget -q https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/Releases/ModelZoo/yolov8n-relu.pt
-    # wget -q https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/Releases/ModelZoo/yolov8n-relu.tflite
+    wget -q --no-check-certificate https://github.com/Microchip-Vectorblox/assets/releases/download/assets/yolov8n-relu.pt
+    # wget -q --no-check-certificate https://github.com/Microchip-Vectorblox/assets/releases/download/assets/yolov8n-relu.tflite
 fi
 if [ ! -f yolov8n-relu.tflite ]; then
     # ignore ultralytics yolo command error, we only care about the Tflite which is generated

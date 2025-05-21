@@ -6,6 +6,28 @@ import tensorflow as tf
 import onnxruntime
 import onnx
 import openvino.inference_engine as ie
+import argparse
+import pathlib
+
+
+def existing_dir(value):
+    filepath = pathlib.Path(value)
+
+    if not filepath.exists() or not filepath.is_dir():
+        msg = f'Directory not found: {value}'
+        raise argparse.ArgumentTypeError(msg)
+    else:
+        return value
+    
+
+def existing_file(value):
+    filepath = pathlib.Path(value)
+
+    if not filepath.exists():
+        msg = f'File not found: {value}'
+        raise argparse.ArgumentTypeError(msg)
+    else:
+        return value
 
 
 MAP_TF_TO_NUMPY_TYPE = {
@@ -128,7 +150,8 @@ def calc_diff(src, dst, threshold=1):
     if len(dst.shape)==3:
         dst = dst.transpose(1,2,0)
 
-    all_within_threshold = np.allclose(src, dst, atol=threshold)
+    # all_within_threshold = np.allclose(src, dst, atol=threshold)
+    all_within_threshold = not (np.max(np.abs(src-dst)) > threshold)
     abs_diff = np.abs(src - dst) 
     diff = src - dst
 

@@ -20,16 +20,13 @@ source $VBX_SDK/vbx_env/bin/activate
 
 echo "Checking for Numpy calibration data file..."
 if [ ! -f $VBX_SDK/tutorials/coco2017_rgb_norm_20x224x224x3.npy ]; then
-    wget -P $VBX_SDK/tutorials/ https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/EAP/calib_npy/coco2017_rgb_norm_20x224x224x3.npy
+    generate_npy $VBX_SDK/tutorials/coco2017_rgb_20x416x416x3.npy -o $VBX_SDK/tutorials/coco2017_rgb_norm_20x224x224x3.npy -s 224 224  --norm 
 fi
 
 echo "Downloading yolov8n-cls..."
 # model details @ https://github.com/ultralytics/ultralytics/
 if [ ! -f yolov8n-cls.onnx ]; then
     yolo export model=yolov8n-cls.pt format=onnx
-fi
-if [ ! -f calibration_image_sample_data_20x128x128x3_float32.npy ]; then
-    wget https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/EAP/calib_npy/calibration_image_sample_data_20x128x128x3_float32.npy
 fi
 
 echo "Running ONNX2TF..."

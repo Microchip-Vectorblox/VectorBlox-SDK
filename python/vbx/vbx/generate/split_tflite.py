@@ -1,4 +1,5 @@
 import argparse
+from .utils import existing_file, existing_dir
 import json
 import copy
 import subprocess
@@ -236,6 +237,13 @@ def check_valid(valid, op_code, op, tensors):
     return True, error_param, param_value, input_param
 
 
+def get_scale_factor(operators, tensors, idx):
+    op = operators[idx]
+    ishape = tensors[op['inputs'][0]]['shape']
+    oshape = tensors[op['outputs'][0]]['shape']
+    return oshape[-3]/ishape[-3], oshape[-2]/ishape[-2]
+
+
 def lut_pattern(operators, codes, tensors, buffers, idx, opcode):
     if not OPTIMIZED_WITH_LUT:
         return []
@@ -287,12 +295,18 @@ def lut_pattern(operators, codes, tensors, buffers, idx, opcode):
             patterns.append(idx+1)
             idx += 1
 
-        elif opcode == "CAST" and next_opcode == "RESHAPE" and next_next_opcode == "GATHER": 
+        elif opcode == "RESHAPE" and next_opcode == "CAST" and next_next_opcode == "GATHER": 
             patterns.append(idx)
             patterns.append(idx+1)
             patterns.append(idx+2)
             lut_count = 4 #for RGBA uint32
             idx += 2
+
+        elif opcode == "CAST" and next_opcode == "GATHER": 
+            patterns.append(idx)
+            patterns.append(idx+1)
+            lut_count = 4 #for RGBA uint32
+            idx += 1
 
         elif forked:
             break
@@ -305,7 +319,7 @@ def lut_pattern(operators, codes, tensors, buffers, idx, opcode):
           
         elif opcode in ["MUL", "ADD", "SUB"] and len(filters) == 1:
             weight_tensor = tensors[filters[0]]
-            if np.prod(weight_tensor['shape']) <=4:
+            if np.prod(weight_tensor['shape']) <= 4:
                 if 'shape' in weight_tensor and len(weight_tensor['shape'])>0 :
                     weight_shape = weight_tensor['shape']
                     lut_count = weight_shape[-1] #channels last
@@ -316,6 +330,8 @@ def lut_pattern(operators, codes, tensors, buffers, idx, opcode):
                     patterns.append(idx)
                 else:
                     break
+            else:
+                break
         else:
             break
 
@@ -441,8 +457,12 @@ def get_splits(jname, split_every_op=False, engine_op_types=None):
 
         op_inputs = [_ for _ in op['inputs'] if _ != -1]
         op_outputs = [_ for _ in op['outputs'] if _ != -1]
-        
-        input_shapes = [tensors[_]['shape'] for _ in op_inputs]
+      
+        input_shapes=[]
+        for op_input in op_inputs:
+            if 'shape' in tensors[op_input]:
+                input_shapes.append(tensors[op_input]['shape'])
+        # input_shapes = [tensors[_]['shape'] for _ in op_inputs]
         input_buffers = [buffers[tensors[_]['buffer']] for _ in op_inputs]
         multi_input = len(input_buffers) > 1 and not any(['data' in _ for _ in input_buffers]) 
         output_shapes = [tensors[_]['shape'] for _ in op_outputs]
@@ -497,9 +517,25 @@ def get_splits(jname, split_every_op=False, engine_op_types=None):
             # update outputs to be from last op in pattern
             op = operators[i]
             op_outputs = [_ for _ in op['outputs'] if _ != -1]
-        elif opcode == 'CAST' and next_opcode == 'RESHAPE' and next_next_opcode == 'GATHER' and len(lut_pattern(operators, codes, tensors, buffers, i, opcode)):
+        elif opcode == 'RESHAPE' and next_opcode == 'CAST' and next_next_opcode == 'GATHER' and len(lut_pattern(operators, codes, tensors, buffers, i, opcode)):
+            patterns = lut_pattern(operators, codes, tensors, buffers, i, opcode) 
+            
+            if len(current):
+                splits.append(current)
+            current =[]         
+
+            current += patterns
+            i += len(patterns) - 1
+            # update outputs to be from last op in pattern
+            op = operators[i]
+            op_outputs = [_ for _ in op['outputs'] if _ != -1]
+        elif opcode == 'CAST' and next_opcode == 'GATHER' and len(lut_pattern(operators, codes, tensors, buffers, i, opcode)):
             patterns = lut_pattern(operators, codes, tensors, buffers, i, opcode) 
 
+            if len(current):
+                splits.append(current)
+            current =[]
+            
             current += patterns
             i += len(patterns) - 1
             # update outputs to be from last op in pattern
@@ -516,7 +552,20 @@ def get_splits(jname, split_every_op=False, engine_op_types=None):
             current = []
             current.append(i)
             # @TODO: Maybe inject an identity if we can fit full map  --> suppose to be only FIA layers
-        elif opcode in ['CONV_2D', 'TRANSPOSE_CONV', 'FULLY_CONNECTED', 'RESIZE_BILINEAR', ' UNIDIRECTIONAL_SEQUENCE_LSTM', 'SOFTMAX', 'ARG_MAX', 'CAST', 'TILE', 'SPLIT', 'SPLIT_V', 'PACK', 'UNPACK', 'RESHAPE','TRANSPOSE', 'AVERAGE_POOL_2D', 'MEAN']: # start a new graph before key subgraph OP
+        elif opcode in ['CONV_2D', 'TRANSPOSE_CONV', 'FULLY_CONNECTED', 'UNIDIRECTIONAL_SEQUENCE_LSTM', 'SOFTMAX', 'ARG_MAX', 'CAST', 'TILE', 'SPLIT', 'SPLIT_V', 'PACK', 'UNPACK', 'RESHAPE','TRANSPOSE', 'AVERAGE_POOL_2D', 'MEAN']: # start a new graph before key subgraph OP
+            if len(current):
+                splits.append(current)
+            current = []
+            current.append(i)
+
+        elif opcode in ['RESIZE_NEAREST_NEIGHBOR']:
+            sf_h, sf_w = get_scale_factor(operators, tensors, i)
+            if sf_h > 2 or sf_w > 2 or prev_opcode in ['RESIZE_NEAREST_NEIGHBOR']:
+                if len(current):
+                    splits.append(current)
+                current = []
+            current.append(i)
+        elif opcode in ['RESIZE_BILINEAR']:
             if len(current):
                 splits.append(current)
             current = []
@@ -542,7 +591,7 @@ def get_splits(jname, split_every_op=False, engine_op_types=None):
             current = []
             current.append(i)
 
-        elif opcode in ['ADD', 'SUB', 'MUL', 'DIV', "GREATER", "GREATER_EQUAL", "LESS", "LESS_EQUAL", "EQUAL", "NOT_EQUAL"] and multi_input and is_singleton(input_shapes): #split if singleton channelwise input
+        elif opcode in ['ADD', 'SUB', 'MUL', 'DIV', 'SQUARED_DIFFERENCE', "GREATER", "GREATER_EQUAL", "LESS", "LESS_EQUAL", "EQUAL", "NOT_EQUAL"] and multi_input and is_singleton(input_shapes): #split if singleton channelwise input
             if len(current):
                 splits.append(current)
             current = []
@@ -1811,7 +1860,7 @@ def preprocess_graphs(tflite_model, scale=1.0, mean=0):
 
 def preprocess():
     parser = argparse.ArgumentParser()
-    parser.add_argument("tflite")
+    parser.add_argument("tflite", type=existing_file)
     parser.add_argument("-s", "--scale", type=float, nargs='+', default=1.0)
     parser.add_argument("-m", "--mean", type=float, nargs='+', default=0.)
     args = parser.parse_args()
@@ -1830,15 +1879,210 @@ def preprocess():
     tmp_dir_obj.cleanup()
 
 
-def inject_post_process(i, op_idx, o0, t0, opcodes, tensors, buffers, graph_outputs, outputs, operators, dataset):
+def inject_post_process(i, op_idx, o0, t0, opcodes, tensors, buffers, graph_outputs, outputs, operators, dataset, opacity, input_height, input_width, height, width):
   
     tx = tensors[outputs[0]].copy()
+    current_type = tx['type']
+    current_shape = tx['shape']
     current_output = outputs[0]
+    current_quant = tx['quantization']
+    double = 0
+
+    #inject ARG_MAX
+    if current_shape[-1] > 1 and len(current_shape) > 3: #perform ARG_MAX injection on non-HxW dimension.
+
+        while (current_shape[-3] < height/4 and current_shape[-2] < width/4):
+            # current_shape = [current_shape[-4], current_shape[-3]*2, current_shape[-2]*2, current_shape[-1]]
+            while (current_shape[-3] < height/4 and current_shape[-2] < width/4):
+                current_shape = [current_shape[-4], current_shape[-3]*2, current_shape[-2]*2, current_shape[-1]]
+
+            data = np.frombuffer(np.asarray([current_shape[-3], current_shape[-2]]).astype(np.int32).tobytes(), dtype=np.uint8).tolist()
+            buffers.append({'data': data, 'offset': 0, 'size': 0})
+            tensors.append({'shape':[2],
+                    'type': 'INT32',
+                    'buffer': len(buffers)-1,
+                    'name': 'resize_double{}_{}'.format(double,i),
+                    'quantization': {'details_type': 'NONE', 'quantized_dimension': 0},
+                    'is_variable': False,
+                    'has_rank': True})
+
+            buffers.append({'offset': 0, 'size': 0})
+            tensors.append({'shape': current_shape,
+                    'type': current_type,
+                    'buffer': len(buffers)-1,
+                    'name': 'resize_double{}_output_{}'.format(double,i),
+                    'quantization': current_quant,
+                    'is_variable': False,
+                    'has_rank': True})
+
+            resize = 'RESIZE_BILINEAR'
+            inject_op = {'opcode_index': opcodes.index(resize),
+                        'builtin_options_type': 'ReshapeOptions',
+                        'inputs': [current_output, len(tensors)-2], 
+                        'outputs': [len(tensors)-1]}
+            operators = operators + [inject_op]
+            current_output = len(tensors)-1
+            double += 1
+
+        data = np.frombuffer(np.asarray([3]).astype(np.int64).tobytes(), dtype=np.uint8).tolist()
+        buffers.append({'data': data, 'offset': 0, 'size': 0})
+        tensors.append({'shape': None,
+                'type': 'INT64',
+                'buffer': len(buffers)-1,
+                'name': 'arg_max_dim_{}'.format(i),
+                'quantization': {'details_type': 'NONE', 'quantized_dimension': 0},
+                'is_variable': False,
+                'has_rank': True})
+        buffers.append({'offset': 0, 'size': 0})
+
+        current_shape = current_shape[:-1]
+        current_type = 'INT32'
+        tensors.append({'shape': current_shape,
+                'type': current_type,
+                'buffer': len(buffers)-1,
+                'name': 'arg_max_{}'.format(i),
+                'quantization': {'details_type': 'NONE', 'quantized_dimension': 0},
+                'is_variable': False,
+                'has_rank': True})
+        inject_op = {'opcode_index': opcodes.index('ARG_MAX'),
+                    'builtin_options_type': "ArgMaxOptions",
+                    'builtin_options': {'output_type': 'INT32'},
+                    'inputs': [current_output, len(tensors)-2], 
+                    'outputs': [len(tensors)-1]}
+        
+        operators = operators + [inject_op]
+        current_output = len(tensors)-1
+
+        current_type = 'UINT8'
+        buffers.append({'offset': 0, 'size': 0})
+        tensors.append({'shape': current_shape,
+                'type': current_type,
+                'buffer': len(buffers)-1,
+                'name': 'cast_{}'.format(i),
+                'quantization': {'details_type': 'NONE', 'quantized_dimension': 0},
+                'is_variable': False,
+                'has_rank': True})
+        current_quant = {'details_type': 'NONE', 'quantized_dimension': 0}
+
+        inject_op = {'opcode_index': opcodes.index('CAST'),
+                    'inputs': [current_output], 
+                    'outputs': [len(tensors)-1]}
+        operators = operators + [inject_op]
+        current_output = len(tensors)-1
+
+    elif current_type in ['INT8']: #inject QUANTIZE
+        current_type = 'UINT8'
+        current_quant['zero_point'][0] += 128
+        buffers.append({'offset': 0, 'size': 0})
+        tensors.append({'shape': current_shape,
+            'type': current_type,
+            'buffer': len(buffers)-1,
+            'name': 'quant_{}'.format(i),
+            'quantization': current_quant,
+            'is_variable': False,
+            'has_rank': True})
+        inject_op = {'opcode_index': opcodes.index('QUANTIZE'),
+                    'inputs': [current_output],
+                    'outputs': [len(tensors)-1]}
+        operators = operators + [inject_op]
+        current_output = len(tensors)-1
+
+    #inject RESHAPE, adding back channels TODO remove if alread NHWC
+    if len(current_shape) == 3:
+        current_shape = current_shape + [1]
+        data = np.frombuffer(np.asarray(current_shape).astype(np.int32).tobytes(), dtype=np.uint8).tolist()
+        buffers.append({'data': data, 'offset': 0, 'size': 0})
+        tensors.append({'shape': [4],
+                'type': 'INT32',
+                'buffer': len(buffers)-1,
+                'name': 'expand_shape_{}'.format(i),
+                'quantization': {'details_type': 'NONE', 'quantized_dimension': 0},
+                'is_variable': False,
+                'has_rank': True})
+
+        buffers.append({'offset': 0, 'size': 0})
+        tensors.append({'shape': current_shape,
+                'type': current_type,
+                'buffer': len(buffers)-1,
+                'name': 'expand_{}'.format(i),
+                'quantization': current_quant,
+                'is_variable': False,
+                'has_rank': True})
+
+        inject_op = {'opcode_index': opcodes.index('RESHAPE'),
+                    'builtin_options_type': 'ReshapeOptions',
+                    'inputs': [current_output, len(tensors)-2], 
+                    'outputs': [len(tensors)-1]}
+        operators = operators + [inject_op]
+        current_output = len(tensors)-1
+
+    if current_shape[-3] != height or current_shape[-2] != width:
+        while (current_shape[-3] < height/4 and current_shape[-2] < width/4):
+            current_shape = [current_shape[-4], current_shape[-3]*2, current_shape[-2]*2, current_shape[-1]]
+
+            data = np.frombuffer(np.asarray([current_shape[-3], current_shape[-2]]).astype(np.int32).tobytes(), dtype=np.uint8).tolist()
+            buffers.append({'data': data, 'offset': 0, 'size': 0})
+            tensors.append({'shape':[2],
+                    'type': 'INT32',
+                    'buffer': len(buffers)-1,
+                    'name': 'resize_double{}_{}'.format(double,i),
+                    'quantization': {'details_type': 'NONE', 'quantized_dimension': 0},
+                    'is_variable': False,
+                    'has_rank': True})
+
+            buffers.append({'offset': 0, 'size': 0})
+            tensors.append({'shape': current_shape,
+                    'type': current_type,
+                    'buffer': len(buffers)-1,
+                    'name': 'resize_double{}_output_{}'.format(double,i),
+                    'quantization': current_quant,
+                    'is_variable': False,
+                    'has_rank': True})
+
+            resize = 'RESIZE_NEAREST_NEIGHBOR'
+            if dataset in ['depth']:
+                resize = 'RESIZE_BILINEAR'
+            inject_op = {'opcode_index': opcodes.index(resize),
+                        'builtin_options_type': 'ReshapeOptions',
+                        'inputs': [current_output, len(tensors)-2], 
+                        'outputs': [len(tensors)-1]}
+            operators = operators + [inject_op]
+            current_output = len(tensors)-1
+            double += 1
+
+        current_shape = [current_shape[-4], height, width, current_shape[-1]]
+
+        data = np.frombuffer(np.asarray([height,width]).astype(np.int32).tobytes(), dtype=np.uint8).tolist()
+        buffers.append({'data': data, 'offset': 0, 'size': 0})
+        tensors.append({'shape':[2],
+                'type': 'INT32',
+                'buffer': len(buffers)-1,
+                'name': 'resize_{}'.format(i),
+                'quantization': {'details_type': 'NONE', 'quantized_dimension': 0},
+                'is_variable': False,
+                'has_rank': True})
+
+        buffers.append({'offset': 0, 'size': 0})
+        tensors.append({'shape': current_shape,
+                'type': current_type,
+                'buffer': len(buffers)-1,
+                'name': 'resize_output_{}'.format(i),
+                'quantization': current_quant,
+                'is_variable': False,
+                'has_rank': True})
+
+        resize = 'RESIZE_NEAREST_NEIGHBOR'
+        inject_op = {'opcode_index': opcodes.index(resize),
+                    'builtin_options_type': 'ReshapeOptions',
+                    'inputs': [current_output, len(tensors)-2], 
+                    'outputs': [len(tensors)-1]}
+        operators = operators + [inject_op]
+        current_output = len(tensors)-1
 
     #inject CAST if
-    if tx['type'] != 'INT32':
+    if current_type != 'INT32':
         buffers.append({'offset': 0, 'size': 0})
-        tensors.append({'shape': tx['shape'],
+        tensors.append({'shape': current_shape,
                 'type': 'INT32',
                 'buffer': len(buffers)-1,
                 'name': 'cast_{}'.format(i),
@@ -1851,48 +2095,25 @@ def inject_post_process(i, op_idx, o0, t0, opcodes, tensors, buffers, graph_outp
         operators = operators + [inject_op]
         current_output = len(tensors)-1
 
-    #inject RESHAPE, adding back channels TODO remove if alread NHWC
-    shape = tx['shape']
-    if len(shape) == 3:
-        shape = shape + [1]
-    data = np.frombuffer(np.asarray(shape).astype(np.int32).tobytes(), dtype=np.uint8).tolist()
-    buffers.append({'data': data, 'offset': 0, 'size': 0})
-    tensors.append({'shape': [4],
-            'type': 'INT32',
-            'buffer': len(buffers)-1,
-            'name': 'expand_shape_{}'.format(i),
-            'quantization': {'details_type': 'NONE', 'quantized_dimension': 0},
-            'is_variable': False,
-            'has_rank': True})
-
-    buffers.append({'offset': 0, 'size': 0})
-    tensors.append({'shape': shape,
-            'type': 'INT32',
-            'buffer': len(buffers)-1,
-            'name': 'expand_{}'.format(i),
-            'quantization': {'details_type': 'NONE', 'quantized_dimension': 0},
-            'is_variable': False,
-            'has_rank': True})
-
-    inject_op = {'opcode_index': opcodes.index('RESHAPE'),
-                'builtin_options_type': 'ReshapeOptions',
-                'inputs': [current_output, len(tensors)-2], 
-                'outputs': [len(tensors)-1]}
-    operators = operators + [inject_op]
-    current_output = len(tensors)-1
-
     colors = []
     if dataset == "VOC":
         colors = [[0,0,0]] + rgb_color.voc_colors
     elif dataset == "COCO":
         colors = [[0,0,0]] + rgb_color.coco_colors
+    elif dataset == "cityscapes":
+        rgb2bgr = lambda x: (x[2],x[1],x[0])
+        colors = np.asarray([rgb2bgr(_["color"]) for _ in rgb_color.city_groups], dtype="uint8")   
     elif dataset == "depth":
         colors = cv2.applyColorMap(np.arange(256).astype('uint8'), cv2.COLORMAP_PLASMA).reshape((256,3))
 
-    # covert to RGB
-    colors = np.array([_[0]*(2**16) + _[1]*(2**8) + _[2]*(2**0) for _ in colors]).astype(np.uint32)
-    # add alpha
-    colors += 128*(2**24)
+    # covert to BGR colormap to RGB, then add alpha
+    colors = np.array([_[2]*(2**16) + _[1]*(2**8) + _[0]*(2**0) for _ in colors]).astype(np.uint32)
+    alpha = max(0,min(255,int(opacity*255)))*(2**24)
+    colors += alpha
+
+    # make NULL category transparent
+    if dataset in ["VOC", "COCO", "cityscapes"]:
+        colors[0] -= alpha
 
     #inject Gather
     buffers.append({'data': np.frombuffer(colors.tobytes(), dtype=np.uint8).tolist(), 'offset': 0, 'size': 0})
@@ -1903,16 +2124,16 @@ def inject_post_process(i, op_idx, o0, t0, opcodes, tensors, buffers, graph_outp
             'quantization': {'details_type': 'NONE', 'quantized_dimension': 0},
             'is_variable': False,
             'has_rank': True})
-    
+
     buffers.append({'offset': 0, 'size': 0})
-    tensors.append({'shape': shape,
+    tensors.append({'shape': current_shape,
             'type': 'INT32',
             'buffer': len(buffers)-1,
             'name': 'output_{}'.format(i),
-            'quantization': {'details_type': 'NONE', 'quantized_dimension': 0},
+            'quantization': {'scale': [0.0], 'zero_point': [0], 'details_type': 'NONE', 'quantized_dimension': 0},
             'is_variable': False,
             'has_rank': True})
-    
+
     inject_op = {'opcode_index': opcodes.index('GATHER'),
                     'builtin_options_type': 'GatherOptions',
                     "builtin_options": {
@@ -1928,6 +2149,7 @@ def inject_post_process(i, op_idx, o0, t0, opcodes, tensors, buffers, graph_outp
 
     current_output = len(tensors)-1
     outputs[i] = len(tensors)-1
+
     graph_outputs[i]['tensor_index'] = len(tensors)-1
     graph_outputs[i]['name'] = tensors[-1]['name']
     
@@ -1935,7 +2157,7 @@ def inject_post_process(i, op_idx, o0, t0, opcodes, tensors, buffers, graph_outp
     return tensors, buffers, graph_outputs, outputs, operators
 
 
-def post_processing_graphs(tflite_model, datatset):
+def post_processing_graphs(tflite_model, datatset, opacity, height, width):
     schema_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),'schema.fbs') 
     dir = os.path.dirname(tflite_model)
     if dir == '':
@@ -1954,12 +2176,22 @@ def post_processing_graphs(tflite_model, datatset):
         tensors = subgraph['tensors']
 
         opcodes = [_['builtin_code'] for _ in graph['operator_codes']]
+        if not 'QUANTIZE' in opcodes:
+            graph['operator_codes'].append({'deprecated_builtin_code': 114, 'version': 1, 'builtin_code': 'QUANTIZE'})
         if not 'GATHER' in opcodes:
             graph['operator_codes'].append({'deprecated_builtin_code': 36, 'version': 2, 'builtin_code': 'GATHER'})
         if not 'CAST' in opcodes:
-            graph['operator_codes'].append({'deprecated_builtin_code': 53, 'version': 2, 'builtin_code': 'CAST'})
+            graph['operator_codes'].append({'deprecated_builtin_code': 53, 'version': 1, 'builtin_code': 'CAST'})
         if not 'RESHAPE' in opcodes:
-            graph['operator_codes'].append({'deprecated_builtin_code': 22, 'version': 2, 'builtin_code': 'RESHAPE'})
+            graph['operator_codes'].append({'deprecated_builtin_code': 22, 'version': 1, 'builtin_code': 'RESHAPE'})
+        if not 'RESIZE_BILINEAR' in opcodes:
+            graph['operator_codes'].append({'deprecated_builtin_code': 23, 'version': 2, 'builtin_code': 'RESIZE_BILINEAR'})
+        if not 'RESIZE_NEAREST_NEIGHBOR' in opcodes:
+            graph['operator_codes'].append({'deprecated_builtin_code': 97, 'version': 2, 'builtin_code': 'RESIZE_NEAREST_NEIGHBOR'})
+        if not 'EMBEDDING_LOOKUP' in opcodes:
+            graph['operator_codes'].append({'deprecated_builtin_code': 7, 'version': 2, 'builtin_code': 'EMBEDDING_LOOKUP'})
+        if not 'ARG_MAX' in opcodes:
+            graph['operator_codes'].append({'deprecated_builtin_code': 56, 'version': 2, 'builtin_code': 'ARG_MAX'})
 
         opcodes = [_['builtin_code'] for _ in graph['operator_codes']]
         inputs = subgraph['inputs']
@@ -2005,6 +2237,10 @@ def post_processing_graphs(tflite_model, datatset):
             graph['signature_defs'][0]['inputs'] = graph_inputs
             graph['signature_defs'][0]['outputs'] = graph_outputs
 
+        # grab input shape
+        input_shape = subgraph['tensors'][graph_inputs[0]['tensor_index']]['shape']
+        input_height, input_width = input_shape[-3], input_shape[-2]
+
         for i, idx in enumerate(outputs[:1]):
             if len(subgraph['operators']) < idx:
                 for op_idx,ops in enumerate(subgraph['operators']):
@@ -2020,7 +2256,7 @@ def post_processing_graphs(tflite_model, datatset):
                 if 'buffer' in t0 and not ('data' in buffers[t0['buffer']]):
                     b0 = buffers[t0['buffer']]
                     q0 = t0['quantization']
-                    tensors, buffers, graph_outputs, outputs, operators = inject_post_process(i, op_idx, o0, t0, opcodes, tensors, buffers, graph_outputs, outputs, operators, datatset)
+                    tensors, buffers, graph_outputs, outputs, operators = inject_post_process(i, op_idx, o0, t0, opcodes, tensors, buffers, graph_outputs, outputs, operators, datatset, opacity, input_height, input_width, height, width)
 
         graph['signature_defs'][0]['outputs'] = graph_outputs
         graph['buffers'] = buffers
@@ -2036,15 +2272,18 @@ def post_processing_graphs(tflite_model, datatset):
 
 def postprocess():
     parser = argparse.ArgumentParser()
-    parser.add_argument("tflite")
-    parser.add_argument("-d", "--dataset", choices=['VOC', 'COCO', 'depth'], default='VOC')
+    parser.add_argument("tflite", type=existing_file)
+    parser.add_argument("-d", "--dataset", choices=['VOC', 'COCO', 'cityscapes', 'depth'], default='VOC')
+    parser.add_argument("-o", "--opacity", type=float, default=0.8)
+    parser.add_argument("--height", type=int, default=1080)
+    parser.add_argument("--width", type=int, default=1920)
     args = parser.parse_args()
 
     tmp_dir_obj = tempfile.TemporaryDirectory()
     tmp_dir = tmp_dir_obj.name
     tmp_tflite = os.path.join(tmp_dir, os.path.basename(args.tflite))
     shutil.copyfile(args.tflite, tmp_tflite)
-    post_processing_graphs(tmp_tflite, args.dataset)
+    post_processing_graphs(tmp_tflite, args.dataset, args.opacity, args.height, args.width)
     graphs = glob.glob(os.path.join(tmp_dir, "*.tflite"))
     for src in graphs:
         if src != tmp_tflite:
@@ -2054,7 +2293,7 @@ def postprocess():
 
 def cut():
     parser = argparse.ArgumentParser()
-    parser.add_argument("tflite")
+    parser.add_argument("tflite", type=existing_file)
     parser.add_argument("-c", "--cuts", type=int, nargs='*')
     parser.add_argument("--vnnx", action='store_true')
     args = parser.parse_args()
@@ -2075,7 +2314,7 @@ def cut():
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("tflite")
+    parser.add_argument("tflite", type=existing_file)
     parser.add_argument("dir")
     parser.add_argument("-j", "--join", action='store_true')
     parser.add_argument("-d", "--debug", action='store_true')

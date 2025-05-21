@@ -20,7 +20,7 @@ source $VBX_SDK/vbx_env/bin/activate
 
 echo "Checking for Numpy calibration data file..."
 if [ ! -f $VBX_SDK/tutorials/coco2017_rgb_norm_20x640x640x3.npy ]; then
-    wget -P $VBX_SDK/tutorials/ https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/EAP/calib_npy/coco2017_rgb_norm_20x640x640x3.npy
+    generate_npy $VBX_SDK/tutorials/coco2017_rgb_20x416x416x3.npy -o $VBX_SDK/tutorials/coco2017_rgb_norm_20x640x640x3.npy -s 640 640  --norm 
 fi
 
 echo "Downloading yolov5s..."
@@ -38,9 +38,6 @@ pip install torch==2.5.0 torchvision==0.20.0
 python export.py --weights ../yolov5s.pt --include onnx
 cd ..
 source $VBX_SDK/vbx_env/bin/activate
-if [ ! -f calibration_image_sample_data_20x128x128x3_float32.npy ]; then
-    wget https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/EAP/calib_npy/calibration_image_sample_data_20x128x128x3_float32.npy
-fi
 
 echo "Running ONNX2TF..."
 onnx2tf -cind images $VBX_SDK/tutorials/coco2017_rgb_norm_20x640x640x3.npy [[[[0.,0.,0.]]]] [[[[1.,1.,1.]]]] \

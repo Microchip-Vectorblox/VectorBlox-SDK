@@ -157,7 +157,7 @@ def main(model_file,expected_checksum,debug=False,verbose=True):
             data['outputs'].append({'data': arr.tolist(), 'shape': shape, 'zero': zero, 'scale': scale, 'dtype': dtype.name.upper()})
             np.save(os.path.join(os.path.dirname(model_file),'test.output.{}.npy'.format(o)), test_arr.reshape(shape))
             data['test_outputs'].append({'data': test_arr.tolist(), 'shape': shape, 'zero': zero, 'scale': scale, 'dtype': dtype.name.upper()})
-            heat = arr - test_arr
+            heat = arr.reshape(shape) - test_arr.reshape(shape)
             while len(heat.shape) < 3:
                 heat = np.expand_dims(heat, axis=0)
             np.save("heatmap.{}.npy".format(o), heat)

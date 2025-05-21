@@ -20,15 +20,12 @@ source $VBX_SDK/vbx_env/bin/activate
 
 echo "Checking for Numpy calibration data file..."
 if [ ! -f $VBX_SDK/tutorials/imagenetv2_rgb_norm_20x224x224x3.npy ]; then
-    wget -P $VBX_SDK/tutorials/ https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/EAP/calib_npy/imagenetv2_rgb_norm_20x224x224x3.npy
+    generate_npy $VBX_SDK/tutorials/imagenetv2_rgb_20x224x224x3.npy -o $VBX_SDK/tutorials/imagenetv2_rgb_norm_20x224x224x3.npy -s 224 224  --norm 
 fi
 
 echo "Downloading onnx_resnet34-v1..."
 # model details @ https://github.com/onnx/models/tree/main/validated/vision/classification/resnet
 wget -q --no-check-certificate https://media.githubusercontent.com/media/onnx/models/main/validated/vision/classification/resnet/model/resnet34-v1-7.onnx
-if [ ! -f calibration_image_sample_data_20x128x128x3_float32.npy ]; then
-    wget https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/EAP/calib_npy/calibration_image_sample_data_20x128x128x3_float32.npy
-fi
 
 echo "Running ONNX2TF..."
 onnx2tf -cind data $VBX_SDK/tutorials/imagenetv2_rgb_norm_20x224x224x3.npy [[[[0.485,0.456,0.406]]]] [[[[0.229,0.224,0.225]]]] \

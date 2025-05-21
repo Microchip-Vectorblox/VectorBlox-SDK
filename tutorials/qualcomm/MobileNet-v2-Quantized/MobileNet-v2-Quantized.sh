@@ -37,7 +37,7 @@ if [ -f MobileNet-v2-Quantized.vnnx ]; then
     echo "Running Simulation..."
     python $VBX_SDK/example/python/classifier.py MobileNet-v2-Quantized.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg 
     echo "C Simulation Command:"
-    echo '$VBX_SDK/example/sim-c/sim-run-model MobileNet-v2-Quantized.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg  '
+    echo '$VBX_SDK/example/sim-c/sim-run-model MobileNet-v2-Quantized.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg CLASSIFY'
 fi
 
 deactivate

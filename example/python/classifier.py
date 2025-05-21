@@ -12,12 +12,13 @@ import model_run as mr
 from vbx.generate.utils import openvino_infer, openvino_input_shape
 from vbx.generate.utils import onnx_infer, onnx_input_shape
 from vbx.generate.utils import load_input
+from vbx.generate.utils import existing_file
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('model')
-    parser.add_argument('image')
+    parser.add_argument('model', type=existing_file)
+    parser.add_argument('image', type=existing_file)
     parser.add_argument('-b', '--bgr', action='store_true')
     parser.add_argument('-m', '--mean', type=float, nargs='+', default=[0.])
     parser.add_argument('-sc', '--scale', type=float, nargs='+', default=[1.])
@@ -43,6 +44,8 @@ if __name__ == "__main__":
         classes = dataset.imagenet_classes_with_nul
     elif len(output)==1000:
         classes = dataset.imagenet_classes
+    elif len(output)==8:
+        classes = dataset.emotion_classes
     else:
         classes = None
 

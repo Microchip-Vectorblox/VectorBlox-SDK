@@ -13,7 +13,7 @@ function install_venv() {
     # tensorflow 2.16.1, 2.16.2, and 2.17.0 fail for the following tutorials:
     # - tensorflow/yolo-v3-tiny-tf, yolo-v3-tf, yolo-v4-tf
     # when using keras-YOLOv3-model-set
-    python -m pip install tensorflow==2.15.1
+    python -m pip install tensorflow-cpu==2.15.1
     python -m pip install numpy==1.23.5
 
     python -m pip install tensorflow_datasets==4.9.3

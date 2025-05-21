@@ -29,13 +29,20 @@ if [ -f DeepLabV3-Plus-MobileNet-Quantized.tflite ]; then
 fi
 
 if [ -f DeepLabV3-Plus-MobileNet-Quantized.pre.tflite ]; then
+   tflite_postprocess DeepLabV3-Plus-MobileNet-Quantized.pre.tflite  --dataset VOC \
+--opacity 0.8 \
+--height 1080 \
+--width 1920
+fi
+
+if [ -f DeepLabV3-Plus-MobileNet-Quantized.pre.post.tflite ]; then
     echo "Generating VNNX for V1000 configuration..."
-    vnnx_compile -c V1000 -t DeepLabV3-Plus-MobileNet-Quantized.pre.tflite -o DeepLabV3-Plus-MobileNet-Quantized.vnnx
+    vnnx_compile -c V1000 -t DeepLabV3-Plus-MobileNet-Quantized.pre.post.tflite -o DeepLabV3-Plus-MobileNet-Quantized.vnnx
 fi
 
 if [ -f DeepLabV3-Plus-MobileNet-Quantized.vnnx ]; then
     echo "Running Simulation..."
-    python $VBX_SDK/example/python/segmentation.py DeepLabV3-Plus-MobileNet-Quantized.vnnx $VBX_SDK/tutorials/test_images/A0PQ76.jpg 
+    python $VBX_SDK/example/python/segmentation.py DeepLabV3-Plus-MobileNet-Quantized.vnnx $VBX_SDK/tutorials/test_images/A0PQ76.jpg --inj 
     echo "C Simulation Command:"
     echo '$VBX_SDK/example/sim-c/sim-run-model DeepLabV3-Plus-MobileNet-Quantized.vnnx $VBX_SDK/tutorials/test_images/A0PQ76.jpg  '
 fi

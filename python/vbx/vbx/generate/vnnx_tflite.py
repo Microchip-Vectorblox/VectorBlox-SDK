@@ -554,6 +554,9 @@ def check_pack(ishape, oshape, axis, c_axis, count):
 
 
 def channels_first_array_reshape(ishape, transform):
+    if tuple(ishape) ==  transform:
+        return 0
+
     iarr = np.random.randint(0, 10, ishape)
     oarr = np.reshape(iarr, transform)
     oshape = oarr.shape
@@ -622,6 +625,8 @@ def channels_first_array_reshape(ishape, transform):
         if expand_axis < -3:
             print('expand axis < -3 not supported')
             mode = -1
+        elif expand_axis == -1 and len(ishape) == 3: # n,h,w aka n,h,w,1  
+            mode = 0
         elif expand_axis == -1: # n,h,w,c,1 aka n,1,h,w,c  
             tmp = np.transpose(c_iarr, adjust_transform([1,2,0], c_iarr.ndim))
             tmp = np.expand_dims(tmp, axis=-3)
@@ -1151,6 +1156,15 @@ def generate_vnnx_from_json_subgraphs(json_subgraphs, preset, test_inputs, test_
         vnnx_graph.allocate_bytes = len(data)
         graph_data = [vnnx_graph.get_structured_data()]
         data = b"".join(graph_data+node_data+subnode_data+tensor_data+align1+[replay]+align2+[weights])
+        
+        if 0: # enable for debug
+            offset = len(b"".join(graph_data+node_data+subnode_data+tensor_data+align1+[replay]+align2))
+            all_tensor_array = []
+            for n in Nodes:
+                all_tensor_array += n.tensor_array
+
+            for t in all_tensor_array:
+                print(t.name, (t.buffer[1] + offset), hex((t.buffer[1] + offset)))
 
     # For 3.0, when graphs are being run in another engine, need also to write the
     # physical memory address of each tensor. Currently, for each (relevant) tensor,
@@ -1565,6 +1579,7 @@ def inject_strided_slice(conv_node, conv_o_tensor, subnode_tensor_array, ids_wit
     sn.tensor_array.append(tn)
     subnode_tensor_array.insert(1, tn)
 
+    sn.num_tensors = len(sn.tensor_array)
     conv_node.Conv2DOptions.stride_width = 1
     conv_o_tensor.id = float(dummy_id_name)
     conv_o_tensor.name = dummy_id_name
@@ -1829,18 +1844,9 @@ def add_external_producer_consumer_info(t, external_inputs, external_outputs,\
 
 
 def check_node_for_collision(node, Nodes, prev_fia_node):
-
-    # TODO force all collisions to 1 for now until pad identity injection fixed.
     node.Conv2DOptions.fia_collision = 1
     node.FullyConnectedOptions.fia_collision = 1
     return
-
-    # TODO bug on some depthwise layers (mobilenetv2), where not having collision would lead to erroneous output on first pass of an output on HW. Force until fixed
-    if node.Conv2DOptions.use_depthwise:
-        node.Conv2DOptions.fia_collision = 1
-        node.FullyConnectedOptions.fia_collision = 1
-        return
-
     # check if prev node(s) that feeds into this node, is non-FIA (current node must wait for signal from MXP), count it as collision
     if len(Nodes) != 0:
         for idx in range(node.num_inputs): 
@@ -1865,46 +1871,40 @@ def check_node_for_collision(node, Nodes, prev_fia_node):
         node_i_tensor_id = node.tensor_array[0].id
         node_i_tensor_ids = [node.tensor_array[_].id for _ in range(node.num_inputs)]
 
-        # if prev FIA node feeds into current node, check its final tile against this node's first tile, if overlap then collision
-        # TODO fix, rather than check rows/cols fully used by previous FIA node,
-        # check the actual output rows/cols completed by previous FIA node, which will differ based on dilation and stride and subnodes
-
+        # if prev_fia_node feeds into current node, then it is collision
+        # TODO determine if we can get no collisions on other layer specs / tilings
         if prev_fia_o_tensor_id in node_i_tensor_ids:
-            if prev_fia_node.type == BuiltinOperator.CONV_2D or prev_fia_node.type == BuiltinOperator.TRANSPOSE_CONV:
-                prev_fia_node_omaps = prev_fia_node.Conv2DOptions.kernels
-            else:
-                prev_fia_node_omaps = 1
+            # if prev_fia_node.type == BuiltinOperator.CONV_2D or prev_fia_node.type == BuiltinOperator.TRANSPOSE_CONV:
+            #     prev_fia_node_omaps = prev_fia_node.Conv2DOptions.kernels
+            # else:
+            #     prev_fia_node_omaps = 1
 
-            last_tile_maps = prev_fia_node_omaps % prev_fia_node.maps
-            if last_tile_maps == 0: # if 0, then prev_fia_node_omaps == prev_fia_node.maps
-                last_tile_maps = prev_fia_node.maps
-            prev_fia_node_completed_maps = prev_fia_node_omaps - last_tile_maps
+            # last_tile_maps = prev_fia_node_omaps % prev_fia_node.maps
+            # if last_tile_maps == 0: # if 0, then prev_fia_node_omaps == prev_fia_node.maps
+            #     last_tile_maps = prev_fia_node.maps
+            # prev_fia_node_completed_maps = prev_fia_node_omaps - last_tile_maps
 
-            row_collision_threshold = node.row_start + node.rows_0
-            if node.Conv2DOptions.use_db and node.Conv2DOptions.conv_rows:
-                row_collision_threshold = node.Conv2DOptions.conv_rows
+            # row_collision_threshold = node.row_start + node.rows_0
+            # if node.Conv2DOptions.use_db and node.Conv2DOptions.conv_rows:
+            #     row_collision_threshold = node.Conv2DOptions.conv_rows
 
-            col_collision_threshold = node.col_start + node.cols_0
+            # col_collision_threshold = node.col_start + node.cols_0
 
-            channel_collision_threshold = node.channels
-            if node.type == BuiltinOperator.CONV_2D:
-                channel_collision_threshold = node.Conv2DOptions.imaps
-            if node.type == BuiltinOperator.FULLY_CONNECTED:
-                channel_collision_threshold = 1
+            # channel_collision_threshold = node.channels
+            # if node.type == BuiltinOperator.CONV_2D:
+            #     channel_collision_threshold = node.Conv2DOptions.imaps
+            # if node.type == BuiltinOperator.FULLY_CONNECTED:
+            #     channel_collision_threshold = 1
 
-            if channel_collision_threshold < prev_fia_node_completed_maps:
-                return
+            # if channel_collision_threshold < prev_fia_node_completed_maps:
+            #     return
 
-            if row_collision_threshold <= prev_fia_node.row_last // prev_fia_node.Conv2DOptions.stride_height:
-                return
+            # if row_collision_threshold <= prev_fia_node.row_last // prev_fia_node.Conv2DOptions.stride_height:
+            #     return
 
-            if col_collision_threshold <= prev_fia_node.col_last // prev_fia_node.Conv2DOptions.stride_width:
-                return
+            # if col_collision_threshold <= prev_fia_node.col_last // prev_fia_node.Conv2DOptions.stride_width:
+            #     return
 
-            node.Conv2DOptions.fia_collision = 1
-            node.FullyConnectedOptions.fia_collision = 1
-        else:
-            # TODO bug when even if prev FIA node didn't feed into current node (no collision), HW checksum didn't match (yolov5n). So force collision until fixed.
             node.Conv2DOptions.fia_collision = 1
             node.FullyConnectedOptions.fia_collision = 1
 
@@ -2056,7 +2056,6 @@ def populate_nodes(json_subgraphs, preset, graph_activations, weights, aliased_i
             layer_codes.append(opcode)
 
         prev_subop = None
-
         subnode_tensor_array = []
         
         i = 0
@@ -2148,21 +2147,6 @@ def populate_nodes(json_subgraphs, preset, graph_activations, weights, aliased_i
         if idims >= 2:
             node.m = t.shape[-2]
         node.n = t.shape[-1]
-
-        # sys.stderr.write('node 2: {} not implemented\n'.format(node))
-        if opcode in ['FULLY_CONNECTED']: #TODO
-            if idims >= 3:
-                node.channels = t.shape[-2]
-                node.m = t.shape[-1]
-                node.n = t.shape[-3]
-            elif idims >= 2:
-                node.channels = 1
-                node.m = t.shape[-2]
-                node.n = t.shape[-1]
-            elif idims >= 1:
-                node.channels = 1
-                node.m = 1
-                node.n = t.shape[-1]
 
         if node.type == BuiltinOperator.CONV_2D:
             conv8 = node.Conv2DOptions
@@ -2262,6 +2246,10 @@ def populate_nodes(json_subgraphs, preset, graph_activations, weights, aliased_i
 
             if pad_hw is not None:
                 if prev_node is None:
+                    inject_identity = True
+                elif op['inputs'][0] in in_id_to_out_ids.keys():
+                    inject_identity = True
+                elif prev_node.num_outputs > 1:
                     inject_identity = True
                 elif input_id in in_id_to_out_ids.keys():
                     # TODO the input to this node is shared with another node, should skip and determine after populate_nodes if pad can be injected or identity must be injected
@@ -2692,6 +2680,19 @@ def populate_nodes(json_subgraphs, preset, graph_activations, weights, aliased_i
 
         elif node.type == BuiltinOperator.FULLY_CONNECTED:
 
+            if idims >= 3:
+                node.channels = t.shape[-2]
+                node.m = t.shape[-1]
+                node.n = t.shape[-3]
+            elif idims >= 2:
+                node.channels = 1
+                node.m = t.shape[-2]
+                node.n = t.shape[-1]
+            elif idims >= 1:
+                node.channels = 1
+                node.m = 1
+                node.n = t.shape[-1]
+
             f_tensor = tensors[op['inputs'][1]]
             b_tensor = None
             if len(op['inputs']) > 2 and op['inputs'][2] != -1:
@@ -2702,6 +2703,7 @@ def populate_nodes(json_subgraphs, preset, graph_activations, weights, aliased_i
             output_depth, accum_depth = tuple(f_tensor['shape'])
             fc8.filter_shape_dims = [output_depth, accum_depth]
             fc8.use_fia = USE_CONV_VECTOR and USE_CONV_FIA
+            fc8.mxp_double_buffer = 1
 
             node.activation_max = 127
             node.activation_min = -128
@@ -3082,6 +3084,8 @@ def lut_func(code, scale=None, param=None):
         fn = lambda s: tf.subtract(s, scale)
     elif code == "POST_PROCESSING":
         fn = lambda s: tf.gather(s, param, axis=1)
+    elif code == "SQUARED_DIFFERENCE":
+        fn = lambda s: tf.math.squared_difference(s, scale)
     return fn
 
 
@@ -3134,7 +3138,7 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
     input_type = i_tensor['type']
     sn.input_data_type = calc_type.from_str(input_type)
 
-    if not subcode in ['QUANTIZE', 'GATHER', 'CAST', 'TOPK_V2', 'RESHAPE', 'NEG']:
+    if not subcode in ['LUT', 'QUANTIZE', 'GATHER', 'CAST', 'TOPK_V2', 'RESHAPE', 'NEG']:
         assert(sn.input_data_type == calc_type.INT8 or sn.input_data_type == calc_type.UINT8)
 
     sn.activation_min = -128
@@ -3265,7 +3269,7 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
 
         subnode_array.append(sn)
 
-    elif subcode in ['ADD', 'SUB', 'MUL', 'DIV', "GREATER", "GREATER_EQUAL", "LESS", "LESS_EQUAL", "EQUAL", "NOT_EQUAL"] and multi_input:  # >>>>>>>>> Main ELTWISE BLOCK with multi_inputs
+    elif subcode in ['ADD', 'SUB', 'MUL', 'DIV', "GREATER", "GREATER_EQUAL", "LESS", "LESS_EQUAL", "EQUAL", "NOT_EQUAL", "SQUARED_DIFFERENCE"] and multi_input:  # >>>>>>>>> Main ELTWISE BLOCK with multi_inputs
        
         sn.type = VNNXOperator.ELTWISE
         eltwise8 = sn.eltwise8
@@ -3279,7 +3283,7 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
         eltwise8.swap = subop['inputs'][1] < subop['inputs'][0]
 
         o_tensor = tensors[subop['outputs'][0]] 
-        if subcode in ['MUL', 'ADD', 'SUB', 'DIV', 'MINIMUM', 'MAXIMUM']:
+        if subcode in ['MUL', 'ADD', 'SUB', 'DIV', 'MINIMUM', 'MAXIMUM', 'SQUARED_DIFFERENCE']:
             output_offset = o_tensor['quantization']['zero_point'][0] 
             output_scale = o_tensor['quantization']['scale']
         else:
@@ -3431,6 +3435,7 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
         sn.type = VNNXOperator.LUT
         transform = None
         sn.ActivationOptions.lut_count = 1
+
         l = 0
         bytes = 1
         while l < len(lut_ops):
@@ -3444,8 +3449,11 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
 
             if code == 'LOGISTIC' and next_code == 'MUL':
                 l += 1
-            elif code == 'CAST' and next_code == 'RESHAPE'and next_next_code == 'GATHER':
+            elif code == 'RESHAPE' and next_code == 'CAST'and next_next_code == 'GATHER':
                 l += 2
+                bytes = 4
+            elif code == 'CAST'and next_code == 'GATHER':
+                l += 1
                 bytes = 4
             elif code in ['MUL', 'ADD', 'SUB']:
                 _, _, _, _, _, _, filter_shape_dims, _ = get_subop_parameters(op, tensors, buffers)
@@ -3478,8 +3486,7 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
                     output_type = o_tensor['type']
                     sn.output_data_type = calc_type.from_str(output_type)
 
-                elif code == 'CAST' and next_code == 'RESHAPE'and next_next_code == 'GATHER':
-
+                elif code == 'RESHAPE' and next_code == 'CAST'and next_next_code == 'GATHER':
                     pixels = get_numpy_data_from_index(next_next_op['inputs'][0], tensors, buffers)
                     arr = np.zeros((256,), dtype=pixels.dtype)
                     arr[:len(pixels)] = pixels
@@ -3490,14 +3497,33 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
                     output_type = o_tensor['type']
                     sn.output_data_type = calc_type.from_str(output_type)
 
-                elif code in ['QUANTIZE', 'HARD_SWISH', 'LOGISTIC', 'RELU', 'RELU6', 'RELU_0_TO_1']:
+                elif code == 'CAST'and next_code == 'GATHER':
+                    pixels = get_numpy_data_from_index(next_op['inputs'][0], tensors, buffers)
+                    arr = np.zeros((256,), dtype=pixels.dtype)
+                    arr[:len(pixels)] = pixels
+                    fn = lambda s: float(arr[int(s)])
+                    l += 1
+
+                    o_tensor = tensors[next_op['outputs'][0]]
+                    output_type = o_tensor['type']
+                    sn.output_data_type = calc_type.from_str(output_type)
+
+                elif code in ['HARD_SWISH', 'LOGISTIC', 'RELU', 'RELU6', 'RELU_0_TO_1']:
                     fn = lut_func(code)
+
+                elif code in ['QUANTIZE']:
+                    fn = lut_func(code)
+
+                    #TODO cover other cases / zeros
+                    if o_tensor['type'] == 'UINT8':
+                        if l < len(lut_ops) - 1:
+                            fn = lambda s: s + 128
 
                 elif code in ['LEAKY_RELU']:
                     opts = op['builtin_options']
                     fn = lut_func(code, opts['alpha'])
 
-                elif code in ['MUL', 'ADD', 'SUB']:
+                elif code in ['MUL', 'ADD', 'SUB', 'SQUARED_DIFFERENCE']:
                     _, _, _, filter_scale, _, filter_offset, filter_shape_dims, filter_data = get_subop_parameters(op, tensors, buffers)
                     if x < filter_shape_dims[-3]:
                         dequantized_filter = filter_scale[0] * (filter_data[x] - filter_offset)  
@@ -3519,6 +3545,7 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
             
             if bytes == 4:
                 l, first, last, step_val, step_ind = LUTPopulate(1., 0., 1., 0, transform, bytes=4, itype=sn.input_data_type)
+                
                 lut_repacked = [0xff & _ for _ in l]
                 lut_repacked += [(0xff * (2**8) & _) // (2**8) for _ in l]
                 lut_repacked += [(0xff * (2**16) & _) // (2**16) for _ in l]
@@ -3615,7 +3642,7 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
         resize = sn.ResizeOptions
         resize.mode = resize_mode.LINEAR 
         resize.ratio =  ((1 << 10) * i_tensor['shape'][1] + o_tensor['shape'][1] / 2) / o_tensor['shape'][1]
-
+       
         new_size_data = get_numpy_data(s_tensor, buffers)
         resize.scale = (new_size_data / i_tensor['shape'][1:3]).tolist() # height and width scales
 
@@ -3626,6 +3653,7 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
         subnode_array.append(sn)
 
     elif subcode == 'MIRROR_PAD':
+        print('WARNING: currently MIRROR_PAD running as PAD')
         sn.type = BuiltinOperator.MIRROR_PAD
 
         pads = get_numpy_data_from_index(subop['inputs'][1], tensors, buffers)
@@ -3943,7 +3971,7 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
 
         subnode_array.append(sn)
 
-    elif subcode in ['ADD', 'SUB']:
+    elif subcode in ['ADD', 'SUB', 'SQUARED_DIFFERENCE', 'SQUARED_ROOT']:
         if subcode == 'ADD':
             sn.type = BuiltinOperator.ADD
         else:
@@ -3969,8 +3997,10 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
         filter_scale = f_tensor['quantization']['scale']
 
         left_shift = 15
-        if 'pot_scale_int16' in opts and opts['pot_scale_int16']:
-            left_shift = 20
+        if subcode != 'SQUARED_DIFFERENCE':
+            if 'pot_scale_int16' in opts and opts['pot_scale_int16']:
+                left_shift = 20
+        
         twice_max_input_scale = 2 * max(input_scale[0], filter_scale[0])
         real_input_multiplier = (np.asarray(input_scale) / twice_max_input_scale).tolist()
         real_filter_multiplier = (np.asarray(filter_scale) / twice_max_input_scale).tolist()
@@ -3990,7 +4020,22 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
         broad8.swap_inputs = swap_input_order
         if subcode == 'SUB':
             broad8.sub = 1
+        
+        if subcode == 'SQUARED_DIFFERENCE':
+            sn.type = BuiltinOperator.SQUARED_DIFFERENCE
+            left_shift = 7
+            sn.activation_max = 127
+            sn.activation_min = -128
+            broad8.sub = -1
+            twice_max_input_scale = 2 * max(input_scale[0], filter_scale[0])
+            real_input_multiplier = (np.asarray(input_scale) / twice_max_input_scale).tolist()
+            real_filter_multiplier = (np.asarray(filter_scale) / twice_max_input_scale).tolist()
+            real_output_multiplier = (twice_max_input_scale*twice_max_input_scale / (1<<left_shift * 2) * np.asarray(output_scale)).tolist()
 
+            input_multiplier, input_shift = get_quantized_multiplier(real_input_multiplier)
+            filter_multiplier, filter_shift = get_quantized_multiplier(real_filter_multiplier)
+            output_multiplier, output_shift = get_quantized_multiplier(real_output_multiplier)
+            
         k, h, w, c = 1, 1, 1, 1
         if len(f_tensor['shape']) == 1:
             c = tuple(f_tensor['shape'])[0]
@@ -4025,9 +4070,9 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
             if OPTIMIZED_ADD and VERBOSE:
                 print(subcode, input_scale[0]/output_scale[0], filter_scale[0]/output_scale[0], "WARNING can't optimize")
 
-
-        if opts['fused_activation_function'] == 'RELU':
-            sn.activation_min = output_offset
+        if subcode != 'SQUARED_DIFFERENCE':
+            if opts['fused_activation_function'] == 'RELU':
+                sn.activation_min = output_offset
 
         sn.input_multiplier = len(weights)
         fmt = "{}i".format(len(input_multiplier))
@@ -4514,10 +4559,10 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
         # neg vnnx: 1,c,y,x {-4, -3, -2, -1}
         if axis == -1 or axis == 3:
             sn.reduce8.axis =  -3 #vnnx channels first
-            axis_list = list(range(input_shape[1]))
+            axis_list = np.array(range(input_shape[1]))
             sn.reduce8.axis_list = len(weights)
-            fmt = "{}i".format(len(axis_list))
-            weights += struct.pack(fmt, *axis_list)
+            fmt = "{}b".format(len(axis_list.flatten()))
+            weights += struct.pack(fmt, *axis_list.flatten())
         elif axis == 0:
             sys.stderr.write('ERROR: reduction on axis {} is not supported in {}\n'.format(axis,subcode))
             sys.exit(1)
@@ -4622,7 +4667,7 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
         # if swap_input_order:
             #Error here because coord_data are not const, so there is nothing inside the buffer
         coord_data = get_numpy_data_from_index(subop['inputs'][1], tensors, buffers)  
-        assert (len(coord_data_tensor['shape']) == 1)
+        # assert (len(coord_data_tensor['shape']) == 1)
 
         input_shape = tensors[subop['inputs'][0]]['shape']
         output_shape = tensors[subop['outputs'][0]]['shape']

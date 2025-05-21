@@ -6,7 +6,7 @@
 #include <string.h>
 
 #define TRACKING
-#define NAME_LENGTH 12
+#define TRACK_NAME_LENGTH 40
 
 typedef struct {
     mf16 x; // state estimate [w,y,width,dx,dy,dwidth]
@@ -19,7 +19,7 @@ typedef struct {
     int framesSinceRec;
     object_t* object; // bool match;
     int misses;
-    char name[NAME_LENGTH];
+    char name[TRACK_NAME_LENGTH];
     fix16_t similarity;
     fix16_t res;
     fix16_t gender;

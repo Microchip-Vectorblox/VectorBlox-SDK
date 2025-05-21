@@ -339,7 +339,7 @@
       "REFLECT", 
       "SYMMETRIC"
     ],
-    "vectorized": [0]
+    "vectorized": [1]
   },
   "MUL": {
     "type": [
@@ -583,7 +583,7 @@
       "INT8",
       "UINT8"
     ],
-    "vectorized": [-1]
+    "vectorized": [1]
   },
   "SQUEEZE": {
     "type": [

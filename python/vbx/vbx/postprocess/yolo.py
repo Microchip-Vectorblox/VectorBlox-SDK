@@ -287,6 +287,8 @@ def ultralytics_post_process(conv_outputs, input_height, input_width, threshold=
     points = []
     angles = []
     seg = []
+    points_xy = []
+    points_s = []
 
     for o,output in enumerate(conv_outputs):
         if len(output.shape) == 2:
@@ -307,6 +309,16 @@ def ultralytics_post_process(conv_outputs, input_height, input_width, threshold=
                 points += [output]
             else:
                 points = [output] + points
+        elif is_pose and output.shape[0] == 2*17:
+            if len(points) == 0 or output.shape[1]*output.shape[2] < points[-1].shape[1]*points[-1].shape[2]:
+                points_xy += [output]
+            else:
+                points_xy = [output] + points_xy
+        elif is_pose and output.shape[0] == 1*17:
+            if len(points) == 0 or output.shape[1]*output.shape[2] < points[-1].shape[1]*points[-1].shape[2]:
+                points_s += [output]
+            else:
+                points_s = [output] + points_s
         elif is_obb and output.shape[0] == 1:
             if len(angles) == 0 or output.shape[1]*output.shape[2] < angles[-1].shape[1]*angles[-1].shape[2]:
                 angles += [output]
@@ -322,7 +334,18 @@ def ultralytics_post_process(conv_outputs, input_height, input_width, threshold=
     classes.sort(reverse=True, key=size_sort)
     boxes.sort(reverse=True, key=size_sort)
     if is_pose:
-        points.sort(reverse=True, key=size_sort)
+        if len(points_xy)>0:    # if keypoints are split in xy coordinates and scores, then combine them
+            points_xy.sort(reverse=True, key=size_sort)
+            points_s.sort(reverse=True, key=size_sort)
+            ind_s = np.arange(51)[2::3]
+            ind_xy = np.setdiff1d(np.arange(51),ind_s)
+            for xy,s in zip(points_xy, points_s):
+                xys = np.zeros((51,xy.shape[1],xy.shape[2]))
+                xys[ind_xy,:,:] = xy
+                xys[ind_s,:,:] = s
+                points.append(xys)
+        else:
+            points.sort(reverse=True, key=size_sort)
     if is_obb:
         angles.sort(reverse=True, key=size_sort)
     if is_seg:

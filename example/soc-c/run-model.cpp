@@ -227,7 +227,7 @@ int main(int argc, char **argv) {
 	//we can run the model.
 #else
 	printf("Starting inference runs\n");
-	for(int run=0; run < 2; ++run){
+	for(int run=0; run < 1; ++run){
 		struct timeval tv1, tv2;
 		gettimeofday(&tv1, NULL);
 		int status = vbx_cnn_model_start(vbx_cnn, model, io_buffers);
@@ -244,13 +244,13 @@ int main(int argc, char **argv) {
 
 	}
 #endif
-	fix16_t* fix16_buffers[model_get_num_inputs(model)+model_get_num_outputs(model)];
+	fix16_t* fix16_output_buffers[model_get_num_outputs(model)];
 	for (int o = 0; o < (int)model_get_num_outputs(model); ++o){
 		int size=model_get_output_length(model, o);
 		fix16_t scale = (fix16_t)model_get_output_scale_fix16_value(model,o); // get output scale
 		int32_t zero_point = model_get_output_zeropoint(model,o); // get output zero
-		fix16_buffers[model_get_num_inputs(model) + o] = (fix16_t*)malloc(size*sizeof(fix16_t));
-		int8_to_fix16(fix16_buffers[model_get_num_inputs(model)+o], (int8_t*)io_buffers[model_get_num_inputs(model)+o], size, scale, zero_point);
+		fix16_output_buffers[o] = (fix16_t*)malloc(size*sizeof(fix16_t));
+		int8_to_fix16(fix16_output_buffers[o], (int8_t*)io_buffers[model_get_num_inputs(model)+o], size, scale, zero_point);
 	}	
 	// users can modify this post-processing function in post_process.c
 	vbx_cnn_io_ptr_t pdma_buffer[model_get_num_outputs(model)];
@@ -262,22 +262,24 @@ int main(int argc, char **argv) {
 	
 	for(int o =0; o<(int)model_get_num_outputs(model);o++){
 		int output_length = model_get_output_length(model, o);
-		//pdma_transfer(pdma_out,(void*)io_buffers[model_get_num_inputs(model)+o],output_offset,model_get_output_length(model, o),vbx_cnn);
-		pdma_ch_transfer(pdma_out,(void*)io_buffers[1+o],output_offset,model_get_output_length(model, o),vbx_cnn,pdma_channel);
+		pdma_ch_transfer(pdma_out,(void*)io_buffers[model_get_num_inputs(model)+o],output_offset,model_get_output_length(model, o),vbx_cnn,pdma_channel);
 		pdma_buffer[o] = (vbx_cnn_io_ptr_t)(pdma_mmap_t + output_offset);
 		output_offset+= output_length;
 	}
 
 #if INT8FLAG	
-//	if (argc > 4) pprint_post_process(argv[2], argv[4], model, io_buffers,1);
-	if (argc > 3) pprint_post_process(argv[1], argv[3], model, (vbx_cnn_io_ptr_t*)pdma_buffer,1,0);
+	if (argc > 3) pprint_post_process(argv[1], argv[3], model, (vbx_cnn_io_ptr_t*)pdma_buffer,1,0,vbx_cnn);
 #else	
-	if (argc > 3) pprint_post_process(argv[1], argv[3], model, (vbx_cnn_io_ptr_t*)fix16_buffers,0);
+	if (argc > 3) pprint_post_process(argv[1], argv[3], model, (vbx_cnn_io_ptr_t*)fix16_output_buffers,0,0,vbx_cnn);
 #endif
 
-	unsigned checksum = fletcher32((uint16_t*)(io_buffers[model_get_num_inputs(model)]),model_get_output_length(model, 0)*sizeof(int8_t)/sizeof(uint16_t));
+	int output_bytes = model_get_output_datatype(model,0) == VBX_CNN_CALC_TYPE_INT16 ? 2 : 1;
+	if (model_get_output_datatype(model,0) == VBX_CNN_CALC_TYPE_INT32) output_bytes = 4;
+	unsigned checksum = fletcher32((uint16_t*)(io_buffers[model_get_num_inputs(model)]),model_get_output_length(model, 0)*output_bytes/sizeof(uint16_t));
 	for(unsigned o =1;o<model_get_num_outputs(model);++o){
-		checksum ^= fletcher32((uint16_t*)io_buffers[model_get_num_inputs(model)+o], model_get_output_length(model, o)*sizeof(int8_t)/sizeof(uint16_t));
+		int output_bytes = model_get_output_datatype(model,o) == VBX_CNN_CALC_TYPE_INT16 ? 2 : 1;
+		if (model_get_output_datatype(model,0) == VBX_CNN_CALC_TYPE_INT32) output_bytes = 4;
+		checksum ^= fletcher32((uint16_t*)io_buffers[model_get_num_inputs(model)+o], model_get_output_length(model, o)*output_bytes/sizeof(uint16_t));
 	}
 	printf("CHECKSUM = %08x\n",checksum);
 	if(WRITE_OUT || (argc<=3 && !strcmp(argv[1],"test.vnnx"))){

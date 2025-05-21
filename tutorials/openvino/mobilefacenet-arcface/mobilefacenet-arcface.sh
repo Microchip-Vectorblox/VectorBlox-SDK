@@ -20,13 +20,13 @@ source $VBX_SDK/vbx_env/bin/activate
 
 echo "Checking for Numpy calibration data file..."
 if [ ! -f $VBX_SDK/tutorials/imagenetv2_20x224x224x3.npy ]; then
-    wget -P $VBX_SDK/tutorials/ https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/EAP/calib_npy/imagenetv2_20x224x224x3.npy
+    generate_npy $VBX_SDK/tutorials/imagenetv2_rgb_20x224x224x3.npy -o $VBX_SDK/tutorials/imagenetv2_20x224x224x3.npy -s 224 224  -b 
 fi
 
 echo "Downloading mobilefacenet-arcface..."
 # model details @ https://github.com/deepinsight/insightface
-wget -q --no-check-certificate https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/Releases/ModelZoo/model-0000.xml
-wget -q --no-check-certificate https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/Releases/ModelZoo/model-0000.bin
+wget -q --no-check-certificate https://github.com/Microchip-Vectorblox/assets/releases/download/assets/model-0000.xml
+wget -q --no-check-certificate https://github.com/Microchip-Vectorblox/assets/releases/download/assets/model-0000.bin
 mv model-0000.xml mobilefacenet-arcface.xml
 mv model-0000.bin mobilefacenet-arcface.bin
 

@@ -242,8 +242,8 @@ size_t model_get_output_dims(const model_t* model,int output_index);
  * @param index The index of the output to get the datatype of
  * @return data type of model output
  */
-
 vbx_cnn_calc_type_e model_get_output_datatype(const model_t* model,int output_index);
+
 /**
  * Get the datatype of an input buffer
  * @param model The model to query
@@ -251,18 +251,19 @@ vbx_cnn_calc_type_e model_get_output_datatype(const model_t* model,int output_in
  * @return data type of model input
  */
 vbx_cnn_calc_type_e model_get_input_datatype(const model_t* model,int input_index);
+
 /**
  * Get the number of input buffers for the model
  * @param model The model to query
  * @return get number of inputs for the model
  */
 size_t model_get_num_inputs(const model_t* model);
+
 /**
  * Get the number of output buffers for then model
  * @param model The model to query
  * @return get number of outputs for the model
  */
-
 size_t model_get_num_outputs(const model_t* model);
 
 /**
@@ -286,6 +287,7 @@ vbx_cnn_size_conf_e model_get_size_conf(const model_t* model);
  * @param the size required to store the data part of the model
  */
 size_t model_get_data_bytes(const model_t* model);
+
 /**
  * Get size required to store the entire model, include temporary buffers
  * the temporary buffers must be contiguous with the model data
@@ -293,7 +295,6 @@ size_t model_get_data_bytes(const model_t* model);
  * @param model The model to query
  * @return The size required to store entire model in memory.
  */
-
 size_t model_get_allocate_bytes(const model_t* model);
 
 /**
@@ -306,18 +307,32 @@ size_t model_get_allocate_bytes(const model_t* model);
  */
 void* model_get_test_input(const model_t* model,int input_index);
 
+/**
+ * @brief Get a pointer to test output to run through the graph for an output buffer
+ * 
+ * @param model The model to query
+ * @param output_index The index for which to get the test output
+ * @return void* pointer test output of model
+ */
 void* model_get_test_output(const model_t* model,int output_index);
 
 /**
- * Get a the amount the the output values should be scaled to
+ * Get the amount of the output values that should be scaled to
  * get the true values
  *
  * @param model The model to query.
  * @param output_index The output for which to get the scale value.
  * @return scale value for model output
  */
-
 float model_get_output_scale_value(const model_t* model,int index);
+
+/**
+ * @brief Get the amount of the output values that should be scaled to get the true values
+ * 
+ * @param model The model to query.
+ * @param output_index The output for which to get the scale value.
+ * @return int scale value for model output in fix16
+ */
 int model_get_output_scale_fix16_value(const model_t* model,int index);
 
 float model_get_input_scale_value(const model_t* model, int index);
@@ -329,6 +344,7 @@ int model_get_input_zeropoint(const model_t* model, int index);
 int vbx_cnn_get_debug_prints(vbx_cnn_t* vbx_cnn,char* buf,size_t max_chars)
     __attribute__((warning("vbx_cnn_get_debug_prints() is not part of the official Vectorblox API"
                            " and could be removed at any time")));
+int model_get_debug_json(const model_t* model);
 #ifdef __cplusplus
 }
 #endif

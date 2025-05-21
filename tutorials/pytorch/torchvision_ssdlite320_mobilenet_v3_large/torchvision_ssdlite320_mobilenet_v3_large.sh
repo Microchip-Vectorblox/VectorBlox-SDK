@@ -19,8 +19,8 @@ fi
 source $VBX_SDK/vbx_env/bin/activate
 
 echo "Checking for Numpy calibration data file..."
-if [ ! -f $VBX_SDK/tutorials/coco2017_rgb_norm_20x640x640x3.npy ]; then
-    wget -P $VBX_SDK/tutorials/ https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/EAP/calib_npy/coco2017_rgb_norm_20x640x640x3.npy
+if [ ! -f $VBX_SDK/tutorials/coco2017_rgb_norm_20x320x320x3.npy ]; then
+    generate_npy $VBX_SDK/tutorials/coco2017_rgb_20x416x416x3.npy -o $VBX_SDK/tutorials/coco2017_rgb_norm_20x320x320x3.npy -s 320 320  --norm 
 fi
 
 echo "Downloading torchvision_ssdlite320_mobilenet_v3_large..."
@@ -33,12 +33,9 @@ model_outputs = ['/head/regression_head/module_list.0/module_list.0.1/Conv_outpu
 onnx.utils.extract_model('ssdlite320_mobilenet_v3_large.onnx', 'ssdlite320_mobilenet_v3_large.onnx', model_inputs, model_outputs)
 EOF
 sor4onnx --input_onnx_file_path ssdlite320_mobilenet_v3_large.onnx --old_new '/transform/Unsqueeze_7_output_0' 'images' --mode full --search_mode prefix_match --output_onnx_file_path ssdlite320_mobilenet_v3_large.onnx
-if [ ! -f calibration_image_sample_data_20x128x128x3_float32.npy ]; then
-    wget https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/EAP/calib_npy/calibration_image_sample_data_20x128x128x3_float32.npy
-fi
 
 echo "Running ONNX2TF..."
-onnx2tf -cind images $VBX_SDK/tutorials/coco2017_rgb_norm_20x640x640x3.npy [[[[0.5,0.5,0.5]]]] [[[[0.5,0.5,0.5]]]] \
+onnx2tf -cind images $VBX_SDK/tutorials/coco2017_rgb_norm_20x320x320x3.npy [[[[0.5,0.5,0.5]]]] [[[[0.5,0.5,0.5]]]] \
 -ois images:1,3,320,320 \
 -i ssdlite320_mobilenet_v3_large.onnx \
 --output_signaturedefs \
@@ -56,7 +53,7 @@ fi
 
 if [ -f torchvision_ssdlite320_mobilenet_v3_large.vnnx ]; then
     echo "Running Simulation..."
-    python $VBX_SDK/example/python/ssdv2.py torchvision_ssdlite320_mobilenet_v3_large.vnnx $VBX_SDK/tutorials/test_images/dog.jpg -t 
+    python $VBX_SDK/example/python/ssdv2.py torchvision_ssdlite320_mobilenet_v3_large.vnnx $VBX_SDK/tutorials/test_images/dog.jpg --torch 
     echo "C Simulation Command:"
     echo '$VBX_SDK/example/sim-c/sim-run-model torchvision_ssdlite320_mobilenet_v3_large.vnnx $VBX_SDK/tutorials/test_images/dog.jpg SSDV2'
 fi

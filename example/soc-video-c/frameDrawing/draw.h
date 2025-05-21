@@ -8,6 +8,9 @@ extern "C" {
 void draw_dma_memcpy(int cols,int rows,
                      uint32_t *dst,int dst_stride,
                      uint32_t *src,int src_stride);
+void draw_dma_memset(int cols,int rows,
+                     uint32_t* dst,int dst_stride,
+                     uint32_t colour);
 void draw_wait_for_draw();
 #define GET_COLOUR(r,g,b,a)  ((uint32_t)(	  \
 	(((r)&0xFF)<<16) | \

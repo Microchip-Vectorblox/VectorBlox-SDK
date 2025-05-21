@@ -4,6 +4,8 @@ VectorBlox is an SDK for compiling and running TFLITE INT8 networks on the Vecto
 
 The list of the TFLITE INT8 supported operators can be found [here](./docs/OPS.md) (currently 64 supported).
 
+The list of supported C postprocessing functions can be found [here](./docs/postprocess.md)
+
 Networks must be quantized, then compiled via the included scripts.
 The networks can then be run via the VectorBlox simulator, or on a physical VectorBlox accelerator.
 
@@ -51,4 +53,3 @@ bash {network}.sh
 ```
 
 A list of tutorials can be found [here](./tutorials/README.md)
-> If experiencing CUDA issues, with the `vbx_env` active, install the CPU version of TensorFlow via: `pip uninstall tensorflow && pip install tensorflow-cpu==2.15.1`

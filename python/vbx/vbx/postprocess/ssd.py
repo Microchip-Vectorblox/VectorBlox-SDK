@@ -190,19 +190,6 @@ prior5_torch = {
        }
 
 
-def convert_to_fixedpoint(data, dtype):
-    # this should go away eventually, and always input uint8 rather than fixedpoint Q1.7
-    if dtype == np.int16:
-        shift_amt = 13
-    elif dtype == np.int8:
-        shift_amt = 7
-    clip_max, clip_min = (1 << shift_amt)-1, -(1 << shift_amt)
-    float_img = flattened.astype(np.float32)/255 * (1 << shift_amt) + 0.5
-
-    fixedpoint_img = np.clip(float_img, clip_min, clip_max).astype(dtype)
-    return fixedpoint_img
-
-
 def logistic(x):
     return 1. / (1. + np.exp(-x))
 
@@ -295,7 +282,7 @@ def detections(boxes, classes, priors, num_classes, size, confidence_threshold=0
     scores = []
     nms_valid = []
 
-    if torch:
+    if True: # if torch:
         for s,score in enumerate(classes):
             if np.argmax(score) != 0:
                     xmin = min(1, max(0, decoded[s][0])) * size
@@ -315,7 +302,7 @@ def detections(boxes, classes, priors, num_classes, size, confidence_threshold=0
                     boxes.append([(xmin+xmax)/2, (ymin+ymax)/2, xmax-xmin, ymax-ymin])
                     scores.append(np.max(score))
 
-        indices = cv2.dnn.NMSBoxes(boxes, scores, 0.5, 0.4)
+        indices = cv2.dnn.NMSBoxes(boxes, scores, confidence_threshold, nms_threshold)
         for i in indices:
             nms_valid.append(valid[i])
         return nms_valid
@@ -445,66 +432,26 @@ def get_priors(params, img_size=(300,300)):
     return np.concatenate((boxes, variances))
 
 
-def ssdv2_predictions(outputs, output_scale_factor, confidence_threshold=0.3, nms_threshold=0.3, top_k=100, num_classes=91):
-    # reshape to original
-    try:
-        elem = int(math.sqrt(outputs[0].size/12))
-        outputs[0] = np.reshape(outputs[0], (1,12,elem,elem))
-    except:
-        outputs.reverse()
-        elem = int(math.sqrt(outputs[0].size/12))
-        outputs[0] = np.reshape(outputs[0], (1,12,elem,elem))
-    elem = int(math.sqrt(outputs[1].size/(3*num_classes)))
-    outputs[1] = np.reshape(outputs[1], (1,(3*num_classes),elem,elem))
-    for i in range(1,6):
-        elem = int(math.sqrt(outputs[2*i].size/(2*3*4)))
-        outputs[2*i] = np.reshape(outputs[2*i], (1,(2*3*4),elem,elem))
-        elem = int(math.sqrt(outputs[2*i+1].size/(2*3*num_classes)))
-        outputs[2*i+1] = np.reshape(outputs[2*i+1], (1,(2*3*num_classes),elem,elem))
+def ssdv2_predictions(outputs, confidence_threshold=0.3, nms_threshold=0.3, top_k=100, num_classes=91, size=300, torch=False):
 
-    # scale factor 
-    for i in range(12):
-        outputs[i] = outputs[i] * output_scale_factor[i]
+    if torch:
+        priors = get_priors(prior0_torch, img_size=(size,size))
+        priors = np.concatenate((priors,get_priors(prior1_torch, img_size=(size,size))), axis=1)
+        priors = np.concatenate((priors,get_priors(prior2_torch, img_size=(size,size))), axis=1)
+        priors = np.concatenate((priors,get_priors(prior3_torch, img_size=(size,size))), axis=1)
+        priors = np.concatenate((priors,get_priors(prior4_torch, img_size=(size,size))), axis=1)
+        priors = np.concatenate((priors,get_priors(prior5_torch, img_size=(size,size))), axis=1)
 
-    priors = get_priors(prior0)
-    priors = np.concatenate((priors,get_priors(prior1)), axis=1)
-    priors = np.concatenate((priors,get_priors(prior2)), axis=1)
-    priors = np.concatenate((priors,get_priors(prior3)), axis=1)
-    priors = np.concatenate((priors,get_priors(prior4)), axis=1)
-    priors = np.concatenate((priors,get_priors(prior5)), axis=1)
+    else:
+        priors = get_priors(prior0, img_size=(size,size))
+        priors = np.concatenate((priors,get_priors(prior1, img_size=(size,size))), axis=1)
+        priors = np.concatenate((priors,get_priors(prior2, img_size=(size,size))), axis=1)
+        priors = np.concatenate((priors,get_priors(prior3, img_size=(size,size))), axis=1)
+        priors = np.concatenate((priors,get_priors(prior4, img_size=(size,size))), axis=1)
+        priors = np.concatenate((priors,get_priors(prior5, img_size=(size,size))), axis=1)
 
-    return predictions(outputs, priors, 300, confidence_threshold, nms_threshold, top_k, num_classes)
+    return predictions(outputs, priors, size, confidence_threshold, nms_threshold, top_k, num_classes, torch=torch)
 
-
-def ssd_torch_predictions(outputs, output_scale_factor, confidence_threshold=0.3, nms_threshold=0.3, top_k=100, num_classes=91):
-    # reshape to original
-    try:
-        elem = int(math.sqrt(outputs[0].size/(12*2)))
-        outputs[0] = np.reshape(outputs[0], (1,(12*2),elem,elem))
-    except:
-        outputs.reverse()
-        elem = int(math.sqrt(outputs[0].size/(12*2)))
-        outputs[0] = np.reshape(outputs[0], (1,(12*2),elem,elem))
-    elem = int(math.sqrt(outputs[1].size/((3*num_classes)*2)))
-    outputs[1] = np.reshape(outputs[1], (1,((3*num_classes)*2),elem,elem))
-    for i in range(1,6):
-        elem = int(math.sqrt(outputs[2*i].size/(2*3*4)))
-        outputs[2*i] = np.reshape(outputs[2*i], (1,(2*3*4),elem,elem))
-        elem = int(math.sqrt(outputs[2*i+1].size/(2*3*num_classes)))
-        outputs[2*i+1] = np.reshape(outputs[2*i+1], (1,(2*3*num_classes),elem,elem))
-
-    # scale factor 
-    for i in range(12):
-        outputs[i] = outputs[i] * output_scale_factor[i]
-
-    priors = get_priors(prior0_torch)
-    priors = np.concatenate((priors,get_priors(prior1_torch)), axis=1)
-    priors = np.concatenate((priors,get_priors(prior2_torch)), axis=1)
-    priors = np.concatenate((priors,get_priors(prior3_torch)), axis=1)
-    priors = np.concatenate((priors,get_priors(prior4_torch)), axis=1)
-    priors = np.concatenate((priors,get_priors(prior5_torch)), axis=1)
-
-    return predictions(outputs, priors, 320, confidence_threshold, nms_threshold, top_k, num_classes, torch=True)
 
 
 def predictions(outputs, priors, size, confidence_threshold=0.3, nms_threshold=0.3, top_k=100, num_classes=91, torch=False):
@@ -520,14 +467,14 @@ def predictions(outputs, priors, size, confidence_threshold=0.3, nms_threshold=0
     # outputs = vino_outputs
 
     for i in range(6):
-        bsize = outputs[i*2].size
+        bsize = outputs[i*2+1].size
         elem = bsize // 4
-        boxes.append(np.reshape(outputs[i*2], (1,elem,1,4)))
+        boxes.append(np.reshape(outputs[i*2+1], (1,elem,1,4)))
 
     for i in range(6):
-        csize = outputs[i*2+1].size
+        csize = outputs[i*2].size
         elem = csize // num_classes
-        classes.append(np.reshape(outputs[i*2+1], (1,elem,num_classes)))
+        classes.append(np.reshape(outputs[i*2], (1,elem,num_classes)))
 
 
     concat_boxes = np.concatenate(boxes, axis=1)

@@ -3,6 +3,8 @@ import numpy as np
 import cv2
 import random
 import argparse
+import sys
+from .utils import existing_file, existing_dir
 
 '''
 This script is used to generate numpy array files (.npy) for use in TF Lite calibration.
@@ -19,7 +21,7 @@ def read_images(directory_path, num_images, rgb=False, grayscale=False, debug=Fa
 
     files = os.listdir(directory_path)
 
-    image_files = [f for f in files if f.endswith(('.jpg', '.jpeg', '.png'))]
+    image_files = [f for f in files if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
 
     selected_images = random.sample(image_files, min(num_images, len(image_files)))
     if debug:
@@ -56,7 +58,7 @@ def preprocess_images(images, shape, grayscale=False, norm=False):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('image_dir')
+    parser.add_argument('src')
     parser.add_argument('-o', '--output-name', type=str, default='')
     parser.add_argument('-c', '--count', type=int, default=20)
     parser.add_argument('-s', '--shape', nargs=2, type=int, default=[224,224]) # height width
@@ -66,8 +68,29 @@ def main():
     parser.add_argument('-d', '--debug', action='store_true')
     args = parser.parse_args()
 
-    images = read_images(args.image_dir, args.count, (not args.bgr), args.grayscale, args.debug)
-    images_array = preprocess_images(images, args.shape, args.grayscale, args.norm)
+    if args.src.endswith('.npy'):
+        orig_array = np.load(args.src)
+        if np.max(orig_array) == 1.0:
+            orig_array *= 255.
+
+        height = args.shape[0]
+        width = args.shape[1]
+        images_array = np.zeros((orig_array.shape[0], height, width, orig_array.shape[-1]), dtype=np.float32)
+        for i, image in enumerate(orig_array):
+            resized = cv2.resize(image, dsize=(width, height), interpolation=cv2.INTER_LINEAR).astype(np.float32)
+            if args.norm:
+                resized = resized/255.
+            images_array[i] = resized
+    elif os.path.isdir(args.src):
+        images = read_images(args.src, args.count, (not args.bgr), args.grayscale, args.debug)
+        images_array = preprocess_images(images, args.shape, args.grayscale, args.norm)
+    else:
+        print('Please provide .npy or directory containing images')
+        sys.exit(-1)
+
+    images_array = images_array[:args.count]
+
+
     if args.debug:
         print("Shape of the numpy array:", images_array.shape)
 

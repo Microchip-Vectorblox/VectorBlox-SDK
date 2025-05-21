@@ -11,6 +11,7 @@ from vbx.generate.utils import onnx_infer, onnx_input_shape
 from vbx.generate.utils import load_input
 import model_run as mr
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('model')
@@ -18,7 +19,7 @@ if __name__ == "__main__":
     parser.add_argument('-b', '--bgr', action='store_true')
     parser.add_argument('-m', '--mean', type=float, nargs='+', default=[0.])
     parser.add_argument('-sc', '--scale', type=float, nargs='+', default=[1.])
-    parser.add_argument('-d', '--dataset',choices=['VOC','COCO','depth'],default='VOC')
+    parser.add_argument('-d', '--dataset',choices=['VOC','COCO','cityscapes','depth'],default='VOC')
     parser.add_argument('-inj', '--injected-pixels', action='store_true')
     parser.add_argument('-o', '--output', default="output.png")
     args = parser.parse_args()
@@ -43,12 +44,14 @@ if __name__ == "__main__":
 
         arr = np.asarray(bytearray(output), dtype='uint8')
         arr = arr.reshape((output.shape[-2], output.shape[-1], 4))
-        mask = cv2.cvtColor(arr, cv2.COLOR_RGBA2BGR)
+        mask = arr[:,:,:3]
     else:
         if len(output.shape) != 2:
+            if len(output.shape) == 3 and output.shape[-1] < output.shape[-3]:
+                output = output.transpose((2,0,1))
+
             # resize bilinear if not matching network input dims
             if (input_height, input_width) != (output.shape[1], output.shape[2]):
-
                 scaled = np.zeros((output.shape[0], input_height, input_width))
                 for c,channel in enumerate(output):
                     scaled[c] = cv2.resize(channel, (input_width, input_height), interpolation=cv2.INTER_LINEAR)
@@ -63,6 +66,9 @@ if __name__ == "__main__":
             colors = np.asarray([[0, 0, 0]] + dataset.voc_colors, dtype="uint8")
         elif args.dataset == 'COCO':
             colors = np.asarray([[0, 0, 0]] + dataset.coco_colors, dtype="uint8")
+        elif args.dataset == 'cityscapes':
+            rgb2bgr = lambda x: (x[2],x[1],x[0])
+            colors = np.asarray([rgb2bgr(_["color"]) for _ in dataset.city_groups], dtype="uint8")   
         elif args.dataset == 'depth':
             colors = cv2.applyColorMap(np.arange(256).astype('uint8'), cv2.COLORMAP_PLASMA).reshape((256,3))
             output = output - np.min(output) 
@@ -73,7 +79,7 @@ if __name__ == "__main__":
     h,w = output.shape[-2], output.shape[-1]
     img = cv2.imread(args.image)
     if img.shape != (h, w, 3):
-        img = cv2.resize(img, (h, w)).clip(0, 255)
+        img = cv2.resize(img, (w, h)).clip(0, 255)
 
     output_img=((0.3 * img) + (0.7 * mask)).astype("uint8")
     cv2.imwrite(args.output, output_img)

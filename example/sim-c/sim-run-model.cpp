@@ -41,11 +41,9 @@ void* read_image(const char* filename, const int channels, const int height, con
 
 int main(int argc, char** argv){
 
-	//On hardware these two variables would be set with real values
+	//On hardware would be set with real values
 	//because this is for the simulator, we use NULL
 	void* ctrl_reg_addr = NULL;
-	//void* firmware_blob = NULL;
-	//vbx_cnn_t* vbx_cnn = vbx_cnn_init(ctrl_reg_addr,firmware_blob);
 	vbx_cnn_t* vbx_cnn = vbx_cnn_init(ctrl_reg_addr);
 
 	if(argc < 2){
@@ -84,6 +82,14 @@ int main(int argc, char** argv){
 	model = (model_t*)realloc(model, model_allocate_size);
 	vbx_cnn_io_ptr_t* io_buffers= (vbx_cnn_io_ptr_t*)malloc(sizeof(vbx_cnn_io_ptr_t)*(model_get_num_inputs(model)+model_get_num_outputs(model)));	
 	vbx_cnn_io_ptr_t* output_buffers = (vbx_cnn_io_ptr_t*)malloc(sizeof(vbx_cnn_io_ptr_t)*(model_get_num_outputs(model)));
+	//Initialize individual buffers
+	for (unsigned o = 0; o < model_get_num_outputs(model); ++o) {
+		int output_length = model_get_output_length(model, o);
+		io_buffers[model_get_num_inputs(model) + o] = (uintptr_t)malloc(output_length*sizeof(fix16_t));
+		output_buffers[o] = (uintptr_t)malloc(output_length*sizeof(uint32_t));
+		io_buffers[model_get_num_inputs(model) + o] = (uintptr_t)output_buffers[o];
+	}
+
 	if (argc>2){
 		if(strcmp(argv[2],"TEST_DATA")!=0){
 			for (unsigned i = 0; i < model_get_num_inputs(model); ++i) {
@@ -103,16 +109,9 @@ int main(int argc, char** argv){
 		}
 	}
 
-	//Initialize individual buffers
-	for (unsigned o = 0; o < model_get_num_outputs(model); ++o) {
-		int output_length = model_get_output_length(model, o);
-		io_buffers[model_get_num_inputs(model) + o] = (uintptr_t)malloc(output_length*sizeof(fix16_t));
-		output_buffers[o] = (uintptr_t)malloc(output_length*sizeof(int8_t));
-		io_buffers[1+o] = (uintptr_t)output_buffers[o];
-	}
 #if TEST_OUT
 	for(unsigned o =0; o<model_get_num_outputs(model); ++o){
-		io_buffers[model_get_num_inputs(model) + o] = (uintptr_t)model_get_test_output(model,o);
+		output_buffers[o] = (uintptr_t)model_get_test_output(model,o);
 	}
 	vbx_cnn_get_state(vbx_cnn);
 	//buffers are now setup,
@@ -130,25 +129,29 @@ int main(int argc, char** argv){
 #endif	
 	
 
-	fix16_t* fix16_buffers[model_get_num_inputs(model)+model_get_num_outputs(model)];
+	fix16_t* fix16_output_buffers[model_get_num_outputs(model)];
 	for (int o = 0; o < (int)model_get_num_outputs(model); ++o){
 		int size=model_get_output_length(model, o);
 		fix16_t scale = (fix16_t)model_get_output_scale_fix16_value(model,o); // get output scale
 		int32_t zero_point = model_get_output_zeropoint(model,o); // get output zero
-		fix16_buffers[model_get_num_inputs(model) + o] = (fix16_t*)malloc(size*sizeof(fix16_t));
-		int8_to_fix16(fix16_buffers[model_get_num_inputs(model)+o], (int8_t*)io_buffers[model_get_num_inputs(model)+o], size, scale, zero_point);
+		fix16_output_buffers[o] = (fix16_t*)malloc(size*sizeof(fix16_t));
+		int8_to_fix16(fix16_output_buffers[o], (int8_t*)io_buffers[model_get_num_inputs(model)+o], size, scale, zero_point);
 	}	
 	// users can modify this post-processing function in post_process.c
 	
 #if INT8FLAG
-	if (argc > 3) pprint_post_process(argv[1], argv[3], model, output_buffers,1,0);
+	if (argc > 3) pprint_post_process(argv[1], argv[3], model, output_buffers,1,0,vbx_cnn);
 #else
-	if (argc > 3) pprint_post_process(argv[1], argv[3], model, (vbx_cnn_io_ptr_t*)fix16_buffers,0);
+	if (argc > 3) pprint_post_process(argv[1], argv[3], model, (vbx_cnn_io_ptr_t*)fix16_output_buffers,0,0,vbx_cnn);
 #endif
 
-	unsigned checksum = fletcher32((uint16_t*)(io_buffers[model_get_num_inputs(model)]),model_get_output_length(model, 0)*sizeof(int8_t)/sizeof(uint16_t));
+	int output_bytes = model_get_output_datatype(model,0) == VBX_CNN_CALC_TYPE_INT16 ? 2 : 1;
+	if (model_get_output_datatype(model,0) == VBX_CNN_CALC_TYPE_INT32) output_bytes = 4;
+	unsigned checksum = fletcher32((uint16_t*)(io_buffers[model_get_num_inputs(model)]),model_get_output_length(model, 0)*output_bytes/sizeof(uint16_t));
 	for(unsigned o =1;o<model_get_num_outputs(model);++o){
-		checksum ^= fletcher32((uint16_t*)io_buffers[model_get_num_inputs(model)+o], model_get_output_length(model, o)*sizeof(int8_t)/sizeof(uint16_t));
+		int output_bytes = model_get_output_datatype(model,0) == VBX_CNN_CALC_TYPE_INT16 ? 2 : 1;
+		if (model_get_output_datatype(model,0) == VBX_CNN_CALC_TYPE_INT32) output_bytes = 4;
+		checksum ^= fletcher32((uint16_t*)io_buffers[model_get_num_inputs(model)+o], model_get_output_length(model, o)*output_bytes/sizeof(uint16_t));
 	}
 	printf("CHECKSUM = 0x%08x\n",checksum);
 	if(WRITE_OUT){
@@ -164,8 +167,8 @@ int main(int argc, char** argv){
 	}
 
 	for (int o = 0; o < (int)model_get_num_outputs(model); ++o){
-		if(fix16_buffers[model_get_num_inputs(model) + o]){
-			free(fix16_buffers[model_get_num_inputs(model) + o]);
+		if(fix16_output_buffers[o]){
+			free((void*)fix16_output_buffers[o]);
 		}
 	}
 	free(io_buffers);

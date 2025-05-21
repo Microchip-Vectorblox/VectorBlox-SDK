@@ -20,10 +20,11 @@ source $VBX_SDK/vbx_env/bin/activate
 
 echo "Checking for Numpy calibration data file..."
 if [ ! -f $VBX_SDK/tutorials/coco2017_rgb_20x513x513x3.npy ]; then
-    wget -P $VBX_SDK/tutorials/ https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/EAP/calib_npy/coco2017_rgb_20x513x513x3.npy
+    generate_npy $VBX_SDK/tutorials/coco2017_rgb_20x416x416x3.npy -o $VBX_SDK/tutorials/coco2017_rgb_20x513x513x3.npy -s 513 513 
 fi
 
 echo "Downloading deeplabv3..."
+# model details @ https://github.com/openvinotoolkit/open_model_zoo/tree/master/models/public/deeplabv3
 # model details @ https://github.com/openvinotoolkit/open_model_zoo/tree/master/models/public/deeplabv3
 omz_downloader --name deeplabv3
 
@@ -49,13 +50,24 @@ tflite_cut deeplabv3.tflite -c 79
 mv deeplabv3.0.tflite deeplabv3.tflite
 
 if [ -f deeplabv3.tflite ]; then
+   tflite_preprocess deeplabv3.tflite   
+fi
+
+if [ -f deeplabv3.pre.tflite ]; then
+   tflite_postprocess deeplabv3.pre.tflite  --dataset VOC \
+--opacity 0.8 \
+--height 1080 \
+--width 1920
+fi
+
+if [ -f deeplabv3.pre.post.tflite ]; then
     echo "Generating VNNX for V1000 configuration..."
-    vnnx_compile -c V1000 -t deeplabv3.tflite -o deeplabv3.vnnx
+    vnnx_compile -c V1000 -t deeplabv3.pre.post.tflite -o deeplabv3.vnnx
 fi
 
 if [ -f deeplabv3.vnnx ]; then
     echo "Running Simulation..."
-    python $VBX_SDK/example/python/segmentation.py deeplabv3.vnnx $VBX_SDK/tutorials/test_images/A0PQ76.jpg 
+    python $VBX_SDK/example/python/segmentation.py deeplabv3.vnnx $VBX_SDK/tutorials/test_images/A0PQ76.jpg --dataset VOC --inj 
     echo "C Simulation Command:"
     echo '$VBX_SDK/example/sim-c/sim-run-model deeplabv3.vnnx $VBX_SDK/tutorials/test_images/A0PQ76.jpg  '
 fi

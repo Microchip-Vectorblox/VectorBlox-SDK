@@ -20,12 +20,12 @@ source $VBX_SDK/vbx_env/bin/activate
 
 echo "Checking for Numpy calibration data file..."
 if [ ! -f $VBX_SDK/tutorials/sample_plates_20x34x146x3.npy ]; then
-    wget -P $VBX_SDK/tutorials/ https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/EAP/calib_npy/sample_plates_20x34x146x3.npy
+    generate_npy $VBX_SDK/tutorials/sample_plates_20x34x146x3.npy -o $VBX_SDK/tutorials/sample_plates_20x34x146x3.npy -s 34 146  -b 
 fi
 
 echo "Downloading lpr_eu_v3..."
 # model details @ pytorch/lpr_eu_v3/README.md
-[ -f lpr_eu_v3.onnx ] || wget -q https://vector-blox-model-zoo.s3.us-west-2.amazonaws.com/Releases/ModelZoo/lpr_eu_v3.onnx
+[ -f lpr_eu_v3.onnx ] || wget -q --no-check-certificate https://github.com/Microchip-Vectorblox/assets/releases/download/assets/lpr_eu_v3.onnx
 
 echo "Running Model Optimizer..."
 mo --input_model lpr_eu_v3.onnx \

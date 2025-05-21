@@ -9,15 +9,16 @@ import json
 from vbx.generate.utils import onnx_infer, onnx_input_shape
 from vbx.generate.utils import openvino_infer, openvino_input_shape
 from vbx.generate.utils import pad_input, load_input
+from vbx.generate.utils import existing_file
 import vbx.sim
 import model_run as mr
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('model')
-    parser.add_argument('image')
-    parser.add_argument('-j', '--json', default=None)
-    parser.add_argument('-l', '--labels', default=None)
+    parser.add_argument('model', type=existing_file)
+    parser.add_argument('image', type=existing_file)
+    parser.add_argument('-j', '--json', default=None, type=existing_file)
+    parser.add_argument('-l', '--labels', default=None, type=existing_file)
     parser.add_argument('-o', '--output', default="output.png")
     parser.add_argument('-t', '--threshold', type=float, default=0.5)
     parser.add_argument('-i', '--iou', type=float, default=0.4)
@@ -26,7 +27,6 @@ if __name__ == "__main__":
     parser.add_argument('-m', '--mean', type=float, nargs='+', default=0.)
     parser.add_argument('-sc', '--scale', type=float, nargs='+', default=[1.])
     parser.add_argument('--prescaled', action='store_true')
-    parser.add_argument('--io')
     args = parser.parse_args()
     
     # open image and preprocess

@@ -3,6 +3,7 @@ import tensorflow as tf
 import cv2
 import numpy as np
 import argparse
+from .utils import existing_dir, existing_file
 import os
 import glob
 import vbx.sim
@@ -79,8 +80,6 @@ def get_tflite_io(tflite_model, input_files, subdir, mean=0., scale=1., rgb=Fals
                     arr = default_input_arr(shape, dtype)
                 elif '.npy' in input_file:
                     arr = np.load(input_file)
-                    if 'vnnx_activations' in input_file:
-                        arr = np.expand_dims(arr, axis=0).transpose((0,2,3,1))
                 elif type(input_file) is np.ndarray:
                     arr = input_file
                 else:
@@ -93,6 +92,31 @@ def get_tflite_io(tflite_model, input_files, subdir, mean=0., scale=1., rgb=Fals
                     arr = arr.astype(dtype)
         else:
             arr = default_input_arr(shape, dtype)
+
+        # expand if necessary
+        if len(arr.shape) == len(shape) - 1:
+            arr = np.expand_dims(arr, axis=0)
+
+        # transpose if necessary
+        if len(shape) == 4:
+            if tuple(shape) == tuple(arr.shape):
+                pass
+            elif tuple(shape) == tuple(arr.transpose((0,3,1,2)).shape):
+                arr = arr.transpose((0,3,1,2))
+            elif tuple(shape) == tuple(arr.transpose((0,2,3,1)).shape):
+                arr = arr.transpose((0,2,3,1))
+        elif len(shape) == 3:
+            if tuple(shape) == tuple(arr.shape):
+                pass
+            elif tuple(shape) == tuple(arr.transpose((2,0,1)).shape):
+                arr = arr.transpose((2,0,1))
+            elif tuple(shape) == tuple(arr.transpose((1,2,0)).shape):
+                arr = arr.transpose((1,2,0))
+
+        if tuple(shape) != tuple(arr.shape):
+            print("input array {} doesn't match ({} != {})".format(i, shape, arr.shape))
+            break
+
 
         interpreter.set_tensor(input_detail['index'], arr)
         # inputs[input_detail['index']] = interpreter.get_tensor(input_detail['index'])
@@ -305,7 +329,7 @@ def compare_tflite(tflite_graph_name, size_conf='V1000', error_rate_threshold=0,
 
 def compare():
     parser = argparse.ArgumentParser()
-    parser.add_argument('tflite')
+    parser.add_argument('tflite', type=existing_file)
     parser.add_argument('-c', '--size-conf', help='size configuration to build model for',
                         choices = ['V250','V500','V1000'], default='V1000')
     parser.add_argument('-e', '--error-rate', type=int, default=0)
@@ -323,8 +347,8 @@ def compare():
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("model")
-    parser.add_argument("-i", "--input", nargs='*')
+    parser.add_argument("model", type=existing_file)
+    parser.add_argument("-i", "--input", nargs='*', type=existing_file)
     parser.add_argument('-b', '--bgr', action='store_true')
     parser.add_argument('-m', '--mean', type=float, nargs='+', default=0.)
     parser.add_argument('-sc', '--scale', type=float, nargs='+', default=1.)

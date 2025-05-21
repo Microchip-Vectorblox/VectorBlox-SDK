@@ -160,7 +160,7 @@ def post_process(output, confidence_thres=0.5, iou_thresh=0.5, num_classes=80, i
 
             # Add the class ID, score, and box coordinates to the respective lists
             class_ids.append(class_id)
-            scores.append(max_score)
+            scores.append(score)
             boxes.append([x, y, width, height])
             if is_pose:
                 keypoints.append(kp)

@@ -258,8 +258,8 @@ typedef STRUCT_PACKED {
 typedef struct {
 	/* int maps,r,col,n,m,c,channels,y,x; */
 	int c,maps,channels;
-	int y,r,m;
-	int x,col,n;
+	int y,r,m; // y=row coord in tiled matrix, r=num of row in a tile, m=rows in the input
+	int x,col,n; // x=col coord in tiled matrix, col=num of cols in a tile, m=cols in the input
 	int b,batch,batches;
 	int32_t idx[SHAPE_DIMS];
 	int32_t step[SHAPE_DIMS];
@@ -590,6 +590,7 @@ typedef STRUCT_PACKED vnnx_subgraph_node {
 			int32_t first_fia;
 			int32_t last_fia;
 			int32_t fia_collision;
+			int32_t mxp_double_buffer;
 			obj_off_t filter_data;
 			obj_off_t bias_data;
 			obj_off_t quantization_records;

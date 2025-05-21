@@ -22,10 +22,13 @@
 
 
 struct model_descr_t models[] = {
-		{"Yolo v8n", "/home/root/samples_V1000_2.0.1/yolov8n_512x288.vnnx", 0, "ULTRALYTICS"},		
-		{"SCRFD", "/home/root/samples_V1000_2.0.1/scrfd_500m_bnkps.vnnx", 0, "SCRFD"},
-		{"mobileface-arcface", "/home/root/samples_V1000_2.0.1/mobilefacenet-arcface.vnnx", 0, "ARCFACE"},
-		{"MobileNet V2", "/home/root/samples_V1000_2.0.1/mobilenet-v2.vnnx", 0, "CLASSIFY"},	
+		{"Yolo v8n", "/home/root/samples_V1000_2.0.2/yolov8n_512x288.vnnx", 0, "ULTRALYTICS"},		
+		{"SCRFD", "/home/root/samples_V1000_2.0.2/scrfd_500m_bnkps.vnnx", 0, "SCRFD"},
+		{"mobileface-arcface", "/home/root/samples_V1000_2.0.2/mobilefacenet-arcface.vnnx", 0, "ARCFACE"},
+		{"MobileNet V2", "/home/root/samples_V1000_2.0.2/mobilenet-v2.vnnx", 0, "CLASSIFY"},	
+		{"Yolov8 Pose", "/home/root/samples_V1000_2.0.2/yolov8n-pose_512x288_split.vnnx", 0, "ULTRALYTICS_POSE"},	
+		{"FFNet 122NS", "/home/root/samples_V1000_2.0.2/FFNet-122NS-LowRes_512x288.vnnx", 0, "PIXEL"},	
+		{"Midas V2", "/home/root/samples_V1000_2.0.2/Midas-V2_256x128.vnnx", 0, "PIXEL"},
 };
 
 #define UIO_DMA_LIMIT 512*1024*1024*2
@@ -262,7 +265,7 @@ int update_Classifier = 1;
 const int CLASSIFIER_FPS = 10;					  
 const int FPS_LIM = 60;
 uint32_t* swap_draw_frame(){
-	//draw_wait_for_draw();
+	draw_wait_for_draw();
 	*SAVED_FRAME_SWAP=1;
 	return (uint32_t*)(intptr_t)(*PROCESSING_FRAME_ADDRESS);
 }
@@ -270,13 +273,6 @@ uint32_t* swap_draw_frame(){
 
 int main(int argc, char **argv) {
 	
-	//linux_draw_frame = (uint32_t *)mmap_frame_buffer();
-	/*
-    void *firmware_instr = read_firmware_file("../../fw/firmware.bin");
-    if (!firmware_instr) {
-        fprintf(stderr, "Unable to correctly read %s. Exiting\n", argv[1]);
-        exit(1);
-	}*/
 
 	volatile uint32_t* frame_reg = (volatile uint32_t*)uio_mmap_from_addr((void*)FRAME_BASE);
 	volatile uint32_t* scale_reg = (volatile uint32_t*)uio_mmap_from_addr((void*)SCALE_BASE);
@@ -332,7 +328,6 @@ int main(int argc, char **argv) {
 	*MIN_LATENCY_SEL_ADDR  = 0;
 	overlay_draw_frame 	   = (uint32_t*)(intptr_t)(*OVERLAY_DRAW_ADDR);
 	
-    //vbx_cnn_t *vbx_cnn = vbx_cnn_init(NULL, firmware_instr);
 	vbx_cnn_t *vbx_cnn = vbx_cnn_init(NULL);
     if (!vbx_cnn) {
         fprintf(stderr, "Unable to initialize vbx_cnn. Exiting\n");
@@ -396,7 +391,7 @@ int main(int argc, char **argv) {
 	int name_input = 0;
 	int embedding_modify = 0;
 	int* input_dims;
-    
+    short privacy = 0;
 
 	input_dims = model_get_input_shape(models[mode].model, 0);
 
@@ -426,7 +421,12 @@ int main(int argc, char **argv) {
     while(1) {
 		gettimeofday(&tv1, NULL);
 		int status = 1;
-		while(status > 0) {	
+		while(status > 0) {
+			if (privacy)
+				if (!strcmp(models[mode].post_process_type, "POSENET") || !strcmp(models[mode].post_process_type, "ULTRALYTICS_POSE")){ //blank screen
+					int split = 24;
+					privacy_draw(split);
+				}		
 			if(!strcmp(models[mode].post_process_type, "RETINAFACE") || !strcmp(models[mode].post_process_type, "SCRFD") || !strcmp(models[mode].post_process_type, "LPD")) {
 				status = runRecognitionDemo(models, vbx_cnn, mode, 0, 1080, 1920, 0, 0);
 			} else {
@@ -451,11 +451,6 @@ int main(int argc, char **argv) {
 
 		gettimeofday(&tv2, NULL);
 		fps = 1000/ (gettimediff_us(tv1, tv2) / 1000);
-		int delayed_fps = fps;
-		while(delayed_fps>FPS_LIM){
-			gettimeofday(&tv2, NULL);
-			delayed_fps = 1000/ (gettimediff_us(tv1, tv2) / 1000);	
-		}
 		loop_draw_frame = swap_draw_frame();
 		overlay_draw_frame = (uint32_t*)(intptr_t)(*OVERLAY_DRAW_ADDR);
 		
@@ -489,6 +484,11 @@ int main(int argc, char **argv) {
 			else if (delete_embedding_mode) {
 				delete_embedding(input_buf,models,mode+1);
 			} 	
+			else if(tolower(input_buf[0])=='b'){
+				if (!strcmp(models[mode].post_process_type, "POSENET") || !strcmp(models[mode].post_process_type, "ULTRALYTICS_POSE")){ //blank screen
+					privacy = !privacy;
+				}
+			}
 			else if (tolower(input_buf[0]) == 'q') {
 				*ALPHA_BLEND_EN_ADDR  = 0;
                 *MIN_LATENCY_SEL_ADDR = 1;			
@@ -505,7 +505,6 @@ int main(int argc, char **argv) {
 				printf("Enter 'a' to add the highlighted face\n");
 			} else { //swap models and display  to UART 
 				while(vbx_cnn_model_poll(vbx_cnn) > 0);
-				//resize_image_hls_wait(SCALER_BASE_ADDRESS);
 				mode = swap_model(mode);
 				input_dims = model_get_input_shape(models[mode].model, 0);
 				int img_h = input_dims[2];

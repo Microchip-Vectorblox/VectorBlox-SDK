@@ -67,8 +67,9 @@ def preprocess_img_to_input_array(img, model, bgr, preprocess_scale=1, preproces
         img_resized = cv2.resize(img, (input_width, input_height)).clip(0, 255)
     else:
         img_resized = img
+
     if channels == 1:
-        img_resized = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        img_resized = cv2.cvtColor(img_resized, cv2.COLOR_BGR2GRAY)
     elif not bgr:
         img_resized = cv2.cvtColor(img_resized, cv2.COLOR_BGR2RGB)
 
@@ -112,7 +113,8 @@ def model_run(arr,model):
         outputs = model.run([arr.flatten()])
         
         for o, output in enumerate(outputs):
-            outputs[o] = model.output_scale_factor[o] * (outputs[o].astype(np.float32) - model.output_zeropoint[o])
+            if model.output_scale_factor[o] != 0.0:
+                outputs[o] = model.output_scale_factor[o] * (outputs[o].astype(np.float32) - model.output_zeropoint[o])
             outputs[o] = outputs[o].reshape(model.output_shape[o])
 
     elif model.endswith('.xml'):
