@@ -7,7 +7,7 @@ import vbx.sim
 import os
 import math
 import sys
-import model_run as mr
+import vbx.sim.model_run as mr
 
 from vbx.generate.utils import openvino_infer, openvino_input_shape
 from vbx.generate.utils import onnx_infer, onnx_input_shape
@@ -34,24 +34,21 @@ if __name__ == "__main__":
     img = cv2.imread(args.image)
     scale = args.scale
 
-    arr, input_shape = mr.preprocess_img_to_input_array(img, args.model, args.bgr, scale, args.mean)
+    arr, input_height, input_width, channels_last = mr.preprocess_img_to_input_array(img, args.model, args.bgr, scale, args.mean)
     outputs, output_shapes = mr.model_run(arr, args.model)
 
-    channels_last = input_shape[-1] < input_shape[-3]
-    h, w = input_shape[-2], input_shape[-1]
     if channels_last:
-        h, w = input_shape[-3], input_shape[-2]
         outputs = mr.transpose_outputs(outputs)
 
     # outputs should be sorted in descending sets of classes and coords w/ size NxN
     outputs = sorted(outputs, key=lambda x: (x.shape[-1], x.shape[-3]))
     outputs.reverse()
 
-    predictions = ssd.ssdv2_predictions(outputs, args.threshold, args.iou, top_k=1, size=w, torch=args.torch)
+    predictions = ssd.ssdv2_predictions(outputs, args.threshold, args.iou, top_k=1, size=input_width, torch=args.torch)
     
     output_img = cv2.resize(img, (1024, 1024), interpolation=cv2.INTER_NEAREST)
-    output_scale_x = 1024. / w
-    output_scale_y = 1024. / h
+    output_scale_x = 1024. / input_width
+    output_scale_y = 1024. / input_height
 
     classes = [str(_) for _ in range(args.num_classes)]
     if args.num_classes == 91:

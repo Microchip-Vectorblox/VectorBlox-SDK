@@ -18,12 +18,22 @@ if [ -z $VBX_SDK ]; then
 fi
 source $VBX_SDK/vbx_env/bin/activate
 
-echo "Downloading MobileNet-v3-Large-Quantized..."
-# model details @ https://huggingface.co/qualcomm/MobileNet-v3-Large-Quantized
+echo "Checking for MobileNet-v3-Large-Quantized files..."
+
+# model details @ https://huggingface.co/qualcomm/MobileNet-v3-Large
 if [ ! -f MobileNet-v3-Large-Quantized.tflite ]; then
-    wget -q --no-check-certificate https://huggingface.co/qualcomm/MobileNet-v3-Large-Quantized/resolve/main/MobileNet-v3-Large-Quantized.tflite
+    wget -q --no-check-certificate https://huggingface.co/qualcomm/MobileNet-v3-Large/resolve/v0.32.0/MobileNet-v3-Large.onnx
 fi
 
+
+if [ ! -f MobileNet-v3-Large-Quantized.tflite ]; then
+   echo "Running ONNX2TF..."
+   onnx2tf -cind image_tensor $VBX_SDK/tutorials/coco2017_rgb_norm_20x224x224x3.npy [[[0.,0.,0.]]] [[[1.,1.,1.]]] \
+-i MobileNet-v3-Large.onnx \
+--output_signaturedefs \
+--output_integer_quantized_tflite
+   cp saved_model/MobileNet-v3-Large_full_integer_quant.tflite MobileNet-v3-Large-Quantized.tflite
+fi
 if [ -f MobileNet-v3-Large-Quantized.tflite ]; then
    tflite_preprocess MobileNet-v3-Large-Quantized.tflite  --scale 255
 fi

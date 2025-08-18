@@ -32,11 +32,12 @@ typedef enum {
 } calc_type_e;
 
 typedef enum{
-	IDENTITY=200,
-	ELTWISE=201,
-	PREFETCH=202,
-	LUT=203,
-	UNKNOWN_SUBGRAPH=204
+	IDENTITY=300,
+	ELTWISE=301,
+	PREFETCH=302,
+	LUT=303,
+	PIXEL_SHUFFLE=304,
+	UNKNOWN_SUBGRAPH=305
 } VNNXOperator;
 
 typedef enum{
@@ -224,7 +225,51 @@ typedef enum {
     SIGN = 158,
     BITCAST = 159,
     BITWISE_XOR = 160,
-    RIGHT_SHIFT = 161
+    RIGHT_SHIFT = 161,
+    STABLEHLO_LOGISTIC = 162, // WARNING: Do not have runtime support
+    STABLEHLO_ADD = 163, // WARNING: No runtime support yet
+    STABLEHLO_DIVIDE = 164, // WARNING: No runtime support yet
+    STABLEHLO_MULTIPLY = 165, // WARNING: No runtime support yet
+    STABLEHLO_MAXIMUM = 166, // WARNING: No runtime support yet
+    STABLEHLO_RESHAPE = 167, // WARNING: No runtime support yet
+    STABLEHLO_CLAMP = 168, // WARNING: No runtime support
+    STABLEHLO_CONCATENATE = 169, // WARNING: No runtime support
+    STABLEHLO_BROADCAST_IN_DIM = 170, // WARNING: No runtime support
+    STABLEHLO_CONVOLUTION = 171, // WARNING: No runtime support
+    STABLEHLO_SLICE = 172, // WARNING: No runtime support
+    STABLEHLO_CUSTOM_CALL = 173, // WARNING: No runtime support
+    STABLEHLO_REDUCE = 174, // WARNING: No runtime support
+    STABLEHLO_ABS = 175, // WARNING: No runtime support
+    STABLEHLO_AND = 176, // WARNING: No runtime support
+    STABLEHLO_COSINE = 177, // WARNING: No runtime support
+    STABLEHLO_EXPONENTIAL = 178, // WARNING: No runtime support
+    STABLEHLO_FLOOR = 179, // WARNING: No runtime support
+    STABLEHLO_LOG = 180, // WARNING: No runtime support
+    STABLEHLO_MINIMUM = 181, // WARNING: No runtime support
+    STABLEHLO_NEGATE = 182, // WARNING: No runtime support
+    STABLEHLO_OR = 183, // WARNING: No runtime support
+    STABLEHLO_POWER = 184, // WARNING: No runtime support
+    STABLEHLO_REMAINDER = 185, // WARNING: No runtime support
+    STABLEHLO_RSQRT = 186, // WARNING: No runtime support
+    STABLEHLO_SELECT = 187, // WARNING: No runtime support
+    STABLEHLO_SUBTRACT = 188, // WARNING: No runtime support
+    STABLEHLO_TANH = 189, // WARNING: No runtime support
+    STABLEHLO_SCATTER = 190,
+    STABLEHLO_COMPARE = 191, // WARNING: No runtime support
+    STABLEHLO_CONVERT = 192, // WARNING: No runtime support
+    STABLEHLO_DYNAMIC_SLICE = 193, // WARNING: No runtime support
+    STABLEHLO_DYNAMIC_UPDATE_SLICE = 194, // WARNING: No runtime support
+    STABLEHLO_PAD = 195, // WARNING: No runtime support
+    STABLEHLO_IOTA = 196, // WARNING: No runtime support
+    STABLEHLO_DOT_GENERAL = 197, // WARNING: No runtime support
+    STABLEHLO_REDUCE_WINDOW = 198, // WARNING: No runtime support
+    STABLEHLO_SORT = 199, // WARNING: No runtime support
+    STABLEHLO_WHILE = 200, // WARNING: No runtime support
+    STABLEHLO_GATHER = 201, // WARNING: No runtime support
+    STABLEHLO_TRANSPOSE = 202, // WARNING: No runtime support
+    DILATE = 203,
+    STABLEHLO_RNG_BIT_GENERATOR = 204,
+    REDUCE_WINDOW = 205
 } BuiltinOperator;
 
 
@@ -454,6 +499,9 @@ typedef STRUCT_PACKED vnnx_layer{
 			int32_t mode;
 		}ReshapeOptions;
 		STRUCT_PACKED{
+			int32_t r;
+		}PixelShuffleOptions;
+		STRUCT_PACKED{
 			int32_t axis;
 			int32_t count;
 			int32_t dims;
@@ -461,7 +509,8 @@ typedef STRUCT_PACKED vnnx_layer{
 		STRUCT_PACKED{
 			float scale[2];
             int32_t mode;
-			int32_t ratio;
+            int32_t num_c_inc;
+            obj_off_t c_inc;
 		}ResizeOptions;
 		STRUCT_PACKED{
 			int32_t permutation[3];
@@ -625,6 +674,8 @@ typedef STRUCT_PACKED vnnx_subgraph_node {
 		STRUCT_PACKED{
 			float scale[2];
             int32_t mode;
+            int32_t num_c_inc;
+            obj_off_t c_inc;
 		}ResizeOptions;
 		STRUCT_PACKED{
 			int32_t permutation[3];

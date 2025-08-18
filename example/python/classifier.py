@@ -7,7 +7,7 @@ import argparse
 import os
 import math
 import json
-import model_run as mr
+import vbx.sim.model_run as mr
 
 from vbx.generate.utils import openvino_infer, openvino_input_shape
 from vbx.generate.utils import onnx_infer, onnx_input_shape
@@ -31,7 +31,7 @@ if __name__ == "__main__":
         os._exit(1)
     
     img = cv2.imread(args.image)
-    arr, input_shape = mr.preprocess_img_to_input_array(img, args.model, args.bgr, args.scale, args.mean)
+    arr, input_height, input_width, channels_last = mr.preprocess_img_to_input_array(img, args.model, args.bgr, args.scale, args.mean)
 
     # run inference
     outputs, _ = mr.model_run(arr, args.model)

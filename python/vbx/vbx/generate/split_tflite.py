@@ -12,6 +12,7 @@ from tqdm import tqdm
 import numpy as np
 import cv2
 import vbx.postprocess.dataset as rgb_color
+from .transform_tflite import get_splits2
 
 #LUT related optimizations options
 OPTIMIZED_WITH_LUT = 1
@@ -244,6 +245,70 @@ def get_scale_factor(operators, tensors, idx):
     return oshape[-3]/ishape[-3], oshape[-2]/ishape[-2]
 
 
+def reshape_pattern(operators, codes, tensors, buffers, idx, opcode):
+    patterns = []
+
+    prev_op = None
+    prev_inputs = None
+    prev_outputs = None
+
+    max_idx = len(operators)
+    while idx < max_idx:
+        op = operators[idx]
+        opcode = codes[op['opcode_index']]
+        op_inputs = [_ for _ in op['inputs'] if _ != -1]
+        op_outputs = [_ for _ in op['outputs'] if _ != -1]
+
+        ibuffers = []
+        for _ in op_inputs:
+            if 'buffer' in tensors[_]:
+                ibuffers += [buffers[tensors[_]['buffer']]]
+        multi_input = len(ibuffers) > 1 and not any(['data' in _ for _ in ibuffers])
+        filters = [_ for _ in op_inputs if 'data' in buffers[tensors[_]['buffer']]]
+
+        next_op, next_opcode = None, ''
+        if idx < max_idx -1:
+            next_op = operators[idx+1]
+            next_opcode = codes[next_op['opcode_index']]
+        next_next_op, next_next_opcode = None, ''
+        if idx < max_idx -2:
+            next_next_op = operators[idx+2]
+            next_next_opcode = codes[next_next_op['opcode_index']]
+
+        connected = True
+        if prev_op != None:
+            connected = any([_ in prev_outputs for _ in op_inputs])
+
+        forked = False
+        if prev_op != None:
+            forked = forks(prev_op, prev_inputs, prev_outputs, operators, tensors)
+
+
+        if not connected:
+            break
+        
+        #PIXEL_SHUFFLE pattern
+        elif opcode == "RESHAPE" and next_opcode == "TRANSPOSE" and next_next_opcode =="RESHAPE": 
+            patterns.append(idx)
+            patterns.append(idx+1)
+            patterns.append(idx+2)
+            idx += 2
+
+        elif forked:
+            break
+        
+        else:
+            break
+
+        idx += 1
+
+        prev_op = op
+        prev_inputs = op_inputs
+        prev_outputs = op_outputs
+        
+    return patterns
+
+
 def lut_pattern(operators, codes, tensors, buffers, idx, opcode):
     if not OPTIMIZED_WITH_LUT:
         return []
@@ -317,7 +382,7 @@ def lut_pattern(operators, codes, tensors, buffers, idx, opcode):
         elif opcode in ['LEAKY_RELU', 'RELU', 'RELU6', 'RELU_N1_TO_1', 'RELU_0_TO_1']:
             patterns.append(idx)
           
-        elif opcode in ["MUL", "ADD", "SUB"] and len(filters) == 1:
+        elif opcode in ["MUL", "ADD", "SUB", "SQUARED_DIFFERENCE"] and len(filters) == 1:
             weight_tensor = tensors[filters[0]]
             if np.prod(weight_tensor['shape']) <= 4:
                 if 'shape' in weight_tensor and len(weight_tensor['shape'])>0 :
@@ -412,6 +477,19 @@ def is_singleton(shapes):
         if len(_shape) > 1 and _shape[-1] == 1 and _shape[-2] == 1:
             return True
     return False
+
+
+def is_sigmoid(a,b):
+    if a == 'LOGISTIC' and b == 'MUL':
+        return True
+    return False
+
+
+def is_lookup(a,b):
+    if a == 'CAST' and b == 'GATHER':
+        return True
+    return False
+
 
 
 def get_splits(jname, split_every_op=False, engine_op_types=None):
@@ -509,35 +587,22 @@ def get_splits(jname, split_every_op=False, engine_op_types=None):
                 splits.append(current)
             current = []
             current.append(i)
-        elif opcode == 'LOGISTIC' and next_opcode == 'MUL' and len(lut_pattern(operators, codes, tensors, buffers, i, opcode)):
+        elif is_sigmoid(opcode,next_opcode) and len(lut_pattern(operators, codes, tensors, buffers, i, opcode)):
             patterns = lut_pattern(operators, codes, tensors, buffers, i, opcode) 
-
             current += patterns
             i += len(patterns) - 1
+
             # update outputs to be from last op in pattern
             op = operators[i]
             op_outputs = [_ for _ in op['outputs'] if _ != -1]
-        elif opcode == 'RESHAPE' and next_opcode == 'CAST' and next_next_opcode == 'GATHER' and len(lut_pattern(operators, codes, tensors, buffers, i, opcode)):
+        elif (is_lookup(opcode,next_opcode) or is_lookup(next_opcode,next_next_opcode)) and len(lut_pattern(operators, codes, tensors, buffers, i, opcode)):
             patterns = lut_pattern(operators, codes, tensors, buffers, i, opcode) 
-            
             if len(current):
                 splits.append(current)
             current =[]         
-
             current += patterns
             i += len(patterns) - 1
-            # update outputs to be from last op in pattern
-            op = operators[i]
-            op_outputs = [_ for _ in op['outputs'] if _ != -1]
-        elif opcode == 'CAST' and next_opcode == 'GATHER' and len(lut_pattern(operators, codes, tensors, buffers, i, opcode)):
-            patterns = lut_pattern(operators, codes, tensors, buffers, i, opcode) 
 
-            if len(current):
-                splits.append(current)
-            current =[]
-            
-            current += patterns
-            i += len(patterns) - 1
             # update outputs to be from last op in pattern
             op = operators[i]
             op_outputs = [_ for _ in op['outputs'] if _ != -1]
@@ -551,6 +616,15 @@ def get_splits(jname, split_every_op=False, engine_op_types=None):
                 splits.append(current)
             current = []
             current.append(i)
+        elif len(reshape_pattern(operators, codes, tensors, buffers, i, opcode)):
+            patterns = reshape_pattern(operators, codes, tensors, buffers, i, opcode)
+
+            current += patterns
+            i += len(patterns) - 1
+            # update outputs to be from last op in pattern
+            op = operators[i]
+            op_outputs = [_ for _ in op['outputs'] if _ != -1]
+
             # @TODO: Maybe inject an identity if we can fit full map  --> suppose to be only FIA layers
         elif opcode in ['CONV_2D', 'TRANSPOSE_CONV', 'FULLY_CONNECTED', 'UNIDIRECTIONAL_SEQUENCE_LSTM', 'SOFTMAX', 'ARG_MAX', 'CAST', 'TILE', 'SPLIT', 'SPLIT_V', 'PACK', 'UNPACK', 'RESHAPE','TRANSPOSE', 'AVERAGE_POOL_2D', 'MEAN']: # start a new graph before key subgraph OP
             if len(current):
@@ -893,41 +967,41 @@ def gen_subgraph(idir, odir, jname, splits, vnnx, forced_shape=None):
         for i in split_indices:
             selected_operators.append(operators[i])
 
-        input_ops = selected_operators[0]['inputs']
-        output_ops = selected_operators[-1]['outputs']
+        input_tensors = selected_operators[0]['inputs']
+        output_tensors = selected_operators[-1]['outputs']
 
         
-        all_input_ops = []
-        all_output_ops = []
+        all_input_tensors = []
+        all_output_tensors = []
 
         for op in selected_operators:
-            all_input_ops += op['inputs']
-            all_output_ops += op['outputs']
+            all_input_tensors += op['inputs']
+            all_output_tensors += op['outputs']
 
-        input_ops = [_ for _ in all_input_ops if _ not in all_output_ops]
-        output_ops = [_ for _ in all_output_ops if _ not in all_input_ops]
+        input_tensors = [_ for _ in all_input_tensors if _ not in all_output_tensors]
+        output_tensors = [_ for _ in all_output_tensors if _ not in all_input_tensors]
 
         input_names = []
-        input_tensors = []
-        for io in input_ops:
+        input_idx = []
+        for io in input_tensors:
             if io != -1:
                 t = tensors[io]
                 buf = buffers[t['buffer']]
                 if 'data' not in buf:
                     if t['name'] not in input_names:
                         input_names.append(t['name'])
-                        input_tensors.append(io)
+                        input_idx.append(io)
 
         output_names = []
-        output_tensors = []
-        for io in output_ops:
+        output_idx = []
+        for io in output_tensors:
             if io != -1:
                 t = tensors[io]
                 buf = buffers[t['buffer']]
                 if 'data' not in buf:
                     if t['name'] not in output_names:
                         output_names.append(t['name'])
-                        output_tensors.append(io)
+                        output_idx.append(io)
 
         # remove unused buffers/tensors
         
@@ -967,8 +1041,8 @@ def gen_subgraph(idir, odir, jname, splits, vnnx, forced_shape=None):
         ssubgraph['tensors'] = stensors
 
         ssubgraph['operators'] = selected_operators
-        ssubgraph['inputs'] = input_tensors
-        ssubgraph['outputs'] = output_tensors
+        ssubgraph['inputs'] = input_idx
+        ssubgraph['outputs'] = output_idx
 
         graph_inputs = [{'name': n, 'tensor_index': i} for n, i in zip(input_names, input_tensors)]
         graph_outputs = [{'name': n, 'tensor_index': i} for n, i in zip(output_names, output_tensors)]
@@ -1422,9 +1496,9 @@ def generate_split_graphs(tflite_model, dir, split_every_op=False, cuts=None, vn
         # Pass in nx_op_types in case need to add additional splits at engine graph boundaries
         splits, error_ops, special_ops = get_splits(jname, split_every_op, engine_op_types)
     else:
-        splits, error_ops, special_ops = get_splits(jname, split_every_op)
-    # print(splits)
-    # sys.stderr.write('splits: {} not implemented\n'.format(splits))
+        # splits, error_ops, special_ops = get_splits(jname, split_every_op)
+        splits, error_ops, special_ops = get_splits2(jname, split_every_op)
+
     if len(error_ops)>0: 
         errors_dir = os.path.join(os.path.join(os.getcwd(), 'unsupported_ops'))
         if os.path.exists(errors_dir):
@@ -1782,42 +1856,48 @@ def preprocess_graphs(tflite_model, scale=1.0, mean=0):
 
         opcodes = [_['builtin_code'] for _ in graph['operator_codes']]
         inputs = subgraph['inputs']
-        
+
         buffers = graph['buffers']
         if 'signature_defs' in graph and len(graph['signature_defs']) > 0:
             graph_inputs = graph['signature_defs'][0]['inputs'] 
         else:
-            input_ops = operators[0]['inputs']
-            output_ops = operators[-1]['outputs']
-            all_input_ops = []
-            all_output_ops = []
+            if 'inputs' in subgraph and 'outputs' in subgraph:
+                input_tensors = subgraph['inputs']
+                output_tensors = subgraph['outputs']
+            else:
+                output_tensors = operators[-1]['outputs']
+                input_tensors = operators[0]['inputs']
+                all_input_tensor = []
+                all_output_tensors = []
 
-            for op in operators:
-                all_input_ops += op['inputs']
-                all_output_ops += op['outputs']
+                for op in operators:
+                    all_input_tensors += op['inputs']
+                    all_output_tensors += op['outputs']
 
-            input_ops = [_ for _ in all_input_ops if _ not in all_output_ops]
-            output_ops = [_ for _ in all_output_ops if _ not in all_input_ops]
+        
+                input_tensors = [_ for _ in all_input_tensors if _ not in all_output_tensors]
+                output_tensors = [_ for _ in all_output_tensors if _ not in all_input_tensors]
+
             input_names = []
-            input_tensors = []
-            for io in input_ops:
+            input_idx = []
+            for io in input_tensors:
                 if io != -1:
                     t = tensors[io]
                     buf = buffers[t['buffer']]
                     if 'data' not in buf:
                         input_names.append(t['name'])
-                        input_tensors.append(io)
+                        input_idx.append(io)
             output_names = []
-            output_tensors = []
-            for io in output_ops:
+            output_idx = []
+            for io in output_tensors:
                 if io != -1:
                     t = tensors[io]
                     buf = buffers[t['buffer']]
                     if 'data' not in buf:
                         output_names.append(t['name'])
-                        output_tensors.append(io)
-            graph_inputs = [{'name': n, 'tensor_index': i} for n, i in zip(input_names, input_tensors)]
-            graph_outputs = [{'name': n, 'tensor_index': i} for n, i in zip(output_names, output_tensors)]
+                        output_idx.append(io)
+            graph_inputs = [{'name': n, 'tensor_index': i} for n, i in zip(input_names, input_idx)]
+            graph_outputs = [{'name': n, 'tensor_index': i} for n, i in zip(output_names, output_idx)]
             graph['signature_defs'] = [{'inputs':None, 'outputs':None, 'signature_key':'serving_default', 'subgraph_index':0}]
             graph['signature_defs'][0]['inputs'] = graph_inputs
             graph['signature_defs'][0]['outputs'] = graph_outputs
@@ -1878,6 +1958,89 @@ def preprocess():
             shutil.copyfile(src, dst)
     tmp_dir_obj.cleanup()
 
+def get_optimal_resize_shape(src_h, src_w, dest_h, dest_w):
+
+    sc_w = dest_w/src_w
+    sc_h = dest_h/src_h
+    heights = []
+    widths = []
+    
+    tmp_h = dest_h
+    tmp_w = dest_w
+    while sc_h>=2 and sc_w>=2:
+        if sc_w>=4:
+            tmp_h = tmp_h//4
+            tmp_w = tmp_w//4
+        elif sc_w>=2 and sc_w<4:  
+            tmp_h = tmp_h//2
+            tmp_w = tmp_w//2
+        else:
+            break
+        heights.append(tmp_h)
+        widths.append(tmp_w)
+        sc_w = tmp_w/src_w
+        sc_h = tmp_h/src_h
+
+    heights.reverse()
+    widths.reverse()
+
+    return heights, widths
+
+def add_quantize_layer(tensors, buffers, opcodes, operators, i, current_output, current_shape, current_type, current_quant, pos):
+    #add 
+
+    if current_type in ['INT8']: #inject QUANTIZE
+        current_type = 'UINT8'
+        zp = 128 
+        buffers.append({'offset': 0, 'size': 0})
+        tensors.append({'shape': current_shape,
+                'type': "UINT8",
+                'buffer': len(buffers)-1,
+                'name': 'quant_{}'.format(i),
+                'quantization': {'scale': [current_quant['scale'][0]], 'zero_point': [0], 'details_type': 'NONE', 'quantized_dimension': 0},
+                'is_variable': False,
+                'has_rank': True}) 
+    else:
+        current_type = 'INT8'
+        buffers.append({'offset': 0, 'size': 0})
+        zp = -128 
+        tensors.append({'shape': current_shape,
+                'type': "INT8",
+                'buffer': len(buffers)-1,
+                'name': 'quant_{}'.format(i),
+                'quantization': {'scale': [current_quant['scale'][0]], 'zero_point': [-128], 'details_type': 'NONE', 'quantized_dimension': 0},
+                'is_variable': False,
+                'has_rank': True}) 
+       
+    inject_op = {'opcode_index': opcodes.index('QUANTIZE'),
+                    'inputs': [current_output],
+                    'outputs': [len(tensors)-1]}
+    operators = operators + [inject_op]
+    current_output = len(tensors)-1
+    
+    return tensors, buffers, operators, current_output, current_type, zp
+
+def op_quantize(tensors, buffers, opcode_idx, i, inject_before, dtype, current_quant, zp):
+    t = tensors[i]
+    #add QUANTIZE
+    print(current_quant['scale'])
+    buffers.append({'offset': 0, 'size': 0})
+    tensors.append({'shape': t['shape'].copy() ,
+            'type': dtype,
+            'buffer': len(buffers)-1,
+            'name': 'quant_{}'.format(i),
+            'quantization': {'scale': [current_quant['scale'][0]], 'zero_point': [zp], 'details_type': 'NONE', 'quantized_dimension': 0},
+            'is_variable': False,
+            'has_rank': True})
+    input_tensor, output_tensor = i, len(tensors)-1
+    if inject_before:
+        input_tensor, output_tensor = len(tensors)-1, i
+    
+    inject_op = {'opcode_index': opcode_idx,
+                'inputs': [input_tensor],
+                'outputs': [output_tensor]}
+    
+    return inject_op, tensors, buffers
 
 def inject_post_process(i, op_idx, o0, t0, opcodes, tensors, buffers, graph_outputs, outputs, operators, dataset, opacity, input_height, input_width, height, width):
   
@@ -2016,9 +2179,27 @@ def inject_post_process(i, op_idx, o0, t0, opcodes, tensors, buffers, graph_outp
         operators = operators + [inject_op]
         current_output = len(tensors)-1
 
+    # inject RESIZE 
+    inject_dequantize = False
+    
+    resize = 'RESIZE_NEAREST_NEIGHBOR'
+    if dataset in ['depth']:
+        resize = 'RESIZE_BILINEAR'
+
+    zp = current_quant['zero_point'][0] if 'zero_point' in current_quant and len(current_quant['zero_point']) > 0 else 0
+
     if current_shape[-3] != height or current_shape[-2] != width:
-        while (current_shape[-3] < height/4 and current_shape[-2] < width/4):
-            current_shape = [current_shape[-4], current_shape[-3]*2, current_shape[-2]*2, current_shape[-1]]
+        heights, widths = get_optimal_resize_shape(current_shape[-3], current_shape[-2], height, width)
+        if current_type in ['UINT8'] and not inject_dequantize and resize in ['RESIZE_BILINEAR']: #inject QUANTIZE
+            # inject_op, tensors, buffers = op_quantize(tensors, buffers, opcodes.index('QUANTIZE'), i, False, current_type, current_quant, -128)
+            tensors, buffers, operators, current_output, current_type, zp = add_quantize_layer(tensors, buffers, opcodes, operators, i, current_output, current_shape, current_type, current_quant, 1)
+            inject_dequantize = True
+                      
+
+        # while (current_shape[-3] < height/4 and current_shape[-2] < width/4):
+        for(_, (h, w)) in enumerate(zip(heights, widths)):
+            #current_shape = [current_shape[-4], current_shape[-3]*2, current_shape[-2]*2, current_shape[-1]]
+            current_shape = [current_shape[-4], h, w, current_shape[-1]]
 
             data = np.frombuffer(np.asarray([current_shape[-3], current_shape[-2]]).astype(np.int32).tobytes(), dtype=np.uint8).tolist()
             buffers.append({'data': data, 'offset': 0, 'size': 0})
@@ -2029,19 +2210,19 @@ def inject_post_process(i, op_idx, o0, t0, opcodes, tensors, buffers, graph_outp
                     'quantization': {'details_type': 'NONE', 'quantized_dimension': 0},
                     'is_variable': False,
                     'has_rank': True})
-
+            if 'scale' in current_quant and len(current_quant['scale']) > 0:
+                sc = current_quant['scale'][0]
+            else:
+                sc = 1.0
             buffers.append({'offset': 0, 'size': 0})
             tensors.append({'shape': current_shape,
                     'type': current_type,
                     'buffer': len(buffers)-1,
                     'name': 'resize_double{}_output_{}'.format(double,i),
-                    'quantization': current_quant,
+                    'quantization': {'scale': [sc], 'zero_point': [zp], 'details_type': 'NONE', 'quantized_dimension': 0},
                     'is_variable': False,
                     'has_rank': True})
 
-            resize = 'RESIZE_NEAREST_NEIGHBOR'
-            if dataset in ['depth']:
-                resize = 'RESIZE_BILINEAR'
             inject_op = {'opcode_index': opcodes.index(resize),
                         'builtin_options_type': 'ReshapeOptions',
                         'inputs': [current_output, len(tensors)-2], 
@@ -2050,8 +2231,8 @@ def inject_post_process(i, op_idx, o0, t0, opcodes, tensors, buffers, graph_outp
             current_output = len(tensors)-1
             double += 1
 
+        
         current_shape = [current_shape[-4], height, width, current_shape[-1]]
-
         data = np.frombuffer(np.asarray([height,width]).astype(np.int32).tobytes(), dtype=np.uint8).tolist()
         buffers.append({'data': data, 'offset': 0, 'size': 0})
         tensors.append({'shape':[2],
@@ -2067,7 +2248,7 @@ def inject_post_process(i, op_idx, o0, t0, opcodes, tensors, buffers, graph_outp
                 'type': current_type,
                 'buffer': len(buffers)-1,
                 'name': 'resize_output_{}'.format(i),
-                'quantization': current_quant,
+                'quantization': {'scale': [sc], 'zero_point': [zp], 'details_type': 'NONE', 'quantized_dimension': 0},
                 'is_variable': False,
                 'has_rank': True})
 
@@ -2078,6 +2259,11 @@ def inject_post_process(i, op_idx, o0, t0, opcodes, tensors, buffers, graph_outp
                     'outputs': [len(tensors)-1]}
         operators = operators + [inject_op]
         current_output = len(tensors)-1
+
+        if inject_dequantize == True and current_type in ['INT8']: #inject DEQUANTIZE
+            tensors, buffers, operators, current_output, current_type, zp = add_quantize_layer(tensors, buffers, opcodes, operators, i, current_output, current_shape, current_type, current_quant, 2)
+            inject_dequantize = False
+            current_quant = tx['quantization']
 
     #inject CAST if
     if current_type != 'INT32':
@@ -2106,6 +2292,11 @@ def inject_post_process(i, op_idx, o0, t0, opcodes, tensors, buffers, graph_outp
     elif dataset == "depth":
         colors = cv2.applyColorMap(np.arange(256).astype('uint8'), cv2.COLORMAP_PLASMA).reshape((256,3))
 
+    colors = [np.asarray(_).astype('uint8') for _ in colors]
+    if len(colors) < 256: 
+        colors += [np.asarray([0,0,0]).astype('uint8') for _ in range(256-len(colors))]
+    if len(colors) > 256:
+        colors = colors[:256]
     # covert to BGR colormap to RGB, then add alpha
     colors = np.array([_[2]*(2**16) + _[1]*(2**8) + _[0]*(2**0) for _ in colors]).astype(np.uint32)
     alpha = max(0,min(255,int(opacity*255)))*(2**24)
@@ -2202,37 +2393,42 @@ def post_processing_graphs(tflite_model, datatset, opacity, height, width):
             graph_inputs = graph['signature_defs'][0]['inputs'] 
             graph_outputs = graph['signature_defs'][0]['outputs'] 
         else:
-            input_ops = operators[0]['inputs']
-            output_ops = operators[-1]['outputs']
-            all_input_ops = []
-            all_output_ops = []
+            if 'inputs' in subgraph and 'outputs' in subgraph:
+                input_tensors = subgraph['inputs']
+                output_tensors = subgraph['outputs']
+            else:
+                output_tensors = operators[-1]['outputs']
+                input_tensors = operators[0]['inputs']
+                all_input_tensor = []
+                all_output_tensors = []
 
-            for op in operators:
-                all_input_ops += op['inputs']
-                all_output_ops += op['outputs']
+                for op in operators:
+                    all_input_tensors += op['inputs']
+                    all_output_tensors += op['outputs']
 
-            input_ops = [_ for _ in all_input_ops if _ not in all_output_ops]
-            output_ops = [_ for _ in all_output_ops if _ not in all_input_ops]
+        
+                input_tensors = [_ for _ in all_input_tensors if _ not in all_output_tensors]
+                output_tensors = [_ for _ in all_output_tensors if _ not in all_input_tensors]
             input_names = []
-            input_tensors = []
-            for io in input_ops:
+            input_idx = []
+            for io in input_tensors:
                 if io != -1:
                     t = tensors[io]
                     buf = buffers[t['buffer']]
                     if 'data' not in buf:
                         input_names.append(t['name'])
-                        input_tensors.append(io)
+                        input_idx.append(io)
             output_names = []
-            output_tensors = []
-            for io in output_ops:
+            output_idx = []
+            for io in output_tensors:
                 if io != -1:
                     t = tensors[io]
                     buf = buffers[t['buffer']]
                     if 'data' not in buf:
                         output_names.append(t['name'])
-                        output_tensors.append(io)
-            graph_inputs = [{'name': n, 'tensor_index': i} for n, i in zip(input_names, input_tensors)]
-            graph_outputs = [{'name': n, 'tensor_index': i} for n, i in zip(output_names, output_tensors)]
+                        output_idx.append(io)
+            graph_inputs = [{'name': n, 'tensor_index': i} for n, i in zip(input_names, input_idx)]
+            graph_outputs = [{'name': n, 'tensor_index': i} for n, i in zip(output_names, output_idx)]
             graph['signature_defs'] = [{'inputs':None, 'outputs':None, 'signature_key':'serving_default', 'subgraph_index':0}]
             graph['signature_defs'][0]['inputs'] = graph_inputs
             graph['signature_defs'][0]['outputs'] = graph_outputs

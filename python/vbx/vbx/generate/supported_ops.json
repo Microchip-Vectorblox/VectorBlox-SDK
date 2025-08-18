@@ -4,7 +4,14 @@
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ],
+    "allocation": ["default"]
   },
   "ADD": {
     "type": [ 
@@ -17,7 +24,14 @@
       "RELU",
       "RELU6"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ],
+    "allocation": ["default"]
   },
   "ARG_MAX": {
     "type": [
@@ -27,7 +41,13 @@
     "axis": [
       -1
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "2D",
+        "3D",
+        "4D"
+      ],
+    "allocation": ["full map"]
   },
   "ARG_MIN": {
     "type": [
@@ -37,7 +57,14 @@
     "axis": [
       -1
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ],
+    "allocation": ["full map"]
   },
   "AVERAGE_POOL_2D": {
     "type": [
@@ -51,7 +78,11 @@
       "RELU",
       "RELU6"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "4D"
+      ],
+    "allocation": [""]
   },
   "BATCH_TO_SPACE_ND": {
     "type": [
@@ -59,6 +90,20 @@
       "UINT8"
     ],
     "vectorized": [0]
+  },
+  "CAST": {
+    "type": [
+      "INT8",
+      "UINT8",
+      "INT32"
+    ],
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "CONCATENATION": {
     "type": [
@@ -77,7 +122,14 @@
       "RELU",
       "RELU6"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ],
+    "others": ["The number of dimensions of the input tensors must match."]
   },
   "CONV_2D": {
     "type": [
@@ -91,7 +143,10 @@
       "RELU",
       "RELU6"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "4D"
+      ]
   },
   "DEPTHWISE_CONV_2D": {
     "type": [
@@ -105,7 +160,10 @@
       "RELU",
       "RELU6"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "4D"
+      ]
   },
   "DEPTH_TO_SPACE": {
     "type": [
@@ -115,6 +173,19 @@
     "vectorized": [0]
   },
   "DEQUANTIZE": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
+  },
+  "DILATE": {
     "type": [
       "INT8",
       "UINT8"
@@ -133,6 +204,12 @@
       "RELU6"
     ],
     "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ],
     "others": ["Input 2 must be a constant"]
   },
   "ELU": {
@@ -140,21 +217,39 @@
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "EQUAL": {
     "type": [
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "EXP": {
     "type": [
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "EXPAND_DIMS": {
     "type": [
@@ -167,7 +262,13 @@
       -2,
       -1
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "FULLY_CONNECTED": {
     "type": [
@@ -178,9 +279,15 @@
       0,
       "NONE",
       "RELU",
-      "RELU6"
+      "RELU6",
+      "HARD_SWISH",
+      "SWISH",
+      "LOGISTIC"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "2D"
+      ]
   },
   "GATHER": {
     "type": [
@@ -194,14 +301,24 @@
       -2,
       -1
     ],
-    "vectorized": [1]
+    "vectorized": [1],
+    "tensor": [
+        "4D"
+      ],
+    "others":["Indices (second input) must be an integer tensor of any dimension"]
   },
   "GELU": {
     "type": [
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "GREATER": {
     "type": [
@@ -214,21 +331,39 @@
       -2,
       -1
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "GREATER_EQUAL": {
     "type": [
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "HARD_SWISH": {
     "type": [
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "L2_NORMALIZATION": {
     "type": [
@@ -253,35 +388,65 @@
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "LESS": {
     "type": [
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "LESS_EQUAL": {
     "type": [
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "LOG": {
     "type": [
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "LOGISTIC": {
     "type": [
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "LOG_SOFTMAX": {
     "type": [
@@ -293,14 +458,27 @@
       -2,
       -1
     ],
-    "vectorized": [0]
+    "vectorized": [0],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "MAXIMUM": {
     "type": [
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D",
+        "5D"
+      ]
   },
   "MAX_POOL_2D": {
     "type": [
@@ -314,21 +492,38 @@
       "RELU",
       "RELU6"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "4D"
+      ]
   },
   "MEAN": {
     "type": [
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D",
+        "5D"
+      ]
   },
   "MINIMUM": {
     "type": [
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D",
+        "5D"
+      ]
   },
   "MIRROR_PAD": {
     "type": [
@@ -339,7 +534,12 @@
       "REFLECT", 
       "SYMMETRIC"
     ],
-    "vectorized": [1]
+    "vectorized": [1],
+    "tensor": [
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "MUL": {
     "type": [
@@ -352,20 +552,39 @@
       "RELU",
       "RELU6"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "NEG": {
     "type": [
       "INT32"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D",
+        "5D"
+      ]
   },
   "NOT_EQUAL": {
     "type": [
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "PACK": {
     "type": [
@@ -378,42 +597,77 @@
       -2,
       -1
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D"
+      ]
   },
   "PAD": {
     "type": [
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "PADV2": {
     "type": [
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "POW": {
     "type": [
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "PRELU": {
     "type": [
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "QUANTIZE": {
     "type": [
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "REDUCE_MAX": {
     "type": [
@@ -426,7 +680,12 @@
       -2,
       -1
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "REDUCE_MIN": {
     "type": [
@@ -439,7 +698,12 @@
       -2,
       -1
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "REDUCE_PROD": {
     "type": [
@@ -453,7 +717,12 @@
       -2,
       -1
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "RELU": {
     "type": [
@@ -467,21 +736,39 @@
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "RELU_0_TO_1": {
     "type": [
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "RELU_N1_TO_1": {
     "type": [
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "RESHAPE": {
     "type": [
@@ -489,42 +776,74 @@
       "UINT8",
       "INT32"
     ],
-    "vectorized": [1]
+    "vectorized": [1],
+    "others": ["Reshape with Join and separate on axis -1, -2 and -3. Multiple axis reshape is not supported."],
+    "tensor": [
+        "3D",
+        "4D"
+      ]
   },
   "RESIZE_BILINEAR": {
     "type": [
-      "INT8",
-      "UINT8"
+      "INT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "RESIZE_NEAREST_NEIGHBOR": {
     "type": [
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "RSQRT": {
     "type": [
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "SILU": {
     "type": [
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "SLICE": {
     "type": [
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "SOFTMAX": {
     "type": [
@@ -536,7 +855,13 @@
       -2,
       -1
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "SPACE_TO_BATCH_ND": {
     "type": [
@@ -563,7 +888,11 @@
       -2,
       -1
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "3D",
+        "4D"
+      ]
   },
   "SPLIT_V": {
     "type": [
@@ -576,14 +905,24 @@
       -2,
       -1
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "3D",
+        "4D"
+      ]
   },
   "SQUARED_DIFFERENCE": {
     "type": [
       "INT8",
       "UINT8"
     ],
-    "vectorized": [1]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "SQUEEZE": {
     "type": [
@@ -596,7 +935,12 @@
       -2,
       -1
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "STRIDED_SLICE": {
     "type": [
@@ -615,7 +959,11 @@
       "NONE",
       "RELU"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "3D",
+        "4D"
+      ]
   },
   "SUM": {
     "type": [
@@ -628,28 +976,50 @@
       -2,
       -1
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "TANH": {
     "type": [
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "TILE": {
     "type": [
       "INT8",
       "UINT8"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "1D",
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "TRANSPOSE": {
     "type": [
       "INT8",
       "UINT8"
     ],
-    "vectorized": [1]
+    "vectorized": [1],
+    "tensor": [
+        "2D",
+        "3D",
+        "4D"
+      ]
   },
   "TRANSPOSE_CONV": {
     "type": [
@@ -663,7 +1033,10 @@
       "RELU",
       "RELU6"
     ],
-    "vectorized": [2]
+    "vectorized": [2],
+    "tensor": [
+        "4D"
+      ]
   },
 
   "UNIDIRECTIONAL_SEQUENCE_LSTM": {
@@ -684,15 +1057,11 @@
       -2,
       -1
     ],
-    "vectorized": [2]
-  },  
-  "CAST": {
-    "type": [
-      "INT8",
-      "UINT8",
-      "INT32"
-    ],
     "vectorized": [2],
-    "others": ["Cast inputs from INT8 or UINT8 to INT32"]
+    "tensor": [
+        "2D",
+        "3D",
+        "4D"
+      ]
   }
 }

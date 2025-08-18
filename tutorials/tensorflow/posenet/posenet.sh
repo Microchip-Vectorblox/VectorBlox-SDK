@@ -23,8 +23,10 @@ if [ ! -f $VBX_SDK/tutorials/face_rgb_20x273x481x3.npy ]; then
     generate_npy $VBX_SDK/tutorials/face_rgb_20x273x481x3.npy -o $VBX_SDK/tutorials/face_rgb_20x273x481x3.npy -s 273 481 
 fi
 
-echo "Downloading posenet..."
+echo "Checking for posenet files..."
+
 # model details @ https://github.com/tensorflow/tfjs-models/blob/master/posenet
+if [ ! -f mobilenet100_stride16.pb ]; then
 # download model; the link for the .json file (and other posenet models) can be found here:
 #   https://github.com/tensorflow/tfjs-models/blob/master/posenet/src/checkpoints.ts
 wget -q https://storage.googleapis.com/tfjs-models/savedmodel/posenet/mobilenet/float/100/model-stride16.json -O mobilenet100_stride16.json
@@ -50,11 +52,15 @@ git clone https://github.com/rwightman/posenet-python $VBX_SDK/example/python/po
 cp -r $VBX_SDK/example/python/posenet_python/posenet $VBX_SDK/example/python/.
 
 mkdir -p output
+fi
 
-echo "Generating TF Lite..."
-tflite_quantize mobilenet100_stride16.pb posenet.tflite -d $VBX_SDK/tutorials/face_rgb_20x273x481x3.npy \
+
+if [ ! -f posenet.tflite ]; then
+   echo "Generating TF Lite..."
+   tflite_quantize mobilenet100_stride16.pb posenet.tflite -d $VBX_SDK/tutorials/face_rgb_20x273x481x3.npy \
 --mean 128 \
 --scale 128 --shape 1 273 481 3
+fi
 
 if [ -f posenet.tflite ]; then
    tflite_preprocess posenet.tflite  --mean 128 --scale 128

@@ -18,11 +18,13 @@ if [ -z $VBX_SDK ]; then
 fi
 source $VBX_SDK/vbx_env/bin/activate
 
-echo "Downloading efficientnet_lite2..."
+echo "Checking for efficientnet_lite2 files..."
+
 # model details @ https://developers.google.com/mediapipe/solutions/vision/image_classifier#efficientnet-lite0_model_recommended
 if [ ! -f efficientnet_lite2.tflite ]; then
     wget -q --no-check-certificate https://storage.googleapis.com/mediapipe-models/image_classifier/efficientnet_lite2/int8/latest/efficientnet_lite2.tflite
 fi
+
 
 if [ -f efficientnet_lite2.tflite ]; then
    tflite_preprocess efficientnet_lite2.tflite  --scale 255

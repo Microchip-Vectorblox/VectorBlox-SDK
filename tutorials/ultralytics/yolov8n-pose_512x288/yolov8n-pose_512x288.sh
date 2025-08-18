@@ -23,25 +23,32 @@ if [ ! -f $VBX_SDK/tutorials/coco2017_rgb_20x288x512x3.npy ]; then
     generate_npy $VBX_SDK/tutorials/coco2017_rgb_20x416x416x3.npy -o $VBX_SDK/tutorials/coco2017_rgb_20x288x512x3.npy -s 288 512 
 fi
 
-echo "Downloading yolov8n-pose_512x288..."
+echo "Checking for yolov8n-pose_512x288 files..."
+
 # model details @ https://github.com/ultralytics/ultralytics/
-if [ ! -f yolov8n-pose.pb ]; then
-   # ignore ultralytics yolo command error, we only care about the Tflite which is generated
-   yolo export model=yolov8n-pose.pt format=pb imgsz=288,512 || true
-fi
-tflite_quantize yolov8n-pose.pb yolov8n-pose_512x288.tflite -d $VBX_SDK/tutorials/coco2017_rgb_20x288x512x3.npy --mean 128 --scale 128 --shape 1 288 512 3
-
-
-tflite_cut yolov8n-pose_512x288.tflite -c 189 215 241 198 205 224 231 261 268
-mv yolov8n-pose_512x288.0.tflite yolov8n-pose_512x288.tflite
-
-if [ -f yolov8n-pose_512x288.tflite ]; then
-   tflite_preprocess yolov8n-pose_512x288.tflite  --scale 255
+if [ ! -f yolov8n-pose_512x288.tflite ]; then
+   if [ ! -f yolov8n-pose.pb ]; then
+       # ignore ultralytics yolo command error, we only care about the Tflite which is generated
+       yolo export model=yolov8n-pose.pt format=pb imgsz=288,512 || true
+   fi
+   tflite_quantize yolov8n-pose.pb yolov8n-pose_512x288.tflite -d $VBX_SDK/tutorials/coco2017_rgb_20x288x512x3.npy --mean 128 --scale 128 --shape 1 288 512 3
 fi
 
-if [ -f yolov8n-pose_512x288.pre.tflite ]; then
+
+
+if [ -f yolov8n-pose_512x288.tflite ]; then 
+   echo "Cutting graph" 
+   tflite_cut yolov8n-pose_512x288.tflite -c 189 215 241 198 205 224 231 261 268
+   mv yolov8n-pose_512x288.0.tflite yolov8n-pose_512x288.cut.tflite 
+fi
+
+if [ -f yolov8n-pose_512x288.cut.tflite ]; then
+   tflite_preprocess yolov8n-pose_512x288.cut.tflite  --scale 255
+fi
+
+if [ -f yolov8n-pose_512x288.cut.pre.tflite ]; then
     echo "Generating VNNX for V1000 configuration..."
-    vnnx_compile -c V1000 -t yolov8n-pose_512x288.pre.tflite -o yolov8n-pose_512x288.vnnx
+    vnnx_compile -c V1000 -t yolov8n-pose_512x288.cut.pre.tflite -o yolov8n-pose_512x288.vnnx
 fi
 
 if [ -f yolov8n-pose_512x288.vnnx ]; then

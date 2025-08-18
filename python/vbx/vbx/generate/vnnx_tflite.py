@@ -13,7 +13,8 @@ import tensorflow as tf
 import vbx.sim
 from .vnnx_types import *
 from .vnnx_allocation import *
-from .split_tflite import lut_pattern, VCI_LUT, is_split_idx_in_engine_graphs, is_singleton, channels_first_shape
+from .split_tflite import VCI_LUT, is_split_idx_in_engine_graphs, is_singleton, channels_first_shape
+from .transform_tflite import graph_pattern, lut_i8_to_u8
 
 
 VERBOSE = 0
@@ -44,7 +45,73 @@ def exception_catcher( node, node_index, tensor_index=None, subnode=None, subnod
         if subnode_index is not None and subnode is not None:
             print("Subnode index {} type {}".format(subnode_index, subnode))
         sys.exit(1)
-        
+
+def resize_nearest_indices(in_size, out_size):
+    in_rows, in_cols = in_size
+    out_rows, out_cols = out_size
+    c_idx, r_idx = [],[]
+
+    for c in range(out_cols):
+        srcIndex = c*in_cols // out_cols
+        if srcIndex >= in_cols:
+            srcIndex = in_cols - 1
+        c_idx.append(srcIndex)
+
+    c_inc = [c_idx.index(_) for _ in set(c_idx)]
+    assert(len(c_inc) == in_cols)
+    c_incr = [c_idx[c_inc[i+1]] - c_idx[c_inc[i]] for i in range(len(c_inc)-1)]
+    c_num_copies = [c_idx.count(_) for _ in set(c_idx)]
+    c_all_same_incr = all([c_incr[0] == d for d in c_incr])
+
+    # print('NEAREST NEIGHBOR')
+    # print('cols', c_incr[0], (c_num_copies[0], c_num_copies[-1]), c_all_same_incr)
+    return c_num_copies, c_inc   
+
+#rows and columns indices
+def resize_bilinear_indices(in_size, out_size):
+    in_rows, in_cols = in_size
+    out_rows, out_cols = out_size
+    c_idx, steps, steps1 = [],[], []
+    c1_idx = []
+    ratio_cols = int(((1 << 10) * in_cols + out_cols / 2) / out_cols)
+    for c in range(out_cols):
+        step = ratio_cols * c
+        row0_frac = step & ((1 << 10) - 1)
+        row1_frac = (1 << 10) - row0_frac
+        steps.append(row0_frac)
+        steps1.append(row1_frac)
+        pos =  max(step / (1 << 10), 0)
+        pos1 = min((step + (1 << 10) - 1) / (1 << 10), in_cols - 1)
+
+        if pos >= in_cols-1:
+           pos = in_cols - 1
+        c_idx.append(int(pos))
+        c1_idx.append(int(pos1))
+
+    c_inc = [c_idx.index(_) for _ in set(c_idx)]
+    step_inc = [c_idx.index(_) for _ in set(c_idx)]
+    c1_inc = [c1_idx.index(_) for _ in set(c1_idx)]
+    
+    if in_cols < out_cols:
+        assert(len(c_inc) == in_cols)
+    c_incr = [c_idx[c_inc[i+1]] - c_idx[c_inc[i]] for i in range(len(c_inc)-1)]
+    c_num_copies = [c_idx.count(_) for _ in set(c_idx)]
+    steps_num_copies = [steps.count(_) for _ in set(steps)]
+    c1_num_copies = [c1_idx.count(_) for _ in set(c1_idx)]
+  
+    # print("steps = ", steps)   
+    # print("steps1 = ", steps1)    
+    # print("c_idx = ", c_idx) 
+    # print("c1_idx = ", c1_idx) 
+    # print("c_inc = ", c_inc) 
+    # print("c1_inc = ", c1_inc) 
+    # print("c_num_copies = ", c_num_copies)
+    # print("num steps = ", len(steps))
+
+    # print('BILINEAR ')
+    # print('cols', c_incr[0], (c_num_copies[0], c_num_copies[-1]), c_all_same_incr)
+    return c_num_copies, c_inc, steps    
+
 
 def sigmoid(x):
   if x > 0:   
@@ -53,8 +120,6 @@ def sigmoid(x):
   else:
     z = np.exp(x)
     return z/(1+z)
-
-
 
 
 def allocation(node, preset, opcode, debug=False):
@@ -656,6 +721,7 @@ def channels_first_array_reshape(ishape, transform):
                 break
 
     if join:
+        assert(join_axis)
         if join_axis < -3:
             print('join axis < -3 not supported')
             mode = -1
@@ -1047,7 +1113,8 @@ def generate_vnnx_from_json_subgraphs(json_subgraphs, preset, test_inputs, test_
     set_io_nodes(vnnx_graph, Nodes, graph_inputs, graph_outputs, weights)
     set_skip_concat(Nodes, test_inputs, test_outputs, external_inputs)
     set_skip_channel_slice(Nodes, test_inputs, test_outputs, external_inputs)
-    act_buffer_size, io_buffer_size = set_io_buffers(Nodes, weights, test_inputs, test_outputs)
+    # act_buffer_size, io_buffer_size = set_io_buffers(Nodes, weights, test_inputs, test_outputs)
+    act_buffer_size, io_buffer_size = set_io_buffers_reused(Nodes, weights, test_inputs, test_outputs)
     update_tensor_shapes(Nodes)
 
     vnnx_graph.replay_buffer = len(weights)
@@ -1057,7 +1124,8 @@ def generate_vnnx_from_json_subgraphs(json_subgraphs, preset, test_inputs, test_
     node_data, subnode_data, tensor_data, align1 = update_offsets(vnnx_graph, Nodes)
 
     # do twice, once to find allocate_length, once for real
-    vnnx_graph.include_io_data = include_io_data
+    vnnx_graph.include_io_data = True
+    # vnnx_graph.include_io_data = include_io_data
     vnnx_graph.allocate_bytes = 0
     vnnx_graph.data_bytes = 0
     graph_data = [vnnx_graph.get_structured_data()]
@@ -1073,6 +1141,7 @@ def generate_vnnx_from_json_subgraphs(json_subgraphs, preset, test_inputs, test_
 
     vnnx_graph.data_bytes = len(data) # - act_buffer_size
     vnnx_graph.allocate_bytes = len(data)
+
     graph_data = [vnnx_graph.get_structured_data()]
     data = b"".join(graph_data+node_data+subnode_data+tensor_data+align1+[weights]+[replay])
 
@@ -1108,8 +1177,8 @@ def generate_vnnx_from_json_subgraphs(json_subgraphs, preset, test_inputs, test_
             vnnx_graph.data_bytes = len(data)
             if trim_act_buffer:
                 vnnx_graph.data_bytes = len(data) - act_buffer_size
-                # if not vnnx_graph.include_io_data:
-                #     vnnx_graph.data_bytes -= io_buffer_size
+                if not vnnx_graph.include_io_data:
+                    vnnx_graph.data_bytes -= io_buffer_size
             vnnx_graph.allocate_bytes = len(data)
             graph_data = [vnnx_graph.get_structured_data()]
             data = b"".join(graph_data+node_data+subnode_data+tensor_data+align1+[replay]+align2+[weights])
@@ -1129,16 +1198,21 @@ def generate_vnnx_from_json_subgraphs(json_subgraphs, preset, test_inputs, test_
         sys.stderr.write('ERROR: model failed to run\n')
         sys.exit(1)
 
-    # print('observed fixed_replay_buffer values {},{},{},{}'.format(
-    #     vnnx_graph.fixed_replay_buffer0,
-    #     vnnx_graph.fixed_replay_buffer1,
-    #     vnnx_graph.fixed_replay_buffer2,
-    #     vnnx_graph.fixed_replay_buffer3))
-    # print()
-    # print('replay_size {}'.format(vnnx_graph.replay_buffer_size))
-    # print('act buffers {}'.format(act_buffer_size))
-    # print('io buffers {}'.format(io_buffer_size))
-    # print()
+    if False:
+        print()
+        print('NODE {:3.2f}'.format(len(b"".join(node_data)) / 2**20))
+        print('SUBNODE {:3.2f}'.format(len(b"".join(subnode_data)) / 2**20))
+        print('TENSOR {:3.2f}'.format(len(b"".join(tensor_data)) / 2**20))
+
+        print('WEIGHTS {:3.2f}'.format(len(b"".join([weights])) / 2**20))
+        print('ACT BUFFERS {:3.2f}'.format(act_buffer_size / 2**20))
+        print('IO BUFFERS {:3.2f}'.format(io_buffer_size / 2**20))
+        print('WEIGHTS - BUFFERS {:3.2f}'.format((len(b"".join([weights]))-(act_buffer_size+io_buffer_size)) / 2**20))
+        print('REPLAY {:3.2f}'.format(vnnx_graph.replay_buffer_size / 2**20))
+        print()
+        print('BINARY {:3.2f}'.format(vnnx_graph.data_bytes / 2**20))
+        print('RUNTIME {:3.2f}'.format(vnnx_graph.allocate_bytes / 2**20))
+        print()
 
     if not replay_first:
         data = b"".join(graph_data+node_data+subnode_data+tensor_data+align1+[weights]+[replay])
@@ -1151,8 +1225,8 @@ def generate_vnnx_from_json_subgraphs(json_subgraphs, preset, test_inputs, test_
         vnnx_graph.data_bytes = len(data)
         if trim_act_buffer:
             vnnx_graph.data_bytes = len(data) - act_buffer_size
-            # if not vnnx_graph.include_io_data:
-            #     vnnx_graph.data_bytes -= io_buffer_size
+            if not vnnx_graph.include_io_data:
+                vnnx_graph.data_bytes -= io_buffer_size
         vnnx_graph.allocate_bytes = len(data)
         graph_data = [vnnx_graph.get_structured_data()]
         data = b"".join(graph_data+node_data+subnode_data+tensor_data+align1+[replay]+align2+[weights])
@@ -1286,6 +1360,141 @@ def set_skip_channel_slice(Nodes, test_inputs, test_outputs, external_inputs):
                 if is_channel_slice:
                     # node.skip = 1
                     pass
+
+def shared_buffers(nodes, inputs, outputs, concat_map):
+    alloc = dict()
+    dealloc = dict()
+    io_size = dict()
+
+    all_tensor_array = []
+    for n in nodes:
+        all_tensor_array += n.tensor_array
+
+    io_names = []
+    for n, node in enumerate(nodes):
+        for t in nodes[n].tensor_array:
+            if t.name in concat_map:
+                t = find_tensors_by_name(all_tensor_array, concat_map[t.name])[0]
+            if t.buffer[1] != -1:
+                io_names.append(t.name)
+            else:
+                io_size[t.name] = np.prod(mod_shape(t.shape,4))*sizeof_calc_type(t.type)
+            
+    for n, node in enumerate(nodes):
+        for t in nodes[n].tensor_array:
+            if t.name in concat_map:
+                t = find_tensors_by_name(all_tensor_array, concat_map[t.name])[0]
+            if not t.name in io_names:
+                if not t.name in alloc:
+                    alloc[t.name] = n         # allocate only on the first use
+                dealloc[t.name] = n       # deallocate on the last use; don't deallocate inputs/outputs
+
+    heap = [(0, 0)]  # occupied memory; each list element is the range of an allocation; start with dummy node
+    heap_ptr = dict()   # pointers to heap, including deallocated; heap_ptr[io_id] = memory location
+    heap_max = heap[0][1]   # keep track of the largest amount of memory used
+    for n in range(len(nodes)):
+        for u, alloc_ind in alloc.items():
+            if n == alloc_ind:  # find all allocations during this layer
+                for h in range(1, len(heap)):
+                    if heap[h][0] - heap[h-1][1] >= io_size[u]: # see if new buffer can fit between allocations
+                        heap_ptr[u] = heap[h-1][1]
+                        heap.insert(h,(heap_ptr[u], heap_ptr[u]+io_size[u]))
+                        break
+                if not u in heap_ptr:  # put new buffer at the end of the heap
+                    heap_ptr[u] = heap[-1][1]
+                    heap.append((heap_ptr[u], heap_ptr[u] + io_size[u]))
+                heap_max = max(heap_max, heap[-1][1])
+        for u, dealloc_ind in dealloc.items():
+            if n == dealloc_ind:    # find all deallocations during this layer
+                for h in range(1, len(heap)):
+                    if heap_ptr[u] == heap[h][0]:  # find the allocation in the heap
+                        heap.pop(h)
+                        break
+
+    return heap_ptr, heap_max
+
+
+def set_all_tensor_buffers(tarray, weights, map):
+    for name in map.keys():
+        ts_io = find_tensors_by_name(tarray, name)
+        for idx, t in enumerate(ts_io):
+            data = map[t.name].astype(np_type(t.type)).tobytes()
+            weights[t.direct:t.direct+len(data)] = data
+
+
+def remap_all_tensor_buffers(tarray, weights, remap, offset, filter=None):
+    for name in remap.keys():
+        if filter is None or name in filter:
+            ts = find_tensors_by_name(tarray, name)
+            for t in ts:
+                t_ = find_tensors_by_name(tarray, remap[t.name])[0]
+                if t_.buffer[1] != -1:
+                    map_all_tensor_buffers(tarray, weights, [t_.name])
+                t.buffer[1], t.direct = t_.buffer[1] + offset[t.name], t_.direct + offset[t.name]
+
+
+def map_all_tensor_buffers(tarray, weights, names):
+    for name in names:
+        ts = find_tensors_by_name(tarray, name)
+        if any(_.buffer[1] == -1 for _ in ts):
+            size = np.prod(mod_shape(ts[0].shape, 4))*sizeof_calc_type(ts[0].type) #TODO fix for proper sized maps (w/ output_strides)
+            for t in ts:
+                t.buffer[1], t.direct = len(weights), len(weights)
+            weights += bytearray(size)
+
+
+def set_io_buffers_reused(Nodes, weights, test_inputs, test_outputs):
+    '''
+    allocate buffers
+    '''
+    init_len = len(weights)
+
+    all_tensor_array = []
+    for n in Nodes:
+        all_tensor_array += n.tensor_array
+
+    unique_names = []
+    for t in all_tensor_array:
+        if t.name not in unique_names: 
+            unique_names.append(t.name)
+
+    concat_offset = {}
+    concat_map = {}
+
+    for n, node in enumerate(Nodes):
+        if node.type == BuiltinOperator.CONCATENATION and node.skip:
+            names = [_.name for _ in node.tensor_array]
+            shapes = [_.shape for _ in node.tensor_array]
+
+            offset = 0
+            for name, shape in zip(names[:-1],shapes[:-1]):
+                concat_map[name] = names[-1]
+                concat_offset[name] = offset
+                offset += np.prod(shape)
+
+    io_names = list(test_inputs.keys())+list(test_outputs.keys())
+    map_all_tensor_buffers(all_tensor_array, weights, io_names)
+    remap_all_tensor_buffers(all_tensor_array, weights, concat_map, concat_offset, io_names)
+    set_all_tensor_buffers(all_tensor_array, weights, test_inputs)
+    set_all_tensor_buffers(all_tensor_array, weights, test_outputs)
+
+    io_len = len(weights)
+    io_buffer_size = io_len - init_len
+
+    heap_ptr, heap_max = shared_buffers(Nodes, test_inputs, test_outputs, concat_map)
+    for t in all_tensor_array:
+        if t.buffer[1] == -1:
+            if t.name in heap_ptr:
+                t.buffer[1] = len(weights) + heap_ptr[t.name]
+                t.direct = len(weights) + heap_ptr[t.name]
+            elif t.name not in concat_map:
+                print('WARNING not in heap_ptr or remapping', t.name)
+    weights += bytearray(heap_max)
+    remap_all_tensor_buffers(all_tensor_array, weights, concat_map, concat_offset)
+
+    act_buffer_size = len(weights) - io_len
+
+    return act_buffer_size, io_buffer_size
 
 
 def set_io_buffers(Nodes, weights, test_inputs, test_outputs):
@@ -2001,7 +2210,7 @@ def populate_nodes(json_subgraphs, preset, graph_activations, weights, aliased_i
         DATA_MOVEMENT += ["UNPACK"]
         DATA_MOVEMENT += ["RESHAPE", "EXPAND_DIMS", "SQUEEZE"]
         DATA_MOVEMENT += ["DEPTH_TO_SPACE", "SPACE_TO_DEPTH", 'BATCH_TO_SPACE_ND', 'SPACE_TO_BATCH_ND']
-        PADDING = ['PAD', 'PADV2', 'MIRROR_PAD']
+        PADDING = ['PAD', 'PADV2', 'MIRROR_PAD', 'DILATE']
         POOLING = ['MAX_POOL_2D', 'AVERAGE_POOL_2D']
         KERNEL_REGULARIZER = ['L2_NORMALIZATION']
         POST_PROCESSING = ['EMBEDDING_LOOKUP']
@@ -2060,18 +2269,23 @@ def populate_nodes(json_subgraphs, preset, graph_activations, weights, aliased_i
         
         i = 0
         lut_ops = None
+        reshape_ops = None
         while i < len(subops):
-            patterns = lut_pattern(subops, codes, tensors, buffers, i, opcode)
-            if len(patterns) and patterns[0] == i:
-                subops_ = [subops[_] for _ in patterns]
-                subcodes_ = [subcodes[_] for _ in patterns]
-                subcode = "LUT"
-                lut_ops = list(zip(subops_, subcodes_, patterns))
+            subcode, pattern = graph_pattern(subops[i:], codes, tensors, buffers)
+            pattern = [_+i for _ in pattern]
+
+            if len(pattern):
+                subops_ = [subops[_] for _ in pattern]
+                subcodes_ = [subcodes[_] for _ in pattern]
+                if subcode == "LUT":
+                    lut_ops = list(zip(subops_, subcodes_, pattern))
+                elif subcode == "TRANSFORM":
+                    reshape_ops = list(zip(subops_, subcodes_, pattern))
             else:
                 subops_ = [subops[i]]
                 subcode = subcodes[i]
             layer_codes.append(subcode)
-            subnode_array, subnode_tensors, prev_subop = populate_subnodes(subcode, lut_ops, subops_, prev_subop, graph_activations, tensors, buffers, weights, dequantize_op_params, aliased_ids, tmp_dir,\
+            subnode_array, subnode_tensors, prev_subop = populate_subnodes(subcode, ops, lut_ops, reshape_ops, subops_, prev_subop, graph_activations, tensors, buffers, weights, dequantize_op_params, aliased_ids, tmp_dir,\
                 engine_graphs_nx, external_inputs, external_outputs, already_external_producer, already_external_consumer, node.offloaded, g)
            
             node.subnode_array += subnode_array
@@ -3085,11 +3299,12 @@ def lut_func(code, scale=None, param=None):
     elif code == "POST_PROCESSING":
         fn = lambda s: tf.gather(s, param, axis=1)
     elif code == "SQUARED_DIFFERENCE":
+        print("lut_func")
         fn = lambda s: tf.math.squared_difference(s, scale)
     return fn
 
 
-def populate_subnodes(subcode, lut_ops, subops, prev_subop, graph_activations, tensors, buffers, weights, dequantize_op_params, aliased_ids, tmp_dir,\
+def populate_subnodes(subcode, ops, lut_ops, reshape_ops, subops, prev_subop, graph_activations, tensors, buffers, weights, dequantize_op_params, aliased_ids, tmp_dir,\
 engine_graphs_nx, external_inputs, external_outputs, already_external_producer, already_external_consumer, node_offloaded, subgraph_idx):
     subnode_array = []
     subnode_tensor_array = []
@@ -3269,7 +3484,7 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
 
         subnode_array.append(sn)
 
-    elif subcode in ['ADD', 'SUB', 'MUL', 'DIV', "GREATER", "GREATER_EQUAL", "LESS", "LESS_EQUAL", "EQUAL", "NOT_EQUAL", "SQUARED_DIFFERENCE"] and multi_input:  # >>>>>>>>> Main ELTWISE BLOCK with multi_inputs
+    elif subcode in ['ADD', 'SUB', 'MUL', 'DIV', "GREATER", "GREATER_EQUAL", "LESS", "LESS_EQUAL", "EQUAL", "NOT_EQUAL", "SQUARED_DIFFERENCE", "MAXIMUM", "MINIMUM"] and multi_input:  # >>>>>>>>> Main ELTWISE BLOCK with multi_inputs
        
         sn.type = VNNXOperator.ELTWISE
         eltwise8 = sn.eltwise8
@@ -3280,7 +3495,18 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
         i_tensor = tensors[subop['inputs'][0]] # left
         i2_tensor = tensors[subop['inputs'][1]] # right
         # Node brings in input2, assumed to be later 
-        eltwise8.swap = subop['inputs'][1] < subop['inputs'][0]
+        # eltwise8.swap = subop['inputs'][1] < subop['inputs'][0]
+
+        eltwise8.swap = False
+        op_outputs = []
+        for op in ops:
+            if op == subop:
+                break
+            else:
+                op_outputs += op['outputs']
+
+        if subop['inputs'][0] in op_outputs:
+            eltwise8.swap = True
 
         o_tensor = tensors[subop['outputs'][0]] 
         if subcode in ['MUL', 'ADD', 'SUB', 'DIV', 'MINIMUM', 'MAXIMUM', 'SQUARED_DIFFERENCE']:
@@ -3348,8 +3574,9 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
             twice_max_input_scale = 2 * max(input_scale[0], input2_scale[0])
             real_input_multiplier = (np.asarray(input_scale) / twice_max_input_scale).tolist()
             real_input2_multiplier = (np.asarray(input2_scale) / twice_max_input_scale).tolist()
-            real_output_multiplier = ((twice_max_input_scale * twice_max_input_scale) /
-                                        (2** left_shift*2 * np.asarray(output_scale))).tolist()
+            # real_output_multiplier = ((twice_max_input_scale * twice_max_input_scale) /
+            #                             (2** left_shift*2 * np.asarray(output_scale))).tolist()
+            real_output_multiplier = ((twice_max_input_scale*twice_max_input_scale) / ((1<<left_shift * 2) * np.asarray(output_scale))).tolist()
             # real_output_multiplier = (twice_max_input_scale / (2**left_shift * np.asarray(output_scale))).tolist()
 
             input_multiplier, input_shift = get_quantized_multiplier(real_input_multiplier)
@@ -3375,7 +3602,12 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
         elif subcode in ['MINIMUM', 'MAXIMUM']:
             input1_shape, idims = channels_first_shape(i_tensor['shape'])
             input2_shape, i2dims = channels_first_shape(i2_tensor['shape'])
-
+            left_shift = 8
+            if subcode == 'MAXIMUM':
+                sn.MinMaxOptions.max = 1
+            else:
+                sn.MinMaxOptions.max = 0
+    
             if input1_shape != input2_shape:
                 if len(input2_shape) > 1:
                     sys.stderr.write("ERROR: SUBOP{} doesn't support difference tensor shapes: {}, {}.\n".format(subcode, input1_shape, len(input2_shape)))
@@ -3431,167 +3663,83 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
 
         subnode_array.append(sn)
 
-    elif subcode == 'LUT':
-        sn.type = VNNXOperator.LUT
-        transform = None
-        sn.ActivationOptions.lut_count = 1
+    elif subcode == 'TRANSFORM':
+        # transform = None
+        # sn.ActivationOptions.lut_count = 1
 
         l = 0
         bytes = 1
-        while l < len(lut_ops):
-            op, code ,_ = lut_ops[l]
-            next_op, next_code = None, ''
-            if l < len(lut_ops)-1:
-                next_op, next_code, _ = lut_ops[l+1]
-            next_next_op, next_next_code = None, ''
-            if l < len(lut_ops)-2:
-                next_next_op, next_next_code, _ = lut_ops[l+2]
-
-            if code == 'LOGISTIC' and next_code == 'MUL':
-                l += 1
-            elif code == 'RESHAPE' and next_code == 'CAST'and next_next_code == 'GATHER':
-                l += 2
-                bytes = 4
-            elif code == 'CAST'and next_code == 'GATHER':
-                l += 1
-                bytes = 4
-            elif code in ['MUL', 'ADD', 'SUB']:
-                _, _, _, _, _, _, filter_shape_dims, _ = get_subop_parameters(op, tensors, buffers)
-                if filter_shape_dims[-3] > sn.ActivationOptions.lut_count:
-                    sn.ActivationOptions.lut_count = filter_shape_dims[-3]
-            l += 1
-
-        lut, step_vals, step_indices = [], [], []
         final_output_scale = None
         final_output_offset = None
-        for x in range(sn.ActivationOptions.lut_count):
-            l = 0
-            lut_fn = []
-            while l < len(lut_ops):
-                op, code, _ = lut_ops[l]
-                next_op, next_code = None, ''
-                if l < len(lut_ops)-1:
-                    next_op, next_code, _ = lut_ops[l+1]
-                next_next_op, next_next_code = None, ''
-                if l < len(lut_ops)-2:
-                    next_next_op, next_next_code, _ = lut_ops[l+2]
+        while l < len(reshape_ops):
+            op, code ,_ = reshape_ops[l]
+            o_tensor = tensors[op['outputs'][0]]
 
-                o_tensor = tensors[op['outputs'][0]]
+            next_op, next_code = None, ''
+            if l < len(reshape_ops)-1:
+                next_op, next_code, _ = reshape_ops[l+1]
+            next_next_op, next_next_code = None, ''
+            if l < len(reshape_ops)-2:
+                next_next_op, next_next_code, _ = reshape_ops[l+2]
 
-                if code == 'LOGISTIC' and next_code == 'MUL':
-                    fn = lut_func('SILU')
-                    l += 1
+            if code == 'RESHAPE' and next_code == 'TRANSPOSE' and next_next_code == 'RESHAPE':
+                l += 2
+                bytes = 1
 
-                    o_tensor = tensors[next_op['outputs'][0]]
-                    output_type = o_tensor['type']
-                    sn.output_data_type = calc_type.from_str(output_type)
-
-                elif code == 'RESHAPE' and next_code == 'CAST'and next_next_code == 'GATHER':
-                    pixels = get_numpy_data_from_index(next_next_op['inputs'][0], tensors, buffers)
-                    arr = np.zeros((256,), dtype=pixels.dtype)
-                    arr[:len(pixels)] = pixels
-                    fn = lambda s: float(arr[int(s)])
-                    l += 2
-
-                    o_tensor = tensors[next_next_op['outputs'][0]]
-                    output_type = o_tensor['type']
-                    sn.output_data_type = calc_type.from_str(output_type)
-
-                elif code == 'CAST'and next_code == 'GATHER':
-                    pixels = get_numpy_data_from_index(next_op['inputs'][0], tensors, buffers)
-                    arr = np.zeros((256,), dtype=pixels.dtype)
-                    arr[:len(pixels)] = pixels
-                    fn = lambda s: float(arr[int(s)])
-                    l += 1
-
-                    o_tensor = tensors[next_op['outputs'][0]]
-                    output_type = o_tensor['type']
-                    sn.output_data_type = calc_type.from_str(output_type)
-
-                elif code in ['HARD_SWISH', 'LOGISTIC', 'RELU', 'RELU6', 'RELU_0_TO_1']:
-                    fn = lut_func(code)
-
-                elif code in ['QUANTIZE']:
-                    fn = lut_func(code)
-
-                    #TODO cover other cases / zeros
-                    if o_tensor['type'] == 'UINT8':
-                        if l < len(lut_ops) - 1:
-                            fn = lambda s: s + 128
-
-                elif code in ['LEAKY_RELU']:
-                    opts = op['builtin_options']
-                    fn = lut_func(code, opts['alpha'])
-
-                elif code in ['MUL', 'ADD', 'SUB', 'SQUARED_DIFFERENCE']:
-                    _, _, _, filter_scale, _, filter_offset, filter_shape_dims, filter_data = get_subop_parameters(op, tensors, buffers)
-                    if x < filter_shape_dims[-3]:
-                        dequantized_filter = filter_scale[0] * (filter_data[x] - filter_offset)  
-                    else:
-                        dequantized_filter = filter_scale[0] * (filter_data[0] - filter_offset)  
-
-                    fn = lut_func(code, dequantized_filter)
-                else:
-                    print('error unsupported LUT pattern', code)
-
+                o_tensor = tensors[next_next_op['outputs'][0]]
+                output_type = o_tensor['type']
+                sn.output_data_type = calc_type.from_str(output_type)
                 final_output_offset = o_tensor['quantization'].get('zero_point', [0])[0]
                 final_output_scale = o_tensor['quantization'].get('scale', [1.0])[0]
-
-                lut_fn.append(fn)
-
-                l += 1
-            lut_fn.reverse()
-            transform = composite_function(*lut_fn)
-            
-            if bytes == 4:
-                l, first, last, step_val, step_ind = LUTPopulate(1., 0., 1., 0, transform, bytes=4, itype=sn.input_data_type)
-                
-                lut_repacked = [0xff & _ for _ in l]
-                lut_repacked += [(0xff * (2**8) & _) // (2**8) for _ in l]
-                lut_repacked += [(0xff * (2**16) & _) // (2**16) for _ in l]
-                lut_repacked += [(0xff * (2**24) & _) // (2**24) for _ in l]
-                lut.extend(lut_repacked)
-                step_vals.extend(step_val)
-                step_indices.extend(step_ind)
-            else:
-                l, first, last, step_val, step_ind = LUTPopulateInt8(input_scale, input_offset, final_output_scale, final_output_offset, transform, itype=sn.input_data_type, otype=sn.output_data_type)
-
-                lut.extend(l)
-                step_vals.extend(step_val)
-                step_indices.extend(step_ind)
-
+                sn.type = VNNXOperator.PIXEL_SHUFFLE
+                r = o_tensor['shape'][-2]//i_tensor['shape'][-2]
+                assert(r == o_tensor['shape'][-3]//i_tensor['shape'][-3])
+                sn.PixelShuffleOptions.r = r
+            l += 1
         sn.input_offset = input_offset
         sn.output_offset = final_output_offset
+
+        sn.input_shift = -1
+        sn.input_multiplier = 1 
+        sn.output_multiplier = len(weights)
+        sn.output_shift = len(weights)
+
+        subnode_array.append(sn)
+
+    elif subcode == 'LUT':
+        sn.type = VNNXOperator.LUT
+        transform = None
+        sn.ActivationOptions.lut_count = 0
+
+        bytes = sizeof_calc_type(sn.output_data_type)
+
+        lut = []
+
+        for lop, code, _ in lut_ops:
+            if code == "GATHER":
+                l = get_numpy_data_from_index(lop['inputs'][0], tensors, buffers)
+                if sn.input_data_type in [calc_type.INT8, calc_type.INT32]:
+                    l = lut_i8_to_u8(l)
+
+                if bytes == 4:
+                    lut_repacked = [0xff & _ for _ in l]
+                    lut_repacked += [(0xff * (2**8) & _) // (2**8) for _ in l]
+                    lut_repacked += [(0xff * (2**16) & _) // (2**16) for _ in l]
+                    lut_repacked += [(0xff * (2**24) & _) // (2**24) for _ in l]
+                    lut += lut_repacked
+                else:
+                    lut += [0xff & _ for _ in l]
+                sn.ActivationOptions.lut_count += 1
+
+        # sn.input_offset = input_offset
         sn.ActivationOptions.input_range_radius = -1
+        sn.ActivationOptions.count = -1
+        sn.ActivationOptions.lut_int8 = -1
+        sn.ActivationOptions.idx_int8 = -1
 
-        if VCI_LUT:
-            sn.ActivationOptions.vci_int8 = len(weights)
-            fmt = "{}B".format(len(lut))
-            weights += struct.pack(fmt, *lut)
-        else:
-            sn.ActivationOptions.vci_int8 = -1 
-
-        if bytes == 4:
-            sn.ActivationOptions.lut_int8 = -1
-            # step_vals = np.asarray(step_vals, dtype='int32')
-            # sn.ActivationOptions.lut_int32 = len(weights)
-            # fmt = "{}I".format(len(step_vals))
-            # weights += struct.pack(fmt, *step_vals)
-        else:
-            sn.ActivationOptions.lut_int8 = len(weights)
-            fmt = "{}b".format(len(step_vals))
-            weights += struct.pack(fmt, *step_vals)
-
-        if bytes == 4:
-            sn.ActivationOptions.idx_int8 = -1
-        else:
-            sn.ActivationOptions.idx_int8 = len(weights)
-            if sn.input_data_type == calc_type.UINT8:
-                fmt = "{}B".format(len(step_indices))
-            else:
-                fmt = "{}b".format(len(step_indices))
-            weights += struct.pack(fmt, *step_indices)
-        sn.ActivationOptions.count = len(step_vals)
+        sn.ActivationOptions.vci_int8 = len(weights)
+        fmt = "{}B".format(len(lut))
+        weights += struct.pack(fmt, *lut)
 
         sn.input_shift = -1
         sn.input_multiplier = 1 
@@ -3624,6 +3772,18 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
 
         subnode_array.append(sn)
 
+    elif subcode in ['DILATE']:
+        sn.type = BuiltinOperator.DILATE
+
+        dilations = get_numpy_data_from_index(subop['inputs'][1], tensors, buffers)
+        sn.pads = [0, 0, 0, 0, 0, 0]
+        assert len(sn.pads) == 6
+        sn.PadOptions.value = input_offset
+        sn.PadOptions.transpose_dilate_w = dilations[-2]
+        sn.PadOptions.transpose_dilate_h = dilations[-3]
+
+        subnode_array.append(sn)
+
     elif subcode == "RESIZE_NEAREST_NEIGHBOR":
         sn.type = BuiltinOperator.RESIZE_NEAREST_NEIGHBOR
         s_tensor = tensors[subop['inputs'][1]]
@@ -3633,6 +3793,19 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
 
         new_size_data = get_numpy_data(s_tensor, buffers)
         resize.scale = (new_size_data / i_tensor['shape'][1:3]).tolist() # height and width scales
+
+        c_num_copies = []
+        steps=[0] #Only needed for bilinear --> so empty for NN
+        if all([sc > 1 for sc in resize.scale]):
+            c_num_copies, c_out = resize_nearest_indices(i_tensor['shape'][1:3], new_size_data)
+
+        sn.ResizeOptions.num_c_inc = len(c_num_copies)
+
+        resize.c_inc = len(weights)
+        fmt = "{}B".format(len(c_num_copies))
+        weights += struct.pack(fmt, *c_num_copies)
+        
+
         subnode_array.append(sn)
 
     elif subcode == "RESIZE_BILINEAR":
@@ -3642,9 +3815,18 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
         resize = sn.ResizeOptions
         resize.mode = resize_mode.LINEAR 
         resize.ratio =  ((1 << 10) * i_tensor['shape'][1] + o_tensor['shape'][1] / 2) / o_tensor['shape'][1]
-       
+
         new_size_data = get_numpy_data(s_tensor, buffers)
         resize.scale = (new_size_data / i_tensor['shape'][1:3]).tolist() # height and width scales
+
+        c_num_copies, steps = [], []
+        c_num_copies, c_out, steps = resize_bilinear_indices(i_tensor['shape'][1:3], new_size_data)
+        # print(c_num_copies)
+        sn.ResizeOptions.num_c_inc = len(c_num_copies)
+
+        resize.c_inc = len(weights)
+        fmt = "{}B".format(len(c_num_copies))
+        weights += struct.pack(fmt, *c_num_copies)
 
         if i_tensor['shape'][1:3] == [1,1]:
             sn.type = BuiltinOperator.RESIZE_NEAREST_NEIGHBOR
@@ -3653,7 +3835,6 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
         subnode_array.append(sn)
 
     elif subcode == 'MIRROR_PAD':
-        print('WARNING: currently MIRROR_PAD running as PAD')
         sn.type = BuiltinOperator.MIRROR_PAD
 
         pads = get_numpy_data_from_index(subop['inputs'][1], tensors, buffers)
@@ -4026,11 +4207,10 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
             left_shift = 7
             sn.activation_max = 127
             sn.activation_min = -128
-            broad8.sub = -1
             twice_max_input_scale = 2 * max(input_scale[0], filter_scale[0])
             real_input_multiplier = (np.asarray(input_scale) / twice_max_input_scale).tolist()
             real_filter_multiplier = (np.asarray(filter_scale) / twice_max_input_scale).tolist()
-            real_output_multiplier = (twice_max_input_scale*twice_max_input_scale / (1<<left_shift * 2) * np.asarray(output_scale)).tolist()
+            real_output_multiplier = ((twice_max_input_scale*twice_max_input_scale) / ((1<<left_shift * 2) * np.asarray(output_scale))).tolist()
 
             input_multiplier, input_shift = get_quantized_multiplier(real_input_multiplier)
             filter_multiplier, filter_shift = get_quantized_multiplier(real_filter_multiplier)
@@ -4324,67 +4504,6 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
         zero_point = i_tensor['quantization']['zero_point'][0]
         dequantize_op_params[output_id] = (scale, zero_point, input_id, 'input')
 
-    # @TODO to move.
-    elif subcode in ['POW','EXP','LOG','ELU','GELU', 'HARD_SWISH', 'SILU', 'RSQRT', 'TANH', 'LOGISTIC']:
-        sn.ActivationOptions.lut_count = 1
-        sn.ActivationOptions.vci_int8 = -1
-
-        sn.type = getattr(BuiltinOperator, f"{subcode}")
-        if subcode == 'POW': #TODO
-            exponent_tensor = tensors[op['inputs'][1]]
-            transform = lambda s: pow(s)
-        elif subcode == 'LOG':
-            transform = lambda s: tf.math.log(s)
-        elif subcode == 'EXP':
-            transform = lambda s: exp(s)
-        elif subcode == 'ELU':
-            transform = lambda s: tf.nn.elu(s)
-        elif subcode == 'GELU':
-            transform = lambda s: tf.nn.gelu(s)
-        elif subcode == 'TANH':
-            transform = lambda s: tf.nn.tanh(s)
-        elif subcode == 'LOGISTIC':
-            transform = lambda s: sigmoid(s)
-        elif subcode == 'HARD_SWISH':
-            transform = lambda s: s * tf.nn.relu6(s + np.float32(3.)) * np.float32(1./ 6.)
-        elif subcode == 'SILU':
-            transform = lambda s: s*sigmoid(s)
-        elif subcode == 'RSQRT':
-            # transform = lambda s: 1.0 / sqrt(s) if s > 0 else 127 * o_tensor['quantization']['scale'][0]
-            transform = lambda s: 1.0 / sqrt(s) if s > 0 else o_tensor['quantization']['zero_point'][0] * 1.0
-
-        input_scale = i_tensor['quantization']['scale']
-        output_scale = o_tensor['quantization']['scale']
-
-        input_offset = i_tensor['quantization']['zero_point'][0]
-        output_offset = o_tensor['quantization']['zero_point'][0]
-
-        sn.input_offset = input_offset
-        sn.output_offset = output_offset
-
-        sn.ActivationOptions.input_range_radius = -1
-        lut, first, last, step_vals, step_indices = LUTPopulateInt8(input_scale[0], input_offset, output_scale[0], output_offset, transform)
-
-        if VCI_LUT:
-            sn.ActivationOptions.vci_int8 = len(weights)
-            fmt = "{}B".format(len(lut))
-            weights += struct.pack(fmt, *lut)
-        else:
-            sn.ActivationOptions.vci_int8 = -1
-        sn.ActivationOptions.lut_int8 = len(weights)
-        fmt = "{}b".format(len(step_vals))
-        weights += struct.pack(fmt, *step_vals)
-        sn.ActivationOptions.idx_int8 = len(weights)
-        fmt = "{}b".format(len(step_indices))
-        weights += struct.pack(fmt, *step_indices)
-        sn.ActivationOptions.count = len(step_vals)
-
-        sn.input_shift = -1
-        sn.input_multiplier = 1 
-        sn.output_multiplier = len(weights)
-        sn.output_shift = len(weights)
-
-        subnode_array.append(sn)
                 
     elif subcode == 'PRELU':
         sn.type = BuiltinOperator.PRELU
@@ -4626,23 +4745,27 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
 
         i_tensor = tensors[subop['inputs'][0]]
         o_tensor = tensors[subop['outputs'][0]]
-        begin = get_numpy_data_from_index(subop['inputs'][1], tensors, buffers)
-        end = get_numpy_data_from_index(subop['inputs'][2], tensors, buffers)
+        begin_tmp = get_numpy_data_from_index(subop['inputs'][1], tensors, buffers)
+        end_tmp = get_numpy_data_from_index(subop['inputs'][2], tensors, buffers)
         stride = get_numpy_data_from_index(subop['inputs'][3], tensors, buffers)
-
+       
         oshape, _ = channels_first_shape(o_tensor['shape'])
-        begin, _ = channels_first_shape(begin)
-        end, _ = channels_first_shape(end)
+        ishape, _ = channels_first_shape(i_tensor['shape'])
+        begin_tmp, _ = channels_first_shape(begin_tmp)
+        end_tmp, _ = channels_first_shape(end_tmp)
         stride, _ = channels_first_shape(stride)
+        
+        begin_mask = opts['begin_mask']
+        end_mask = opts['end_mask']        
 
         oshape = pad_list(oshape, 4)
-        begin = pad_list(begin, 4, 0)
-        end = pad_list(end, 4)
+        begin = pad_list(begin_tmp, 4, 0)
+        end = pad_list(end_tmp, 4)
         stride = pad_list(stride, 4)
 
         sn.SliceOptions.begin = begin
         sn.SliceOptions.stride = stride
-        sn.SliceOptions.end = [_ if _ != 0 else oshape[idx] for idx, _ in enumerate(end)]
+        sn.SliceOptions.end = [_ if _ != 0 else oshape[idx]*stride[idx] for idx, _ in enumerate(end)]
 
         subnode_array.append(sn)
 
@@ -4830,7 +4953,7 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
         i_tensor = tensors[subop['inputs'][0]]
         f_tensor = tensors[subop['inputs'][1]]
         filter_data = get_numpy_data(f_tensor, buffers)
-
+        
         k, h, w, c = 1, 1, 1, 1
         if len(f_tensor['shape']) == 1:
             c = tuple(f_tensor['shape'])[0]
@@ -4850,11 +4973,12 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
         sn.MinMaxOptions.filter_shape_dims = [k, c, h, w]    
 
         input_offset = i_tensor['quantization']['zero_point'][0]
+        input_scale = i_tensor['quantization']['scale']
+
         output_offset = o_tensor['quantization']['zero_point'][0] 
         output_scale = o_tensor['quantization']['scale']
         
         filter_offset = f_tensor['quantization']['zero_point'][0]
-        input_scale = i_tensor['quantization']['scale']
         filter_scale = f_tensor['quantization']['scale']
         
         input_multiplier, input_shift = get_quantized_multiplier(input_scale)
@@ -4889,6 +5013,7 @@ engine_graphs_nx, external_inputs, external_outputs, already_external_producer, 
         weights += struct.pack(fmt, *filter_shift)
         
         sn.MinMaxOptions.filter_offset = filter_offset
+        sn.MinMaxOptions.left_shift = 8
 
         sn.MinMaxOptions.filter_data = len(weights)
         fmt = "{}b".format(len(filter_data.flatten()))

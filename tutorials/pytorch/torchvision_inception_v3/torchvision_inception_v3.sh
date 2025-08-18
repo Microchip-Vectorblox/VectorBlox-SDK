@@ -23,17 +23,20 @@ if [ ! -f $VBX_SDK/tutorials/imagenetv2_rgb_norm_100x299x299x3.npy ]; then
     generate_npy $VBX_SDK/tutorials/imagenetv2_rgb_20x224x224x3.npy -o $VBX_SDK/tutorials/imagenetv2_rgb_norm_100x299x299x3.npy -s 299 299  --norm 
 fi
 
-echo "Downloading torchvision_inception_v3..."
+echo "Checking for torchvision_inception_v3 files..."
+if [ ! -f torchvision_inception_v3.tflite ]; then
 # model details @ https://pytorch.org/vision/0.14/models/inception.html
 python $VBX_SDK/tutorials/torchvision_to_onnx.py inception_v3 -i 299
+fi
 
-echo "Running ONNX2TF..."
-onnx2tf -cind input.1 $VBX_SDK/tutorials/imagenetv2_rgb_norm_100x299x299x3.npy [[[[0.485,0.456,0.406]]]] [[[[0.229,0.224,0.225]]]] \
+if [ ! -f torchvision_inception_v3.tflite ]; then
+   echo "Running ONNX2TF..."
+   onnx2tf -cind input.1 $VBX_SDK/tutorials/imagenetv2_rgb_norm_100x299x299x3.npy [[[[0.485,0.456,0.406]]]] [[[[0.229,0.224,0.225]]]] \
 -i inception_v3.onnx \
 --output_signaturedefs \
 --output_integer_quantized_tflite
-cp saved_model/inception_v3_full_integer_quant.tflite torchvision_inception_v3.tflite
-
+   cp saved_model/inception_v3_full_integer_quant.tflite torchvision_inception_v3.tflite
+fi
 if [ -f torchvision_inception_v3.tflite ]; then
    tflite_preprocess torchvision_inception_v3.tflite  --mean 123.675 116.28 103.53 --scale 58.4 57.1 57.38
 fi

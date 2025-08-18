@@ -23,7 +23,8 @@ if [ ! -f $VBX_SDK/tutorials/face_rgb_norm_20x288x512x3.npy ]; then
     generate_npy $VBX_SDK/tutorials/face_rgb_20x273x481x3.npy -o $VBX_SDK/tutorials/face_rgb_norm_20x288x512x3.npy -s 288 512  --norm 
 fi
 
-echo "Downloading scrfd_500m_bnkps..."
+echo "Checking for scrfd_500m_bnkps files..."
+
 # model details @ https://insightface.ai/scrfd
 # ONNX file was created through the following process:
 # git clone https://github.com/deepinsight/insightface.git
@@ -33,15 +34,17 @@ echo "Downloading scrfd_500m_bnkps..."
 
 [ -f scrfd_500m_bnkps.onnx ] || wget -q --no-check-certificate https://github.com/Microchip-Vectorblox/assets/releases/download/assets/scrfd_500m_bnkps.onnx
 
-echo "Running ONNX2TF..."
-onnx2tf -cind input.1 $VBX_SDK/tutorials/face_rgb_norm_20x288x512x3.npy [[[[0.5,0.5,0.5]]]] [[[[0.502,0.502,0.502]]]] \
+
+if [ ! -f scrfd_500m_bnkps.tflite ]; then
+   echo "Running ONNX2TF..."
+   onnx2tf -cind input.1 $VBX_SDK/tutorials/face_rgb_norm_20x288x512x3.npy [[[[0.5,0.5,0.5]]]] [[[[0.502,0.502,0.502]]]] \
 --overwrite_input_shape input.1:1,3,288,512 \
 --output_names_to_interrupt_model_conversion "487" "488" "489" "462" "463" "464" "437" "438" "439" \
 -i scrfd_500m_bnkps.onnx \
 --output_signaturedefs \
 --output_integer_quantized_tflite
-cp saved_model/scrfd_500m_bnkps_full_integer_quant.tflite scrfd_500m_bnkps.tflite
-
+   cp saved_model/scrfd_500m_bnkps_full_integer_quant.tflite scrfd_500m_bnkps.tflite
+fi
 if [ -f scrfd_500m_bnkps.tflite ]; then
    tflite_preprocess scrfd_500m_bnkps.tflite  --mean 127.5 127.5 127.5 --scale 128 128 128
 fi

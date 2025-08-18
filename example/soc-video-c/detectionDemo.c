@@ -2,27 +2,27 @@
 #include "detectionDemo.h"
 #include "frameDrawing/draw_assist.h"
 #include "frameDrawing/draw.h"
-#include <sys/time.h>
-#include <errno.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <sys/mman.h>
-#include "pdma/pdma_helpers.h"
 
 //#define DRAW_SCALER
-#define PDMA 1
-extern int update_Classifier;
+
 extern volatile uint32_t*  PROCESSING_FRAME_ADDRESS;
 extern volatile uint32_t*  PROCESSING_NEXT_FRAME_ADDRESS;
+extern volatile uint32_t*  SCALER_BASE_ADDRESS;
 extern volatile uint32_t*  SAVED_FRAME_SWAP;
 extern int fps;
 
-extern uint32_t* overlay_draw_frame;
+extern int set_screen_width;
+extern int set_screen_height;
+extern int set_screen_y_offset;
+extern int set_screen_x_offset;
+extern int set_screen_stride;
 
+
+#ifndef HLS_RESIZE
 extern volatile uint32_t* RED_DDR_FRAME_START_ADDR;
 extern volatile uint32_t* GREEN_DDR_FRAME_START_ADDR;
 extern volatile uint32_t* BLUE_DDR_FRAME_START_ADDR;
-
+#endif
 static inline void* virt_to_phys(vbx_cnn_t* vbx_cnn,void* virt){
 	return (char*)(virt) + vbx_cnn->dma_phys_trans_offset;
 }
@@ -60,6 +60,23 @@ static inline uint32_t* virt_loop() {
 }
 #endif
 
+#if VBX_SOC_DRIVER
+#include <sys/time.h>
+#include <errno.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include "pdma/pdma_helpers.h"
+
+
+extern uint32_t *linux_draw_frame;
+extern uint32_t* overlay_draw_frame;
+
+static inline uint32_t* virt_loop_linux(uint32_t* loop) {
+	uint32_t offset = ((uint32_t)(uintptr_t)overlay_draw_frame) - 0x70000000;
+	return (uint32_t*)((char*)(linux_draw_frame) + offset);
+}
+
 static int gettimediff_us_2(struct timeval start, struct timeval end) {
 	int sec = end.tv_sec - start.tv_sec;
 	int usec = end.tv_usec - start.tv_usec;
@@ -74,16 +91,13 @@ int32_t pdma_ch_transfer(uint64_t output_data_phys, void* source_buffer,int offs
 	uint64_t srcbuf=0x3000000000 + (uint64_t)(uintptr_t)virt_to_phys(vbx_cnn, source_buffer);
 	return pdma_ch_cpy(output_data_phys + offset, srcbuf, size, channel);
 }
-
-#if VBX_SOC_DRIVER
-extern uint32_t *linux_draw_frame;
-static inline uint32_t* virt_loop_linux(uint32_t* loop) {
-	uint32_t offset = ((uint32_t)(uintptr_t)overlay_draw_frame) - 0x70000000;
-	return (uint32_t*)((char*)(linux_draw_frame) + offset);
-}
+#else
+	
+	#include "../tinyprintf.h"
+	
 #endif
 
-#define POSE 1
+
 #define BOXES_LEN 1024
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
@@ -108,6 +122,17 @@ short detectionDemoInit(vbx_cnn_t* the_vbx_cnn, struct model_descr_t* models, ui
 	}
 
 	size_t input_length = 0;
+#ifdef HLS_RESIZE
+	input_length = model_get_input_length(object_model->model, 0) *
+		((int)model_get_input_datatype(object_model->model, 0) + 1);
+	object_model->pipelined_input_buffer[0] = vbx_allocate_dma_buffer(the_vbx_cnn, input_length, 0);
+	object_model->pipelined_input_buffer[1] = vbx_allocate_dma_buffer(the_vbx_cnn, input_length, 0);
+	object_model->model_io_buffers[0] =(uintptr_t)object_model->pipelined_input_buffer[0];
+	if(!object_model->pipelined_input_buffer[0] ||!object_model->pipelined_input_buffer[1]){
+			printf("Memory allocation issue for model input buffers.\n");
+			return -1;	
+	}
+#else	
 	input_length = model_get_input_length(object_model->model, 0) *
 		((int)model_get_input_datatype(object_model->model, 0) + 1);
 	object_model->model_input_buffer = vbx_allocate_dma_buffer(the_vbx_cnn, input_length, 0);
@@ -116,6 +141,7 @@ short detectionDemoInit(vbx_cnn_t* the_vbx_cnn, struct model_descr_t* models, ui
 		printf("Memory allocation issue for model input buffers.\n");
 		return -1;	
 	}
+#endif
 
 	// Determine the input and output lengths of the Object Model, and re-order output buffers if applicable
 	int num_outputs = model_get_num_outputs(object_model->model);
@@ -147,12 +173,21 @@ short detectionDemoInit(vbx_cnn_t* the_vbx_cnn, struct model_descr_t* models, ui
 
 int runDetectionDemo(struct model_descr_t* models, vbx_cnn_t* the_vbx_cnn, uint8_t modelIdx){
 	int err, status;
+	err = 0;
+	status = 0;
 	struct timeval m_run1, m_run2;
 	struct model_descr_t *object_model = models+modelIdx;
 	int* input_dims = model_get_input_shape(object_model->model, 0);	
 	uint32_t offset;
 	//Start processing the network if not already running - 1st pass only (frame 0 )
 	if(!object_model->is_running) {		
+#ifdef HLS_RESIZE	
+	resize_image_hls(SCALER_BASE_ADDRESS,(uint32_t*)(intptr_t)(*PROCESSING_FRAME_ADDRESS),
+				set_screen_width, set_screen_height, set_screen_stride, 
+				set_screen_x_offset, set_screen_y_offset,
+				(uint8_t*)virt_to_phys(the_vbx_cnn, (void*)object_model->pipelined_input_buffer[object_model->buf_idx]),
+				input_dims[3],input_dims[2]);
+#else
 		*BLUE_DDR_FRAME_START_ADDR  = (2*input_dims[3]*input_dims[2]);
 		*GREEN_DDR_FRAME_START_ADDR = (1*input_dims[3]*input_dims[2]);
 		*RED_DDR_FRAME_START_ADDR   = (0*input_dims[3]*input_dims[2]); 
@@ -180,10 +215,19 @@ int runDetectionDemo(struct model_descr_t* models, vbx_cnn_t* the_vbx_cnn, uint8
 #endif
 		object_model->model_io_buffers[0] = (uintptr_t)object_model->model_input_buffer - the_vbx_cnn->dma_phys_trans_offset;	
 //		object_model->model_io_buffers[0] = (uintptr_t)model_get_test_input(object_model->model,0);
-		
+#endif		
 		// Start model
+#if VBX_SOC_DRIVER		
 		gettimeofday(&m_run1, NULL);
+#endif		
 		err = vbx_cnn_model_start(the_vbx_cnn, object_model->model, object_model->model_io_buffers); 
+#ifdef HLS_RESIZE
+		resize_image_hls_start(SCALER_BASE_ADDRESS,(uint32_t*)(intptr_t)(*PROCESSING_NEXT_FRAME_ADDRESS),
+                set_screen_width, set_screen_height, set_screen_stride,
+                set_screen_x_offset, set_screen_y_offset,
+                (uint8_t*)virt_to_phys(the_vbx_cnn, (void*)object_model->pipelined_input_buffer[!object_model->buf_idx]),
+                input_dims[3], input_dims[2]);
+#endif
 		if(err != 0) return err;
 		object_model->is_running = 1;
 	}
@@ -195,10 +239,16 @@ int runDetectionDemo(struct model_descr_t* models, vbx_cnn_t* the_vbx_cnn, uint8
 	} else if (status == 0) { // When  model is completed
 
 		//Swap set of pipelined output buffers
+#ifdef HLS_RESIZE
+		object_model->model_io_buffers[0] = (uintptr_t)object_model->pipelined_input_buffer[!object_model->buf_idx];
+
+        //wait for next frame scaling to finish, if it hasn't already
+		resize_image_hls_wait(SCALER_BASE_ADDRESS);
+#else		
 		offset = (*PROCESSING_NEXT_FRAME_ADDRESS) - 0x70000000;
 		object_model->model_input_buffer = (uint8_t*)(uintptr_t)(SCALER_FRAME_ADDRESS + offset);
 		object_model->model_io_buffers[0] = (uintptr_t)object_model->model_input_buffer - the_vbx_cnn->dma_phys_trans_offset;	
-
+#endif
 		int num_outputs = model_get_num_outputs(object_model->model);
 		for (int o = 0; o < num_outputs; o++) {			
 			object_model->model_io_buffers[o+1] = (uintptr_t)object_model->pipelined_output_buffers[!object_model->buf_idx][o];
@@ -208,13 +258,21 @@ int runDetectionDemo(struct model_descr_t* models, vbx_cnn_t* the_vbx_cnn, uint8
 		err = vbx_cnn_model_start(the_vbx_cnn, object_model->model, object_model->model_io_buffers); 
 		if(err != 0) return err;
 		object_model->is_running = 1;
-	
-		
+#ifdef HLS_RESIZE
+		resize_image_hls_start(SCALER_BASE_ADDRESS,(uint32_t*)(intptr_t)(*PROCESSING_NEXT_FRAME_ADDRESS),
+				set_screen_width, set_screen_height, set_screen_stride, 
+				set_screen_x_offset, set_screen_y_offset,
+				(uint8_t*)virt_to_phys(the_vbx_cnn, (void*)object_model->pipelined_input_buffer[object_model->buf_idx]),
+				input_dims[3],input_dims[2]);
+#endif
+
+    if(!strcmp(object_model->post_process_type, "PIXEL")){
+            pixel_draw(object_model->model, (vbx_cnn_io_ptr_t*)object_model->pipelined_output_buffers[object_model->buf_idx],the_vbx_cnn);
+    }
+#if VBX_SOC_DRIVER
 		gettimeofday(&m_run2, NULL);
 		m_run_fps = 1000/ (gettimediff_us_2(m_run1, m_run2) / 1000);
-
-
-	if (PDMA && strcmp(object_model->post_process_type, "PIXEL")){
+	if (PDMA){
 		vbx_cnn_io_ptr_t pdma_buffer[model_get_num_outputs(object_model->model)];
 		int output_offset=0;
 		for(int o =0; o<(int)model_get_num_outputs(object_model->model);o++){
@@ -223,14 +281,12 @@ int runDetectionDemo(struct model_descr_t* models, vbx_cnn_t* the_vbx_cnn, uint8
 			pdma_buffer[o] = (vbx_cnn_io_ptr_t)(pdma_mmap_t + output_offset);
 			output_offset+= output_length;
 		}
-		pprint_post_process(object_model->name, object_model->post_process_type, object_model->model, (vbx_cnn_io_ptr_t*)pdma_buffer,1,fps,the_vbx_cnn);
-	}else if(!strcmp(object_model->post_process_type, "PIXEL")){
-		pixel_draw(object_model->model, (vbx_cnn_io_ptr_t*)object_model->pipelined_output_buffers[object_model->buf_idx],the_vbx_cnn);
-		pprint_post_process(object_model->name, object_model->post_process_type, object_model->model, (vbx_cnn_io_ptr_t*)object_model->pipelined_output_buffers[object_model->buf_idx],1,fps,the_vbx_cnn);
+		pprint_post_process(object_model->name, object_model->post_process_type, object_model->model, (fix16_t**)(uintptr_t)pdma_buffer,1,fps);
 	}
-	else{
-		pprint_post_process(object_model->name, object_model->post_process_type, object_model->model, (vbx_cnn_io_ptr_t*)object_model->pipelined_output_buffers[object_model->buf_idx],1,fps,the_vbx_cnn);
-	}
+#else
+		pprint_post_process(object_model->name, object_model->post_process_type, object_model->model, (fix16_t**)(uintptr_t)object_model->pipelined_output_buffers[object_model->buf_idx],1,fps);
+
+#endif
 	object_model->buf_idx = !object_model->buf_idx;
 		
 	}

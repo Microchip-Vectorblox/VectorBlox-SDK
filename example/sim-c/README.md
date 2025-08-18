@@ -2,11 +2,11 @@
 - Setup `VBX_SDK` environment (see steps  [here](../../README.md))
 - Generate a vnnx network from the [tutorials directory](../../tutorials/)
 
-- Or alternatively, [sample networks]( https://github.com/Microchip-Vectorblox/VectorBlox-SoC-Video-Kit-Demo/releases/download/release-v2.0.2/samples_V1000_2.0.2.zip) can be downloaded directly 
+- Or alternatively, [sample networks]( https://github.com/Microchip-Vectorblox/VectorBlox-SoC-Video-Kit-Demo/releases/download/release-v2.0.3/samples_V1000_2.0.3.zip) can be downloaded directly 
     ```
-    wget --no-check-certificate https://github.com/Microchip-Vectorblox/VectorBlox-SoC-Video-Kit-Demo/releases/download/release-v2.0.2/samples_V1000_2.0.2.zip
+    wget --no-check-certificate https://github.com/Microchip-Vectorblox/VectorBlox-SoC-Video-Kit-Demo/releases/download/release-v2.0.3/samples_V1000_2.0.3.zip
  
-    unzip samples_V1000_2.0.2.zip
+    unzip samples_V1000_2.0.3.zip
     ```
 ## Using  `sim-run-model` to benchmark networks
 - Activate the `VBX_SDK` environment
@@ -17,9 +17,9 @@
     
 ## Examples usage 
 ```
-./sim-run-model  ~/samples_V1000_2.0.2/mobilenet-v2.vnnx ../../tutorials/test_images/oreo.jpg CLASSIFY
-./sim-run-model  ~/samples_V1000_2.0.2/mobilenet-v2.vnnx ../../tutorials/test_images/oreo.jpg  
-./sim-run-model  ~/samples_V1000_2.0.2/mobilenet-v2.vnnx TEST_DATA
+./sim-run-model  ~/samples_V1000_2.0.3/mobilenet-v2.vnnx ../../tutorials/test_images/oreo.jpg CLASSIFY
+./sim-run-model  ~/samples_V1000_2.0.3/mobilenet-v2.vnnx ../../tutorials/test_images/oreo.jpg  
+./sim-run-model  ~/samples_V1000_2.0.3/mobilenet-v2.vnnx TEST_DATA
 ```
     
 

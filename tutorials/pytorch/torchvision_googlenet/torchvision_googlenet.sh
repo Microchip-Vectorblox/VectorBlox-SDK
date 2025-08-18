@@ -23,17 +23,20 @@ if [ ! -f $VBX_SDK/tutorials/imagenetv2_rgb_norm_20x224x224x3.npy ]; then
     generate_npy $VBX_SDK/tutorials/imagenetv2_rgb_20x224x224x3.npy -o $VBX_SDK/tutorials/imagenetv2_rgb_norm_20x224x224x3.npy -s 224 224  --norm 
 fi
 
-echo "Downloading torchvision_googlenet..."
+echo "Checking for torchvision_googlenet files..."
+if [ ! -f torchvision_googlenet.tflite ]; then
 # model details @ https://pytorch.org/vision/0.14/models/googlenet.html
 python $VBX_SDK/tutorials/torchvision_to_onnx.py googlenet
+fi
 
-echo "Running ONNX2TF..."
-onnx2tf -cind input.1 $VBX_SDK/tutorials/imagenetv2_rgb_norm_20x224x224x3.npy [[[[0.485,0.456,0.406]]]] [[[[0.229,0.224,0.225]]]] \
+if [ ! -f torchvision_googlenet.tflite ]; then
+   echo "Running ONNX2TF..."
+   onnx2tf -cind input.1 $VBX_SDK/tutorials/imagenetv2_rgb_norm_20x224x224x3.npy [[[[0.485,0.456,0.406]]]] [[[[0.229,0.224,0.225]]]] \
 -i googlenet.onnx \
 --output_signaturedefs \
 --output_integer_quantized_tflite
-cp saved_model/googlenet_full_integer_quant.tflite torchvision_googlenet.tflite
-
+   cp saved_model/googlenet_full_integer_quant.tflite torchvision_googlenet.tflite
+fi
 if [ -f torchvision_googlenet.tflite ]; then
    tflite_preprocess torchvision_googlenet.tflite  --mean 123.675 116.28 103.53 --scale 58.4 57.1 57.38
 fi

@@ -97,7 +97,7 @@ class Parser:
                 if apply_activation:
                     predictions[box_index + 0 * region_size] = self.logistic(predictions[box_index + 0 * region_size])
                     predictions[box_index + 1 * region_size] = self.logistic(predictions[box_index + 1 * region_size])
-                if version in ['ultra5', '5']:
+                if version in ['ultra5', '5','7']:
                     # ultralytics yolov5 (and master yolov3)
                     x = (col + predictions[box_index + 0 * region_size] * 2 - 0.5) / width * net_w
                     y = (row + predictions[box_index + 1 * region_size] * 2 - 0.5) / height * net_h
@@ -110,6 +110,9 @@ class Parser:
                     try:
                         h_exp = exp(predictions[box_index + 3 * region_size])
                         w_exp = exp(predictions[box_index + 2 * region_size])
+                        if version in ['x']:
+                            h_exp = h_exp / height * net_h
+                            w_exp = w_exp / width * net_w
                     except OverflowError:
                         continue
 

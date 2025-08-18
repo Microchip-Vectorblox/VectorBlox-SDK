@@ -50,6 +50,10 @@ function install_venv() {
     python -m pip install -e $SCRIPTDIR/python/vbx
 	
 	python -m pip install posix-ipc
+    cd $SCRIPTDIR/vbx_env/lib/python*/site-packages/openvino/ &&\
+    echo $'import warnings\nwarnings.filterwarnings("ignore")\nimport logging\nlogging.basicConfig(level=logging.INFO)' >> __init__.py &&\
+    sed -i 's/WARNING/ERROR/g' tools/pot/utils/logger.py
+    cd -
     deactivate
 }
 

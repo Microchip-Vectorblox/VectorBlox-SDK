@@ -5,7 +5,7 @@
 #include "frameDrawing/draw.h"
 #include <string.h>
 #include <sys/time.h>
-#include "pdma/pdma_helpers.h"
+
 extern volatile uint32_t* PROCESSING_FRAME_ADDRESS;
 extern volatile uint32_t* PROCESSING_NEXT_FRAME_ADDRESS;
 extern volatile uint32_t* PROCESSING_NEXT2_FRAME_ADDRESS;
@@ -24,6 +24,7 @@ extern uint32_t* overlay_draw_frame;
 
 // Globals Specification
 #if VBX_SOC_DRIVER
+	#include "pdma/pdma_helpers.h"
 	#define MAX_TRACKS 48
 	#define DB_LENGTH 32
 	extern int delete_embedding_mode;
@@ -346,13 +347,20 @@ int runRecognitionDemo(struct model_descr_t* models, vbx_cnn_t* the_vbx_cnn, uin
 		tracksInit(recognition_model);
 	}
 	// Start processing the network if not already running - 1st pass (frame 0)
-	if(!detect_model->is_running) {		
+	if(!detect_model->is_running) {	
+#ifdef HLS_RESIZE
+		resize_image_hls(SCALER_BASE_ADDRESS,(uint32_t*)(intptr_t)(*PROCESSING_FRAME_ADDRESS),
+				screen_width, screen_height, screen_stride, screen_x_offset, screen_y_offset,
+				(uint8_t*)virt_to_phys(the_vbx_cnn, (void*)detect_model->model_input_buffer),
+				detectInputW, detectInputH);
+#else
 		*BLUE_DDR_FRAME_START_ADDR  =  SCALER_FRAME_ADDRESS + (2*detectInputW*detectInputH);
 		*GREEN_DDR_FRAME_START_ADDR =  SCALER_FRAME_ADDRESS + (1*detectInputW*detectInputH);
 		*RED_DDR_FRAME_START_ADDR   =  SCALER_FRAME_ADDRESS + (0*detectInputW*detectInputH);
 		offset = (*PROCESSING_FRAME_ADDRESS) - 0x70000000;
 		detect_model->model_input_buffer = (uint8_t*)(uintptr_t)(SCALER_FRAME_ADDRESS + offset);
 		detect_model->model_io_buffers[0] = (uintptr_t)detect_model->model_input_buffer - the_vbx_cnn->dma_phys_trans_offset;	
+#endif		
 		//detect_model->model_io_buffers[0] = (uintptr_t)model_get_test_input(detect_model->model,0);
 		// Start Detection model
 		err = vbx_cnn_model_start(the_vbx_cnn, detect_model->model, detect_model->model_io_buffers);		

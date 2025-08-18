@@ -1,0 +1,26 @@
+diff --git a/yolo/tools/solver.py b/yolo/tools/solver.py
+index 03bbcd2..8d3decf 100644
+--- a/yolo/tools/solver.py
++++ b/yolo/tools/solver.py
+@@ -170,8 +170,6 @@ class ExportModel(BaseModel):
+         export_mode = False
+         format = cfg.task.format
+         # TODO check if we can use export mode for all formats
+-        if self.format == "coreml":
+-            export_mode = True
+ 
+         super().__init__(cfg, export_mode=export_mode)
+         self.cfg = cfg
+diff --git a/yolo/utils/export_utils.py b/yolo/utils/export_utils.py
+index 906bc56..fe4eaaa 100644
+--- a/yolo/utils/export_utils.py
++++ b/yolo/utils/export_utils.py
+@@ -52,7 +52,7 @@ class ModelExporter:
+             dummy_input,
+             onnx_model_path,
+             input_names=["input"],
+-            output_names=self.output_names,
++            # output_names=self.output_names,
+             dynamic_axes=dynamic_axes,
+         )
+ 

@@ -17,11 +17,11 @@ struct model_descr_t{
     int time_ms;
     vbx_cnn_io_ptr_t* model_io_buffers;
     uint8_t* model_input_buffer;
-    fix16_t* model_output_buffer[12];
-    size_t model_output_length[12];
+    fix16_t* model_output_buffer[64];
+    size_t model_output_length[64];
     // the following pipelined I/O buffers used for objectDetection
     uint8_t* pipelined_input_buffer[2];
-    fix16_t* pipelined_output_buffers[2][12];
+    fix16_t* pipelined_output_buffers[2][64];
     int buf_idx;
     int is_running;
     track_t** pTracks;

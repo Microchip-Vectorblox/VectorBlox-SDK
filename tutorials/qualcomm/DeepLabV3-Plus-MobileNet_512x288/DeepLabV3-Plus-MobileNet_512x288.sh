@@ -23,9 +23,11 @@ if [ ! -f $VBX_SDK/tutorials/coco2017_rgb_norm_20x288x512x3.npy ]; then
     generate_npy $VBX_SDK/tutorials/coco2017_rgb_20x416x416x3.npy -o $VBX_SDK/tutorials/coco2017_rgb_norm_20x288x512x3.npy -s 288 512  --norm 
 fi
 
-echo "Downloading DeepLabV3-Plus-MobileNet_512x288..."
+echo "Checking for DeepLabV3-Plus-MobileNet_512x288 files..."
+
 # model details @ 
-[ -f DeepLabV3-Plus-MobileNet_512x288.onnx ] || wget -q --no-check-certificate https://huggingface.co/qualcomm/DeepLabV3-Plus-MobileNet/resolve/e0501ac875458bf2fde9d6c910b1fc43ac701fa6/DeepLabV3-Plus-MobileNet.onnx
+if [ ! -f DeepLabV3-Plus-MobileNet_512x288.tflite ]; then
+   [ -f DeepLabV3-Plus-MobileNet_512x288.onnx ] || wget -q --no-check-certificate https://huggingface.co/qualcomm/DeepLabV3-Plus-MobileNet/resolve/e0501ac875458bf2fde9d6c910b1fc43ac701fa6/DeepLabV3-Plus-MobileNet.onnx
 python - <<EOF
 import onnx
 import numpy as np
@@ -55,20 +57,24 @@ onnx.save(model, 'DeepLabV3-Plus-MobileNet.dynamic.onnx')
 EOF
 
 onnxsim DeepLabV3-Plus-MobileNet.dynamic.onnx DeepLabV3-Plus-MobileNet_512x288.onnx --overwrite-input-shape 1,3,288,512
+fi
 
-echo "Running ONNX2TF..."
-onnx2tf -cind image $VBX_SDK/tutorials/coco2017_rgb_norm_20x288x512x3.npy [[[0.,0.,0.]]] [[[1.,1.,1.]]] \
+
+
+if [ ! -f DeepLabV3-Plus-MobileNet_512x288.tflite ]; then
+   echo "Running ONNX2TF..."
+   onnx2tf -cind image $VBX_SDK/tutorials/coco2017_rgb_norm_20x288x512x3.npy [[[0.,0.,0.]]] [[[1.,1.,1.]]] \
 -i DeepLabV3-Plus-MobileNet_512x288.onnx \
 --output_signaturedefs \
 --output_integer_quantized_tflite
-cp saved_model/DeepLabV3-Plus-MobileNet_512x288_full_integer_quant.tflite DeepLabV3-Plus-MobileNet_512x288.tflite
-
+   cp saved_model/DeepLabV3-Plus-MobileNet_512x288_full_integer_quant.tflite DeepLabV3-Plus-MobileNet_512x288.tflite
+fi
 if [ -f DeepLabV3-Plus-MobileNet_512x288.tflite ]; then
    tflite_preprocess DeepLabV3-Plus-MobileNet_512x288.tflite  --scale 255
 fi
 
 if [ -f DeepLabV3-Plus-MobileNet_512x288.pre.tflite ]; then
-   tflite_postprocess DeepLabV3-Plus-MobileNet_512x288.pre.tflite  --dataset VOC \
+   tflite_postprocess DeepLabV3-Plus-MobileNet_512x288.pre.tflite  --post-process-layer PIXEL_VOC \
 --opacity 0.8 \
 --height 1080 \
 --width 1920

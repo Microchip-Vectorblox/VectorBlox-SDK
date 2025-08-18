@@ -18,13 +18,15 @@ if [ -z $VBX_SDK ]; then
 fi
 source $VBX_SDK/vbx_env/bin/activate
 
-echo "Downloading yolov8s_FULL..."
+echo "Checking for yolov8s_FULL files..."
+
 # model details @ https://github.com/ultralytics/ultralytics/
 [ -f coco.names ] || wget -q https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
 if [ ! -f yolov8s_FULL.tflite ]; then
     yolo export model=yolov8s.pt format=tflite int8 || true
     cp yolov8s_saved_model/yolov8s_full_integer_quant.tflite yolov8s_FULL.tflite
 fi
+
 
 if [ -f yolov8s_FULL.tflite ]; then
    tflite_preprocess yolov8s_FULL.tflite  --scale 255

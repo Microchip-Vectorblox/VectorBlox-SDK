@@ -20,7 +20,7 @@ C_SRCS+=../../drivers/vectorblox/vbx_cnn_api.c ../../drivers/vectorblox/vbx_cnn_
 CXX_SRCS=run-model.cpp
 C_OBJS=$(addsuffix .o,$(addprefix obj/,$(abspath $(C_SRCS))))
 CXX_OBJS=$(addsuffix .o,$(addprefix obj/,$(abspath $(CXX_SRCS))))
-C_FLAGS+=-Wall -O3 -I../../drivers/vectorblox/ -I../postprocess/libfixmath/ -Ipdma/ -I../postprocess/ -MD -DVBX_SOC_DRIVER
+C_FLAGS+=-Wall -O3 -I../../drivers/vectorblox/ -I../postprocess/libfixmath/ -Ipdma/ -I../postprocess/ -MD -DVBX_SOC_DRIVER -DPDMA
 
 $(CXX_OBJS) $(C_OBJS):
 $(C_OBJS) $(CXX_OBJS):obj/%.o:%

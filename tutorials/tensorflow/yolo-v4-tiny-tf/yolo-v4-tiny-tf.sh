@@ -23,16 +23,23 @@ if [ ! -f $VBX_SDK/tutorials/coco2017_rgb_20x416x416x3.npy ]; then
     generate_npy $VBX_SDK/tutorials/coco2017_rgb_20x416x416x3.npy -o $VBX_SDK/tutorials/coco2017_rgb_20x416x416x3.npy -s 416 416 
 fi
 
-echo "Downloading yolo-v4-tiny-tf..."
+echo "Checking for yolo-v4-tiny-tf files..."
+
 # model details @ https://github.com/openvinotoolkit/open_model_zoo/tree/2021.4.2/models/public/yolo-v4-tiny-tf/
 [ -f coco.names ] || wget -q https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
-omz_downloader --name yolo-v4-tiny-tf
-DOWNLOAD_DIR=public/yolo-v4-tiny-tf
-python $DOWNLOAD_DIR/keras-YOLOv3-model-set/tools/model_converter/convert.py $DOWNLOAD_DIR/keras-YOLOv3-model-set/cfg/yolov4-tiny.cfg $DOWNLOAD_DIR/yolov4-tiny.weights yolo-v4-tiny.h5
+if [ ! -f yolo-v4-tiny-tf.tflite ]; then
+   omz_downloader --name yolo-v4-tiny-tf
+   DOWNLOAD_DIR=public/yolo-v4-tiny-tf
+   python $DOWNLOAD_DIR/keras-YOLOv3-model-set/tools/model_converter/convert.py $DOWNLOAD_DIR/keras-YOLOv3-model-set/cfg/yolov4-tiny.cfg $DOWNLOAD_DIR/yolov4-tiny.weights yolo-v4-tiny.h5
+fi
 
-echo "Generating TF Lite..."
-tflite_quantize yolo-v4-tiny.h5 yolo-v4-tiny-tf.tflite -d $VBX_SDK/tutorials/coco2017_rgb_20x416x416x3.npy \
+
+
+if [ ! -f yolo-v4-tiny-tf.tflite ]; then
+   echo "Generating TF Lite..."
+   tflite_quantize yolo-v4-tiny.h5 yolo-v4-tiny-tf.tflite -d $VBX_SDK/tutorials/coco2017_rgb_20x416x416x3.npy \
 --scale 255. --shape 1 416 416 3
+fi
 
 if [ -f yolo-v4-tiny-tf.tflite ]; then
    tflite_preprocess yolo-v4-tiny-tf.tflite  --scale 255

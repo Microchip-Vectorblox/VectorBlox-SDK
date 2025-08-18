@@ -23,16 +23,23 @@ if [ ! -f $VBX_SDK/tutorials/imagenetv2_rgb_20x160x160x3.npy ]; then
     generate_npy $VBX_SDK/tutorials/imagenetv2_rgb_20x224x224x3.npy -o $VBX_SDK/tutorials/imagenetv2_rgb_20x160x160x3.npy -s 160 160 
 fi
 
-echo "Downloading mobilenet_v1_050_160..."
-# model details @ https://tfhub.dev/google/imagenet/mobilenet_v1_050_160/classification/5
-wget -q https://tfhub.dev/google/imagenet/mobilenet_v1_050_160/classification/5?tf-hub-format=compressed -O mobilenet_v1_050_160.tar.gz
-mkdir -p mobilenet_v1_050_160
-tar -xzf mobilenet_v1_050_160.tar.gz -C mobilenet_v1_050_160
-python ../../saved_model_signature.py mobilenet_v1_050_160
+echo "Checking for mobilenet_v1_050_160 files..."
 
-echo "Generating TF Lite..."
-tflite_quantize mobilenet_v1_050_160 mobilenet_v1_050_160.tflite -d $VBX_SDK/tutorials/imagenetv2_rgb_20x160x160x3.npy \
+# model details @ https://tfhub.dev/google/imagenet/mobilenet_v1_050_160/classification/5
+if [ ! -f mobilenet_v1_050_160.tflite ]; then
+   wget -q https://tfhub.dev/google/imagenet/mobilenet_v1_050_160/classification/5?tf-hub-format=compressed -O mobilenet_v1_050_160.tar.gz
+   mkdir -p mobilenet_v1_050_160
+   tar -xzf mobilenet_v1_050_160.tar.gz -C mobilenet_v1_050_160
+   python ../../saved_model_signature.py mobilenet_v1_050_160
+fi
+
+
+
+if [ ! -f mobilenet_v1_050_160.tflite ]; then
+   echo "Generating TF Lite..."
+   tflite_quantize mobilenet_v1_050_160 mobilenet_v1_050_160.tflite -d $VBX_SDK/tutorials/imagenetv2_rgb_20x160x160x3.npy \
 --scale 255. --shape 1 160 160 3
+fi
 
 if [ -f mobilenet_v1_050_160.tflite ]; then
    tflite_preprocess mobilenet_v1_050_160.tflite  --scale 255

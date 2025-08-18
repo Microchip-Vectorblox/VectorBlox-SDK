@@ -11,7 +11,7 @@ from vbx.generate.utils import load_input
 import vbx.postprocess.dataset as dataset
 import vbx.postprocess.classifier as classifier
 import vbx.postprocess.yolo as yolo
-import model_run as mr
+import vbx.sim.model_run as mr
 from non_max_merge import *
 
 colors = dataset.coco_colors
@@ -566,12 +566,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
     img = cv2.imread(args.image)
 
-    arr, input_shape = mr.preprocess_img_to_input_array(img, args.model, args.bgr, args.scale, args.mean)
+    arr, input_height, input_width, channels_last = mr.preprocess_img_to_input_array(img, args.model, args.bgr, args.scale, args.mean)
     outputs, output_shapes = mr.model_run(arr, args.model)
-    channels_last = input_shape[-1] < input_shape[-3]
-    input_height, input_width = input_shape[-2], input_shape[-1]
+    
     if channels_last:
-        input_height, input_width = input_shape[-3], input_shape[-2]
+        outputs = mr.transpose_outputs(outputs)
 
     labels = None
     if args.labels:

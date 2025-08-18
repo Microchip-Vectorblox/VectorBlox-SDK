@@ -23,18 +23,21 @@ if [ ! -f $VBX_SDK/tutorials/coco2017_rgb_norm_20x640x640x3.npy ]; then
     generate_npy $VBX_SDK/tutorials/coco2017_rgb_20x416x416x3.npy -o $VBX_SDK/tutorials/coco2017_rgb_norm_20x640x640x3.npy -s 640 640  --norm 
 fi
 
-echo "Downloading yolov9-m..."
+echo "Checking for yolov9-m files..."
+
 # model details @ https://github.com/ramonhollands/YOLO
-if [ ! -f v9-m.cut.onnx ]; then
-git clone -b add-export-task https://github.com/ramonhollands/YOLO
-sed -i '173d;174d;' YOLO/yolo/tools/solver.py
-python3 -m venv yolo_venv
-source yolo_venv/bin/activate
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-pip install lightning hydra-core requests rich pillow einops wandb pycocotools onnx
-cd YOLO && python yolo/lazy.py task=export model=v9-m task.format=onnx && cd ..
-deactivate
-source $VBX_SDK/vbx_env/bin/activate
+[ -f coco.names ] || wget -q https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
+if [ ! -f yolov9-m.tflite ]; then
+   if [ ! -f v9-m.cut.onnx ]; then
+       git clone -b add-export-task https://github.com/ramonhollands/YOLO
+       sed -i '173d;174d;' YOLO/yolo/tools/solver.py
+       python3 -m venv yolo_venv
+       source yolo_venv/bin/activate
+       pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+       pip install lightning hydra-core requests rich pillow einops wandb pycocotools onnx
+       cd YOLO && python yolo/lazy.py task=export model=v9-m task.format=onnx && cd ..
+       deactivate
+       source $VBX_SDK/vbx_env/bin/activate
 
 python - << EOF
 import onnx
@@ -45,16 +48,19 @@ outputs = ["1_class_scores_small", "4_class_scores_medium", "7_class_scores_larg
 onnx.utils.extract_model("./YOLO/v9-m.onnx", "v9-m.cut.onnx", ["input"], outputs)
 EOF
 
+   fi
 fi
 
-echo "Running ONNX2TF..."
-onnx2tf -cind input $VBX_SDK/tutorials/coco2017_rgb_norm_20x640x640x3.npy [[[[0.,0.,0.]]]] [[[[1.,1.,1.]]]] \
+
+if [ ! -f yolov9-m.tflite ]; then
+   echo "Running ONNX2TF..."
+   onnx2tf -cind input $VBX_SDK/tutorials/coco2017_rgb_norm_20x640x640x3.npy [[[[0.,0.,0.]]]] [[[[1.,1.,1.]]]] \
 -dgc \
 -i v9-m.cut.onnx \
 --output_signaturedefs \
 --output_integer_quantized_tflite
-cp saved_model/v9-m.cut_full_integer_quant.tflite yolov9-m.tflite
-
+   cp saved_model/v9-m.cut_full_integer_quant.tflite yolov9-m.tflite
+fi
 if [ -f yolov9-m.tflite ]; then
    tflite_preprocess yolov9-m.tflite  --scale 255
 fi
@@ -66,7 +72,7 @@ fi
 
 if [ -f yolov9-m.vnnx ]; then
     echo "Running Simulation..."
-    python $VBX_SDK/example/python/yoloInfer.py yolov9-m.vnnx $VBX_SDK/tutorials/test_images/dog.jpg -v 8 -t 0.3 
+    python $VBX_SDK/example/python/yoloInfer.py yolov9-m.vnnx $VBX_SDK/tutorials/test_images/dog.jpg -v 8 -t 0.3 -l coco.names 
     echo "C Simulation Command:"
     echo '$VBX_SDK/example/sim-c/sim-run-model yolov9-m.vnnx $VBX_SDK/tutorials/test_images/dog.jpg ULTRALYTICS'
 fi

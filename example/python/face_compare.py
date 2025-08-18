@@ -4,7 +4,7 @@ import numpy as np
 import argparse
 import os
 import math
-import model_run as mr
+import vbx.sim.model_run as mr
 from vbx.generate.utils import openvino_infer, openvino_input_shape
 from vbx.generate.utils import load_input
 
@@ -33,12 +33,12 @@ if __name__ == "__main__":
     scale = args.scale
     
     img1 = cv2.imread(args.image1)
-    arr1, input_shape = mr.preprocess_img_to_input_array(img1, args.model, args.bgr, scale)
+    arr1, _, _, _ = mr.preprocess_img_to_input_array(img1, args.model, args.bgr, scale)
     outputs1, output_shapes1 = mr.model_run(arr1, args.model)
     image1_out = outputs1[0]
 
     img2 = cv2.imread(args.image2)
-    arr2, input_shape = mr.preprocess_img_to_input_array(img2, args.model, args.bgr, scale)
+    arr2, _, _, _ = mr.preprocess_img_to_input_array(img2, args.model, args.bgr, scale)
     outputs2, output_shapes2 = mr.model_run(arr2, args.model)
     image2_out = outputs2[0]
     

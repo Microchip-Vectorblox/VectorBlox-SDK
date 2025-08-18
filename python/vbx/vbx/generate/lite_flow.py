@@ -9,6 +9,7 @@ import numpy as np
 from .split_tflite import generate_split_graphs
 from .vnnx_tflite import generate_vnnx_from_json_subgraphs, get_graph_activations
 from .infer_tflite import get_tflite_io
+from .transform_tflite import load_graph, verify_graph, save_graph, transform_graph, default_passes
 
 
 def transpose_io_to_vnnx(x):
@@ -144,17 +145,27 @@ def main():
     parser.add_argument('-v', '--vbx_version', choices=[2, 3], type=int, default=2, help=argparse.SUPPRESS)
     args = parser.parse_args()
 
-    tflite_to_vnnx(args.tflite,
-                   args.size_conf,
-                   output_filename=args.output,
-                   start_layer=args.start_layer,
-                   end_layer=args.end_layer,
-                   inputs=args.inputs,
-                   mean=args.mean,
-                   scale=args.scale,
-                   rgb=(not args.bgr),
-                   debug=args.debug,
-                   vbx_version=args.vbx_version)
+    graph, dir_obj = load_graph(args.tflite)
+
+    if verify_graph(graph, 'MXP', 'FIA', False, optimized=False):
+        graph_ = transform_graph(graph, default_passes, False)
+        optimized_tflite = save_graph(args.tflite.replace('.tflite', '.tr.tflite'), dir_obj, graph_, copy=args.debug)
+
+        if verify_graph(graph, 'MXP', 'FIA', False, optimized=True):
+            tflite_to_vnnx(optimized_tflite, #args.tflite
+                           args.size_conf,
+                           output_filename=args.output,
+                           start_layer=args.start_layer,
+                           end_layer=args.end_layer,
+                           inputs=args.inputs,
+                           mean=args.mean,
+                           scale=args.scale,
+                           rgb=(not args.bgr),
+                           debug=args.debug,
+                           vbx_version=args.vbx_version)
+
+    if not dir_obj is None:
+        dir_obj.cleanup()
 
 if __name__ == "__main__":
     main()

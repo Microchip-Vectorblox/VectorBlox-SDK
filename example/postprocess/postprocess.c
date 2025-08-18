@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <assert.h>
 #include <sys/time.h>
+#include <stdbool.h>
 
 #ifdef HARDWARE_DRAW
  #include "imageScaler/scaler.h"
@@ -1084,7 +1085,7 @@ char *imagenet_classes[1000] = {
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 
-#define TIMING 0
+
 #if TIMING
 static int gettimediff_us2(struct timeval start, struct timeval end) {
 	int sec = end.tv_sec - start.tv_sec;
@@ -1925,9 +1926,6 @@ static struct timeval tv1, tv2,tv0;
 gettimeofday(&tv0, NULL); 	
 #endif
 
-		int8_t* cached_output=malloc(8400*(4+num_classes)*sizeof(*cached_output));
-		memcpy(cached_output,output,8400*(4+num_classes)*sizeof(*cached_output));
-		
 #if TIMING
 gettimeofday(&tv1, NULL); 
 printf("copy over outputs: %d ms\n",(gettimediff_us2(tv0, tv1) / 1000));	
@@ -1940,8 +1938,8 @@ printf("copy over outputs: %d ms\n",(gettimediff_us2(tv0, tv1) / 1000));
 			int max_score_ind = 0;
 					
 			for(int c = 4; c <(4+num_classes);c++){
-				if(cached_output[i*(4+num_classes) +c]>  max_score){
-					max_score=cached_output[i*(4+num_classes) + c];
+				if(output[i*(4+num_classes) +c]>  max_score){
+					max_score=output[i*(4+num_classes) + c];
 					max_score_ind = c-4;
 				}
 			}
@@ -1950,10 +1948,10 @@ printf("copy over outputs: %d ms\n",(gettimediff_us2(tv0, tv1) / 1000));
 				fix16_boxes[total_box_count].confidence = int8_to_fix16_single(max_score,f16_scale,zero_point);
 				fix16_boxes[total_box_count].class_id = max_score_ind;
 
-				fix16_t x = int8_to_fix16_single(cached_output[i*(4+num_classes)+0],f16_scale, zero_point);
-				fix16_t y = int8_to_fix16_single(cached_output[i*(4+num_classes)+1],f16_scale, zero_point);
-				fix16_t w = int8_to_fix16_single(cached_output[i*(4+num_classes)+2],f16_scale, zero_point);
-				fix16_t h = int8_to_fix16_single(cached_output[i*(4+num_classes)+3],f16_scale, zero_point);
+				fix16_t x = int8_to_fix16_single(output[i*(4+num_classes)+0],f16_scale, zero_point);
+				fix16_t y = int8_to_fix16_single(output[i*(4+num_classes)+1],f16_scale, zero_point);
+				fix16_t w = int8_to_fix16_single(output[i*(4+num_classes)+2],f16_scale, zero_point);
+				fix16_t h = int8_to_fix16_single(output[i*(4+num_classes)+3],f16_scale, zero_point);
 
 				fix16_boxes[total_box_count].xmin = fix16_to_int((x - fix16_mul(w,fix16_half))*input_w);
 				fix16_boxes[total_box_count].xmax = fix16_to_int((x + fix16_mul(w,fix16_half))*input_w);
@@ -1977,7 +1975,6 @@ printf("total time: %d ms\n",(gettimediff_us2(tv0, tv2) / 1000));
 printf("memcpy: %d ms\n",(gettimediff_us2(tv0, tv1) / 1000));		
 printf("processing: %d ms\n",(gettimediff_us2(tv1, tv2) / 1000));		
 #endif
-		free(cached_output);
 		return clean_box_count;
 
 
@@ -2068,12 +2065,16 @@ int ultralytics_process_box_int8(fix16_t *xywh, int8_t* arr, fix16_t angle, cons
 }
 
 
-int post_process_ultra_int8(int8_t **outputs, int* outputs_shape[], fix16_t *post, fix16_t thresh, int zero_points[], fix16_t scale_outs[], const int max_boxes, const int is_obb, const int is_pose)
+int post_process_ultra_int8(int8_t **outputs, int* outputs_shape[], fix16_t *post, fix16_t thresh, int zero_points[], fix16_t scale_outs[], const int max_boxes, const int is_obb, const int is_pose,int num_outputs)
 {
 	int total_count = 0;
 	int C = outputs_shape[0][1];	// number of classes (80 for COCO)
 	fix16_t fix16_log_odds = fix16_log(fix16_div(thresh, fix16_sub(fix16_one, thresh)));
-	for(int o=0; o<6; o+=2){
+	bool has_argmax = false;
+	if (num_outputs ==9)
+		has_argmax = true;
+	int outputs_per_stride = 2; //increment should be done by stride sets, (usually 3 sets)
+	for(int o=0; o < 6; o+=outputs_per_stride){
 		int H = outputs_shape[o][2];
 		int W = outputs_shape[o][3];
 		int8_t *out8 = outputs[o];
@@ -2085,12 +2086,24 @@ int post_process_ultra_int8(int8_t **outputs, int* outputs_shape[], fix16_t *pos
 		for(int h=0; h<H; h++)
 			for(int w=0; w<W; w++)
 				valid_locations[h][w] = 0;
-		int8_t* outPtr = out8;
-		for(int c=0; c<C; c++){
+		if(has_argmax){
+			uint8_t *argmax = outputs[(o/2+6)];
 			for(int h=0; h<H; h++){
 				for(int w=0; w<W; w++){
-					if(*outPtr++>i8_log_odds){	// only process likely scores
+					uint8_t C = argmax[h*W+w];
+					if(out8[C*H*W + h*W + w]>i8_log_odds){	// only process likely scores
 						valid_locations[h][w] = 1;
+					}
+				}
+			}
+		}
+		else{
+			for(int c=0; c<C; c++){
+				for(int h=0; h<H; h++){
+					for(int w=0; w<W; w++){
+						if(out8[ c*H*W + h*W + w]>i8_log_odds){	// only process likely scores
+							valid_locations[h][w] = 1;
+						}
 					}
 				}
 			}
@@ -2527,7 +2540,7 @@ int post_process_blazeface(object_t faces[],fix16_t* scores,fix16_t* points,int 
 	return facesLength;
 }
 
-int pprint_post_process(const char *name, const char *pptype, model_t *model, vbx_cnn_io_ptr_t *o_buffers,int int8_flag, int fps,vbx_cnn_t *the_vbx_cnn)
+int pprint_post_process(const char *name, const char *pptype, model_t *model, fix16_t **o_buffers,int int8_flag, int fps)
 {
 	char label[256];
 	const int topk=5;
@@ -2537,7 +2550,7 @@ int pprint_post_process(const char *name, const char *pptype, model_t *model, vb
 	int input_h = in_dims[total_dims-2];
 	int input_w = in_dims[total_dims-1];
 	
-#if HARDWARE_DRAW
+#ifdef HARDWARE_DRAW
 	fix16_t hratio = fix16_div(fix16_from_int(1080),fix16_from_int(input_h));
 	fix16_t wratio = fix16_div(fix16_from_int(1920),fix16_from_int(input_w));
 	
@@ -2654,7 +2667,7 @@ int pprint_post_process(const char *name, const char *pptype, model_t *model, vb
 			fix16_t y = plate->box[1];
 			fix16_t w = plate->box[2];
 			fix16_t h = plate->box[3];
-#if HARDWARE_DRAW
+#ifdef HARDWARE_DRAW
 			x = fix16_sub(x, fix16_div(w, fix16_two));
 			y = fix16_sub(y, fix16_div(h, fix16_two));
 			if( x > 0 &&  y > 0 && w > 0 && h > 0) {
@@ -2723,7 +2736,7 @@ int pprint_post_process(const char *name, const char *pptype, model_t *model, vb
 			fix16_t y = face->box[1];
 			fix16_t w = face->box[2] - face->box[0];
 			fix16_t h = face->box[3] - face->box[1];
-#if HARDWARE_DRAW
+#ifdef HARDWARE_DRAW
 			if( x > 0 &&  y > 0 && w > 0 && h > 0) {
 				x = fix16_mul(x, wratio);
 				y = fix16_mul(y, hratio);
@@ -2781,7 +2794,7 @@ int pprint_post_process(const char *name, const char *pptype, model_t *model, vb
 					class_name =  imagenet_classes[idx-1];
 				}
 			} 
-#if HARDWARE_DRAW
+#ifdef HARDWARE_DRAW
 			snprintf(label,sizeof(label),"%d %s %d%%",i,class_name,(score*100)>>16);
 			draw_label(label,20,36+i*34,overlay_draw_frame,2048,1080,WHITE);
 #else
@@ -2874,13 +2887,6 @@ int pprint_post_process(const char *name, const char *pptype, model_t *model, vb
 			fix16_t f16_scale = (fix16_t)model_get_output_scale_fix16_value(model,0); // get output scale
 			int32_t zero_point = model_get_output_zeropoint(model,0); // get output zero
 			if(int8_flag){
-				int total_len=0;
-				for(int o=0; o<num_outputs;o++){
-					total_len += model_get_output_length(model,o);
-					printf("%d: %d\n",o,(int)model_get_output_length(model,o));
-				}
-				printf("total len: %d\n",total_len);
-				
 				valid_boxes = post_process_ultra_nms_int8(output_int8, 8400, input_h, input_w,f16_scale,zero_point, thresh, iou, boxes, max_boxes, 80);
 			} else{
 				valid_boxes = post_process_ultra_nms(output, 8400, input_h, input_w, thresh, iou, boxes, NULL, max_boxes, 80, 0, 0);
@@ -2888,37 +2894,41 @@ int pprint_post_process(const char *name, const char *pptype, model_t *model, vb
 
 		} else if (!strcmp(pptype, "ULTRALYTICS")){
 			class_names = coco_classes;
-			int* outputs_shape[6];
-			int8_t *outputs_int8[6];
-			int zero_points[6];
-			fix16_t scale_outs[6];
+			int* outputs_shape[9];
+			int8_t *outputs_int8[9];
+			int zero_points[9];
+			fix16_t scale_outs[9];
 
 			// put outputs in this order
 			// type:  {class_stride8, box_stride8,   class_stride16,  box_stride16,    class_stride32,  box_stride32}
 			// shape: {[1,80,H/8,W/8],[1,64,H/8,W/8],[1,80,H/16,W/16],[1,64,H/16,W/16],[1,80,H/32,W/32],[1,64,H/32,W/32]}
 			int32_t w_min = 0x7FFFFFFF;	// minimum width must be stride32
 			int32_t w_max = 0;			// maximum width must be stride8
-			int* shapes[6];
-			for(int n=0; n<6; n++){
+			int* shapes[9];
+			
+			for(int n=0; n<num_outputs; n++){
 				shapes[n] = model_get_output_shape(model,n);
 				w_min = MIN(shapes[n][3], w_min);
 				w_max = MAX(shapes[n][3], w_max);
 			}
-			for(int i=0; i<6; i++){
-				int o;	// proper order
+
+			for(int i=0; i<num_outputs; i++){
+				int o=2;	// proper order
 				if(shapes[i][3]==w_min) o=4;		// stride 8
 				else if(shapes[i][3]==w_max) o=0;	// stride 32
 				else o=2;							// stride 16
-				if(shapes[i][1]==64) o+=1;			// box (otherwise class)
+				if(shapes[i][1]==64) o+=1;
+				else if(shapes[i][1] == 1) o= o/2 + 6;			// box (otherwise class)
 				outputs_shape[o] = shapes[i];
 				outputs_int8[o] = (int8_t*)(uintptr_t)o_buffers[i];
 				zero_points[o]=model_get_output_zeropoint(model,i);
 				scale_outs[o]=model_get_output_scale_fix16_value(model,i);
-			}
+			}			
+			
 			const int max_detections = 200;
 			fix16_t post_buffer[max_detections*(4+80)];
 			int post_len;
-			post_len = post_process_ultra_int8(outputs_int8, outputs_shape, post_buffer, thresh, zero_points, scale_outs, max_detections, 0, 0);
+			post_len = post_process_ultra_int8(outputs_int8, outputs_shape, post_buffer, thresh, zero_points, scale_outs, max_detections, 0, 0,num_outputs);
 			valid_boxes = post_process_ultra_nms(post_buffer, post_len, input_h, input_w, thresh, iou, boxes, NULL, boxes_len, 80, 0, 0);
 
 		} else if (!strcmp(pptype, "YOLOV3") || !strcmp(pptype, "YOLOV4")){ //tiny yolo v3/v4 COCO
@@ -3128,7 +3138,7 @@ int pprint_post_process(const char *name, const char *pptype, model_t *model, vb
 				sprintf(class_str, "%d", boxes[i].class_id);
 			}
 
-#if HARDWARE_DRAW
+#ifdef HARDWARE_DRAW
 			int x = boxes[i].xmin,y=boxes[i].ymin;
 			int w = boxes[i].xmax-boxes[i].xmin;
 			int h = boxes[i].ymax-boxes[i].ymin;
@@ -3269,11 +3279,11 @@ int pprint_post_process(const char *name, const char *pptype, model_t *model, vb
 		}	
 		const int max_detections = 200;
 		fix16_t post_buffer[max_detections*(4+1+17*3)];
-		post_len = post_process_ultra_int8(outputs_int8, outputs_shape, post_buffer, thresh, zero_points, scale_outs, max_detections, 0, split);
+		post_len = post_process_ultra_int8(outputs_int8, outputs_shape, post_buffer, thresh, zero_points, scale_outs, max_detections, 0, split,num_outputs);
 
 		valid_boxes = post_process_ultra_nms(post_buffer, post_len, input_h, input_w, thresh, iou, boxes, poses, boxes_len, 1, 0, 1);
 
-#if HARDWARE_DRAW
+#ifdef HARDWARE_DRAW
 		int radius = 6;
 		int skeleton [19][2] = {{0,1} , {0,2}, {1,3}, {2,4}, {0,5}, {6,0}, {5,7}, {7,9}, {6,8}, {8,10}, {5,6}, {5,11}, {6,12}, {11,12}, {11,13}, {13,15}, {12,14}, {14,16}};
 		int color;
@@ -3413,7 +3423,7 @@ int pprint_post_process(const char *name, const char *pptype, model_t *model, vb
 		const int max_detections = 4000;
 		fix16_t post_buffer[max_detections*4+15+1];
 		int post_len;
-		post_len = post_process_ultra_int8(outputs_int8, outputs_shape, post_buffer, thresh, zero_points, scale_outs, max_detections, 1, 0);
+		post_len = post_process_ultra_int8(outputs_int8, outputs_shape, post_buffer, thresh, zero_points, scale_outs, max_detections, 1, 0, num_outputs);
 		valid_boxes = post_process_ultra_nms(post_buffer, post_len, input_h, input_w, thresh, iou, boxes, NULL, boxes_len, 15, 1, 0);
 		char class_str[50];
 		for(int i=0;i<valid_boxes;++i){
@@ -3436,7 +3446,7 @@ int pprint_post_process(const char *name, const char *pptype, model_t *model, vb
 					fix16_to_float(boxes[i].angle));
 		}
 	}  else {
-#if HARDWARE_DRAW
+#ifdef HARDWARE_DRAW
 #else		
 		printf("Unknown post processing type %s, skipping post process\n", pptype);	
 #endif	

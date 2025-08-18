@@ -18,7 +18,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-#define PDMA 1
+
 //#define fix16_exp fix16_exp_lut
 fix16_t fix16_logistic_activate(fix16_t x);
 
@@ -140,9 +140,10 @@ int post_process_ultra_nms(fix16_t *output, int output_boxes, int input_h, int i
  * @param max_boxes Max number of boxes 
  * @param is_obb Check if postprocess is done for oriented-bounding boxes
  * @param is_pose Check if postprocess is done for pose detection
+ * @param num_outputs Number of outputs the model contains
  * @return int Number of detected boxes
  */
-int post_process_ultra_int8(int8_t **outputs, int* outputs_shape[], fix16_t *post, fix16_t thresh, int zero_points[], fix16_t scale_outs[], const int max_boxes, const int is_obb, const int is_pose);
+int post_process_ultra_int8(int8_t **outputs, int* outputs_shape[], fix16_t *post, fix16_t thresh, int zero_points[], fix16_t scale_outs[], const int max_boxes, const int is_obb, const int is_pose, int num_outputs);
 /**
  * @brief Post-processing for Yolov2/V3/V4/V5. Returns number of detected objects, along with  boxes containing coordinates, confidence, and class information.
  * 
@@ -271,7 +272,7 @@ int decodeMultiplePoses_int8(poses_t poses[],int8_t *scores, int8_t *offsets,int
  * @param the_vbx_cnn vectorblox cnn object
  * @return int return 0 if successfully able to run postprocessing, -1 if postprocessing type is not valid.
  */
-int pprint_post_process(const char *name, const char *pptype, model_t *model, vbx_cnn_io_ptr_t *o_buffers,int int8_flag, int fps,vbx_cnn_t *the_vbx_cnn);
+int pprint_post_process(const char *name, const char *pptype, model_t *model, fix16_t **o_buffers,int int8_flag, int fps);
 
 #ifdef __cplusplus
 }

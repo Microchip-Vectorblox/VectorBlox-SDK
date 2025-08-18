@@ -11,8 +11,8 @@ import pprint
 import shutil
 import json
 
-from .utils import match_shape, calc_diff, create_tensor_data
-from .split_tflite import generate_split_graphs, generate_join_graphs 
+from .utils import match_shape, calc_diff, generate_inputs_outputs
+from .split_tflite import generate_split_graphs
 
 import subprocess
 import shlex
@@ -204,40 +204,6 @@ def print_diff(src_name, dst_name, src, dst, info, verbose):
         print()
 
 
-def generate_inputs_outputs(tflite_model_binary):
-    interpreter = tf.lite.Interpreter(model_content=tflite_model_binary)
-    interpreter.allocate_tensors()
-    input_details = interpreter.get_input_details()
-    input_values = {}
-    min_value = 0
-    max_value = 20
-    for i,input_detail in enumerate(input_details):
-        if input_detail["dtype"] == np.float32:
-            min_value = -1
-            max_value = 1
-        elif input_detail["dtype"] == np.int8:
-            min_value = -128
-            max_value = 127
-        elif input_detail["dtype"] == np.uint8:
-            min_value = 0
-            max_value = 255
-        input_value = create_tensor_data(
-                input_detail["dtype"],
-                input_detail["shape"],
-                min_value=min_value,
-                max_value=max_value,
-                int8_range=False)
-        interpreter.set_tensor(input_detail["index"], input_value)
-        input_values.update({"i{}".format(i): input_value})
-    interpreter.invoke()
-
-    output_details = interpreter.get_output_details()
-    output_values = {}
-    for o, output_detail in enumerate(output_details):
-        output_values.update({ "o{}".format(o): interpreter.get_tensor(output_detail["index"])})
-    return input_values, output_values
-
-
 def compare_tflite(tflite_graph_name, size_conf='V1000', error_rate_threshold=0, error_threshold=1, verbose=False):
     if verbose:
         print(tflite_graph_name)
@@ -289,17 +255,17 @@ def compare_tflite(tflite_graph_name, size_conf='V1000', error_rate_threshold=0,
                 flattened.append(vnnx_i.flatten())
 
             outputs = vnnx_model.run(flattened)
-            # outputs = vnnx_model.run(vnnx_model.test_input)
 
             for (out_name,tfl_out), idx in zip(example['outputs'].items(), range(vnnx_model.num_outputs)):
                 output = outputs[idx]
+                output = outputs[0] #TODO all multi-outputs written to output[0]
                 output = output.reshape(vnnx_model.output_shape[idx])
                 vnnx_io['outputs'][out_name] = output
                 if verbose:
                     npy_output_name = tflite_graph_name.replace('.tflite', '.' + out_name + '.vnnx.npy')
                     np.save(npy_output_name, output)
                 #TODO use vbx.sim outputs
-                output = np.load(os.path.join(os.path.dirname(tflite_graph_name), 'vnnx.output.{}.npy'.format(idx)))
+                # output = np.load(os.path.join(os.path.dirname(tflite_graph_name), 'vnnx.output.{}.npy'.format(idx)))
 
             tfl_out = match_shape(tfl_out, vnnx_model.output_shape[idx], to_tfl=False) # from tfl shape to vnnx
             

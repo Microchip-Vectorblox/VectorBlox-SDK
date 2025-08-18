@@ -23,8 +23,10 @@ if [ ! -f $VBX_SDK/tutorials/coco2017_rgb_norm_20x320x320x3.npy ]; then
     generate_npy $VBX_SDK/tutorials/coco2017_rgb_20x416x416x3.npy -o $VBX_SDK/tutorials/coco2017_rgb_norm_20x320x320x3.npy -s 320 320  --norm 
 fi
 
-echo "Downloading torchvision_ssdlite320_mobilenet_v3_large..."
+echo "Checking for torchvision_ssdlite320_mobilenet_v3_large files..."
+
 # model details @ https://pytorch.org/vision/0.14/models/ssdlite.html
+if [ ! -f torchvision_ssdlite320_mobilenet_v3_large.tflite ]; then
 python $VBX_SDK/tutorials/torchvision_to_onnx.py ssdlite320_mobilenet_v3_large -i 320
 python - <<EOF
 import onnx
@@ -33,15 +35,18 @@ model_outputs = ['/head/regression_head/module_list.0/module_list.0.1/Conv_outpu
 onnx.utils.extract_model('ssdlite320_mobilenet_v3_large.onnx', 'ssdlite320_mobilenet_v3_large.onnx', model_inputs, model_outputs)
 EOF
 sor4onnx --input_onnx_file_path ssdlite320_mobilenet_v3_large.onnx --old_new '/transform/Unsqueeze_7_output_0' 'images' --mode full --search_mode prefix_match --output_onnx_file_path ssdlite320_mobilenet_v3_large.onnx
+fi
 
-echo "Running ONNX2TF..."
-onnx2tf -cind images $VBX_SDK/tutorials/coco2017_rgb_norm_20x320x320x3.npy [[[[0.5,0.5,0.5]]]] [[[[0.5,0.5,0.5]]]] \
+
+if [ ! -f torchvision_ssdlite320_mobilenet_v3_large.tflite ]; then
+   echo "Running ONNX2TF..."
+   onnx2tf -cind images $VBX_SDK/tutorials/coco2017_rgb_norm_20x320x320x3.npy [[[[0.5,0.5,0.5]]]] [[[[0.5,0.5,0.5]]]] \
 -ois images:1,3,320,320 \
 -i ssdlite320_mobilenet_v3_large.onnx \
 --output_signaturedefs \
 --output_integer_quantized_tflite
-cp saved_model/ssdlite320_mobilenet_v3_large_full_integer_quant.tflite torchvision_ssdlite320_mobilenet_v3_large.tflite
-
+   cp saved_model/ssdlite320_mobilenet_v3_large_full_integer_quant.tflite torchvision_ssdlite320_mobilenet_v3_large.tflite
+fi
 if [ -f torchvision_ssdlite320_mobilenet_v3_large.tflite ]; then
    tflite_preprocess torchvision_ssdlite320_mobilenet_v3_large.tflite  --mean 127.5 127.5 127.5 --scale 127.5 127.5 127.5
 fi

@@ -23,17 +23,20 @@ if [ ! -f $VBX_SDK/tutorials/imagenetv2_rgb_norm_20x227x227x3.npy ]; then
     generate_npy $VBX_SDK/tutorials/imagenetv2_rgb_20x224x224x3.npy -o $VBX_SDK/tutorials/imagenetv2_rgb_norm_20x227x227x3.npy -s 227 227  --norm 
 fi
 
-echo "Downloading torchvision_squeezenet1_0..."
+echo "Checking for torchvision_squeezenet1_0 files..."
+if [ ! -f torchvision_squeezenet1_0.tflite ]; then
 # model details @ https://pytorch.org/vision/0.14/models/generated/torchvision.models.squeezenet1_0.html#torchvision.models.squeezenet1_0
 python $VBX_SDK/tutorials/torchvision_to_onnx.py squeezenet1_0 -i 227
+fi
 
-echo "Running ONNX2TF..."
-onnx2tf -cind input.1 $VBX_SDK/tutorials/imagenetv2_rgb_norm_20x227x227x3.npy [[[[0.485,0.456,0.406]]]] [[[[0.229,0.224,0.225]]]] \
+if [ ! -f torchvision_squeezenet1_0.tflite ]; then
+   echo "Running ONNX2TF..."
+   onnx2tf -cind input.1 $VBX_SDK/tutorials/imagenetv2_rgb_norm_20x227x227x3.npy [[[[0.485,0.456,0.406]]]] [[[[0.229,0.224,0.225]]]] \
 -i squeezenet1_0.onnx \
 --output_signaturedefs \
 --output_integer_quantized_tflite
-cp saved_model/squeezenet1_0_full_integer_quant.tflite torchvision_squeezenet1_0.tflite
-
+   cp saved_model/squeezenet1_0_full_integer_quant.tflite torchvision_squeezenet1_0.tflite
+fi
 if [ -f torchvision_squeezenet1_0.tflite ]; then
    tflite_preprocess torchvision_squeezenet1_0.tflite  --mean 123.675 116.28 103.53 --scale 58.4 57.1 57.38
 fi

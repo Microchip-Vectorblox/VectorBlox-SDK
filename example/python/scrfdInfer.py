@@ -7,7 +7,7 @@ import json
 import vbx.postprocess.scrfd
 import sys
 
-import model_run as mr
+import vbx.sim.model_run as mr
 
 np.set_printoptions(threshold=sys.maxsize)
 
@@ -28,12 +28,12 @@ def main():
     img = cv2.imread(args.image)
     scale = args.scale
 
-    arr, input_shape = mr.preprocess_img_to_input_array(img, args.model, args.bgr, scale, args.mean)
+    arr, input_height, input_width, channels_last = mr.preprocess_img_to_input_array(img, args.model, args.bgr, scale, args.mean)
     outputs, _ = mr.model_run(arr, args.model)
-    channels_last = input_shape[-1] < input_shape[-3]
-    h, w = input_shape[-2], input_shape[-1]
+
+    h, w = input_height, input_width
+    
     if channels_last:
-        h, w = input_shape[-3], input_shape[-2]
         outputs=mr.transpose_outputs(outputs)
 
     #sort the outputs for preprocessing
@@ -60,9 +60,9 @@ def main():
     for i,l in enumerate(idx):
         ordered_outputs.append(outputs[idx[i][0]].flatten().squeeze())
 
-    faces = vbx.postprocess.scrfd.scrfd(ordered_outputs, w, h ,args.threshold, args.nms_threshold)
-    if img.shape != input_shape:
-        img = cv2.resize(img,(w,h))
+    faces = vbx.postprocess.scrfd.scrfd(ordered_outputs, input_width, input_height ,args.threshold, args.nms_threshold)
+    if img.shape[:2] != (input_height, input_width):
+        img = cv2.resize(img,(input_width, input_height))
 
 
     for f in faces:

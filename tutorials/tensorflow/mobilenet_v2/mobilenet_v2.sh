@@ -23,19 +23,26 @@ if [ ! -f $VBX_SDK/tutorials/imagenetv2_rgb_20x224x224x3.npy ]; then
     generate_npy $VBX_SDK/tutorials/imagenetv2_rgb_20x224x224x3.npy -o $VBX_SDK/tutorials/imagenetv2_rgb_20x224x224x3.npy -s 224 224 
 fi
 
-echo "Downloading mobilenet_v2..."
+echo "Checking for mobilenet_v2 files..."
+
 # model details @ https://keras.io/api/applications/mobilenet/
+if [ ! -f mobilenet_v2.tflite ]; then
 python - <<EOF
 import tensorflow as tf
 from tensorflow.keras.applications import MobileNetV2
 mobilenet_v2_model = MobileNetV2(input_shape=(224, 224, 3), weights='imagenet', classifier_activation=None)
 mobilenet_v2_model.save('saved_model/')
 EOF
+fi
 
-echo "Generating TF Lite..."
-tflite_quantize saved_model mobilenet_v2.tflite -d $VBX_SDK/tutorials/imagenetv2_rgb_20x224x224x3.npy \
+
+
+if [ ! -f mobilenet_v2.tflite ]; then
+   echo "Generating TF Lite..."
+   tflite_quantize saved_model mobilenet_v2.tflite -d $VBX_SDK/tutorials/imagenetv2_rgb_20x224x224x3.npy \
 --mean 127.5 \
 --scale 127.5 --shape 1 224 224 3
+fi
 
 if [ -f mobilenet_v2.tflite ]; then
    tflite_preprocess mobilenet_v2.tflite  --mean 127.5 --scale 127.5

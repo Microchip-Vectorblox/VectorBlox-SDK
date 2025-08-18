@@ -5,7 +5,6 @@ import sys
 import tensorflow as tf
 import onnxruntime
 import onnx
-import openvino.inference_engine as ie
 import argparse
 import pathlib
 
@@ -64,7 +63,9 @@ def create_tensor_data(dtype, shape, min_value=-100, max_value=100, int8_range=F
     value = np.random.randint(min_value, max_value + 1, shape)
     if int8_range: #Generate consecutive values uint8
         arr = np.zeros(np.prod(shape))
-        arr_inc = [arr[0]+ (i%255) for i in range(len(arr))]
+        channels = shape[-1]
+        map_size = np.prod(shape) // channels
+        arr_inc = [arr[0]+ (i%256) for i in range(map_size) for c in range(channels)]
         value = np.array(arr_inc).reshape(shape)
   elif dtype == tf.bool:
     value = np.random.choice([True, False], size=shape)
@@ -73,6 +74,42 @@ def create_tensor_data(dtype, shape, min_value=-100, max_value=100, int8_range=F
     letters = list(string.ascii_uppercase)
     return np.random.choice(letters, size=shape).astype(dtype)
   return np.dtype(dtype).type(value) if np.isscalar(value) else value.astype(dtype)
+
+
+def generate_inputs_outputs(tflite_model_binary, int8_range=False):
+    interpreter = tf.lite.Interpreter(model_content=tflite_model_binary)
+    interpreter.allocate_tensors()
+    input_details = interpreter.get_input_details()
+    input_values = {}
+    min_value = 0
+    max_value = 20
+    for i,input_detail in enumerate(input_details):
+        if input_detail["dtype"] == np.float32:
+            min_value = -1
+            max_value = 1
+        elif input_detail["dtype"] == np.int8:
+            min_value = -128
+            max_value = 127
+        elif input_detail["dtype"] == np.uint8:
+            min_value = 0
+            max_value = 255
+        input_value = create_tensor_data(
+                input_detail["dtype"],
+                input_detail["shape"],
+                min_value=min_value,
+                max_value=max_value,
+                int8_range=int8_range)
+        interpreter.set_tensor(input_detail["index"], input_value)
+        input_values.update({"i{}".format(i): input_value})
+    interpreter.invoke()
+
+    output_details = interpreter.get_output_details()
+    output_values = {}
+    for o, output_detail in enumerate(output_details):
+        output_values.update({ "o{}".format(o): interpreter.get_tensor(output_detail["index"])})
+    return input_values, output_values
+
+
 
 
 def one_elem(l):
@@ -146,10 +183,8 @@ def match_shape(act, ref_shape, to_tfl):
 
 # used in unit tests also
 def calc_diff(src, dst, threshold=1):
-    
-    if len(dst.shape)==3:
-        dst = dst.transpose(1,2,0)
-
+    # if len(dst.shape)==3:
+    #     dst = dst.transpose(1,2,0)
     # all_within_threshold = np.allclose(src, dst, atol=threshold)
     all_within_threshold = not (np.max(np.abs(src-dst)) > threshold)
     abs_diff = np.abs(src - dst) 
@@ -239,6 +274,7 @@ def onnx_infer(onnx_model, input_array, flatten=False):
 
 
 def openvino_input_shape(xml, weights):
+    import openvino.inference_engine as ie
     core = ie.IECore()
     net = core.read_network(model=xml, weights=weights)
 
@@ -248,8 +284,9 @@ def openvino_input_shape(xml, weights):
 
 
 def openvino_infer(xml_model, input_array, flatten=False):
-    weights=xml_model.replace('.xml', '.bin')
+    import openvino.inference_engine as ie
     core = ie.IECore()
+    weights=xml_model.replace('.xml', '.bin')
     net = core.read_network(model=xml_model, weights=weights)
     exec_net = core.load_network(network=net, device_name="CPU")
     assert(len(net.input_info) == 1)

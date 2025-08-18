@@ -9,7 +9,7 @@ import numpy as np
 from vbx.generate.utils import openvino_infer, openvino_input_shape
 from vbx.generate.utils import onnx_infer, onnx_input_shape
 from vbx.generate.utils import load_input
-import model_run as mr
+import vbx.sim.model_run as mr
 
 
 if __name__ == "__main__":
@@ -30,11 +30,7 @@ if __name__ == "__main__":
 
     scale = args.scale
     img = cv2.imread(args.image)
-    arr, input_shape = mr.preprocess_img_to_input_array(img, args.model, args.bgr, scale)
-    channels_last = input_shape[-1] < input_shape[-3]
-    input_height, input_width = input_shape[-2], input_shape[-1]
-    if channels_last:
-        input_height, input_width = input_shape[-3], input_shape[-2]
+    arr, input_height, input_width, channels_last = mr.preprocess_img_to_input_array(img, args.model, args.bgr, scale)
     outputs, output_shapes = mr.model_run(arr, args.model)
     
     output=outputs[0].squeeze()

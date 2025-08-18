@@ -18,11 +18,14 @@ if [ -z $VBX_SDK ]; then
 fi
 source $VBX_SDK/vbx_env/bin/activate
 
-echo "Downloading GoogLeNetQuantized..."
-# model details @ https://aihub.qualcomm.com/models/googlenetquantized
+echo "Checking for GoogLeNetQuantized files..."
+
+# model details @ https://aihub.qualcomm.com/models/googlenet
 if [ ! -f GoogLeNetQuantized.tflite ]; then
-    wget -q --no-check-certificate https://huggingface.co/qualcomm/GoogLeNetQuantized/resolve/main/GoogLeNetQuantized.tflite
+    wget -q --no-check-certificate https://huggingface.co/qualcomm/GoogLeNet/resolve/v0.32.0/GoogLeNet_w8a8.tflite
+    mv GoogLeNet_w8a8.tflite GoogLeNetQuantized.tflite
 fi
+
 
 if [ -f GoogLeNetQuantized.tflite ]; then
    tflite_preprocess GoogLeNetQuantized.tflite  --scale 255

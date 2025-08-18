@@ -23,18 +23,25 @@ if [ ! -f $VBX_SDK/tutorials/coco2017_rgb_20x416x416x3.npy ]; then
     generate_npy $VBX_SDK/tutorials/coco2017_rgb_20x416x416x3.npy -o $VBX_SDK/tutorials/coco2017_rgb_20x416x416x3.npy -s 416 416 
 fi
 
-echo "Downloading yolo-v3-tiny-tf..."
+echo "Checking for yolo-v3-tiny-tf files..."
+
 # model details @ https://github.com/openvinotoolkit/open_model_zoo/tree/2021.4.2/models/public/yolo-v3-tiny-tf/
 [ -f coco.names ] || wget -q https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
-[ -f yolov3-tiny.weights ] || wget -q http://web.archive.org/web/20210225040312/https://pjreddie.com/media/files/yolov3-tiny.weights
-omz_downloader --name yolo-v3-tiny-tf
-rm -rf keras-YOLOv3-model-set && git clone https://github.com/david8862/keras-YOLOv3-model-set
-cd keras-YOLOv3-model-set && git checkout 56bcc2e && cd ..
-python keras-YOLOv3-model-set/tools/model_converter/convert.py keras-YOLOv3-model-set/cfg/yolov3-tiny.cfg yolov3-tiny.weights yolo-v3-tiny.h5
+if [ ! -f yolo-v3-tiny-tf.tflite ]; then
+   [ -f yolov3-tiny.weights ] || wget -q http://web.archive.org/web/20210225040312/https://pjreddie.com/media/files/yolov3-tiny.weights
+   omz_downloader --name yolo-v3-tiny-tf
+   rm -rf keras-YOLOv3-model-set && git clone https://github.com/david8862/keras-YOLOv3-model-set
+   cd keras-YOLOv3-model-set && git checkout 56bcc2e && cd ..
+   python keras-YOLOv3-model-set/tools/model_converter/convert.py keras-YOLOv3-model-set/cfg/yolov3-tiny.cfg yolov3-tiny.weights yolo-v3-tiny.h5
+fi
 
-echo "Generating TF Lite..."
-tflite_quantize yolo-v3-tiny.h5 yolo-v3-tiny-tf.tflite -d $VBX_SDK/tutorials/coco2017_rgb_20x416x416x3.npy \
+
+
+if [ ! -f yolo-v3-tiny-tf.tflite ]; then
+   echo "Generating TF Lite..."
+   tflite_quantize yolo-v3-tiny.h5 yolo-v3-tiny-tf.tflite -d $VBX_SDK/tutorials/coco2017_rgb_20x416x416x3.npy \
 --scale 255. --shape 1 416 416 3
+fi
 
 if [ -f yolo-v3-tiny-tf.tflite ]; then
    tflite_preprocess yolo-v3-tiny-tf.tflite  --scale 255

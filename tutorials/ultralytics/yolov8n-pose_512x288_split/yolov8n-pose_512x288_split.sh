@@ -23,15 +23,19 @@ if [ ! -f $VBX_SDK/tutorials/coco2017_rgb_20x288x512x3.npy ]; then
     generate_npy $VBX_SDK/tutorials/coco2017_rgb_20x416x416x3.npy -o $VBX_SDK/tutorials/coco2017_rgb_20x288x512x3.npy -s 288 512 
 fi
 
-echo "Downloading yolov8n-pose_512x288_split..."
+echo "Checking for yolov8n-pose_512x288_split files..."
+
 # model details @ https://github.com/ultralytics/ultralytics/
-if [ ! -f yolov8n-pose.onnx ]; then
-   # ignore ultralytics yolo command error, we only care about the Tflite which is generated
-   yolo export model=yolov8n-pose.pt format=onnx imgsz=288,512 || true
+if [ ! -f yolov8n-pose_512x288_split.tflite ]; then
+   if [ ! -f yolov8n-pose.onnx ]; then
+       # ignore ultralytics yolo command error, we only care about the Tflite which is generated
+       yolo export model=yolov8n-pose.pt format=onnx imgsz=288,512 || true
+   fi
+   python pose_split_kps.py
+   onnx2tf -cind images $VBX_SDK/tutorials/coco2017_rgb_20x288x512x3.npy [[[[128,128,128]]]] [[[[128,128,128]]]] -i yolov8n-pose_edit.onnx --output_signaturedefs --output_integer_quantized_tflite
+   cp saved_model/yolov8n-pose_edit_full_integer_quant.tflite yolov8n-pose_512x288_split.tflite
 fi
-python pose_split_kps.py
-onnx2tf -cind images $VBX_SDK/tutorials/coco2017_rgb_20x288x512x3.npy [[[[128,128,128]]]] [[[[128,128,128]]]] -i yolov8n-pose_edit.onnx --output_signaturedefs --output_integer_quantized_tflite
-cp saved_model/yolov8n-pose_edit_full_integer_quant.tflite yolov8n-pose_512x288_split.tflite
+
 
 
 if [ -f yolov8n-pose_512x288_split.tflite ]; then

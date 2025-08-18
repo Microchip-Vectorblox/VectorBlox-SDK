@@ -23,26 +23,33 @@ if [ ! -f $VBX_SDK/tutorials/coco2017_rgb_20x288x512x3.npy ]; then
     generate_npy $VBX_SDK/tutorials/coco2017_rgb_20x416x416x3.npy -o $VBX_SDK/tutorials/coco2017_rgb_20x288x512x3.npy -s 288 512 
 fi
 
-echo "Downloading yolov8n_512x288..."
+echo "Checking for yolov8n_512x288 files..."
+
 # model details @ https://github.com/ultralytics/ultralytics/
 [ -f coco.names ] || wget -q https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
-if [ ! -f yolov8n.pb ]; then
-    # ignore ultralytics yolo command error, we only care about the Tflite which is generated
-    yolo export model=yolov8n.pt format=pb imgsz=288,512 || true
-fi
-tflite_quantize yolov8n.pb yolov8n_512x288.tflite -d $VBX_SDK/tutorials/coco2017_rgb_20x288x512x3.npy --mean 128 --scale 128 --shape 1 288 512 3
-
-
-tflite_cut yolov8n_512x288.tflite -c 190 197 207 214 224 231
-mv yolov8n_512x288.0.tflite yolov8n_512x288.tflite
-
-if [ -f yolov8n_512x288.tflite ]; then
-   tflite_preprocess yolov8n_512x288.tflite  --scale 255
+if [ ! -f yolov8n_512x288.tflite ]; then
+   if [ ! -f yolov8n.pb ]; then
+       # ignore ultralytics yolo command error, we only care about the Tflite which is generated
+       yolo export model=yolov8n.pt format=pb imgsz=288,512 || true
+   fi
+   tflite_quantize yolov8n.pb yolov8n_512x288.tflite -d $VBX_SDK/tutorials/coco2017_rgb_20x288x512x3.npy --mean 128 --scale 128 --shape 1 288 512 3
 fi
 
-if [ -f yolov8n_512x288.pre.tflite ]; then
+
+
+if [ -f yolov8n_512x288.tflite ]; then 
+   echo "Cutting graph" 
+   tflite_cut yolov8n_512x288.tflite -c 190 197 207 214 224 231
+   mv yolov8n_512x288.0.tflite yolov8n_512x288.cut.tflite 
+fi
+
+if [ -f yolov8n_512x288.cut.tflite ]; then
+   tflite_preprocess yolov8n_512x288.cut.tflite  --scale 255
+fi
+
+if [ -f yolov8n_512x288.cut.pre.tflite ]; then
     echo "Generating VNNX for V1000 configuration..."
-    vnnx_compile -c V1000 -t yolov8n_512x288.pre.tflite -o yolov8n_512x288.vnnx
+    vnnx_compile -c V1000 -t yolov8n_512x288.cut.pre.tflite -o yolov8n_512x288.vnnx
 fi
 
 if [ -f yolov8n_512x288.vnnx ]; then

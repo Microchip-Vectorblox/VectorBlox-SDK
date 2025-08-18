@@ -16,7 +16,7 @@ def main():
     parser.add_argument('-sc', '--scale', type=float, nargs='+', default=1.)
     args = parser.parse_args()
     fileName = os.path.splitext(os.path.basename(args.image))[0]
-    outputName = args.out_dir+'/'+fileName+"_"+args.out_name+".png"
+    outputName = fileName+"_"+args.out_name+".png"
 
     img = cv2.imread(args.image)
     modelInput, meta = pn.preprocessImage(img, (not args.bgr), args.mean, args.scale)

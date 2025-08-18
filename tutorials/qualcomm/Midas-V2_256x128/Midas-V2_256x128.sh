@@ -23,12 +23,14 @@ if [ ! -f $VBX_SDK/tutorials/coco2017_rgb_norm_20x128x256x3.npy ]; then
     generate_npy $VBX_SDK/tutorials/coco2017_rgb_20x416x416x3.npy -o $VBX_SDK/tutorials/coco2017_rgb_norm_20x128x256x3.npy -s 128 256  --norm 
 fi
 
-echo "Downloading Midas-V2_256x128..."
-# model details @ https://aihub.qualcomm.com/models/midas
-if [ ! -f Midas-V2.onnx ]; then
-    wget -q --no-check-certificate https://huggingface.co/qualcomm/Midas-V2/resolve/main/Midas-V2.onnx
+echo "Checking for Midas-V2_256x128 files..."
 
-fi
+# model details @ https://aihub.qualcomm.com/models/midas
+if [ ! -f Midas-V2_256x128.tflite ]; then
+   if [ ! -f Midas-V2.onnx ]; then
+       wget -q --no-check-certificate https://huggingface.co/qualcomm/Midas-V2/resolve/d182b62632d80d3d1690f6e13fec18dd09c05fdf/Midas-V2.onnx
+
+   fi
 #wget https://github.com/isl-org/MiDaS/releases/download/v2_1/model-small.pb
 
 python - <<EOF
@@ -48,20 +50,24 @@ model_256x128 = update_model_dims.update_inputs_outputs_dims(model, {"image":[1,
 model_simp, check = simplify(model_256x128)
 onnx.save(model_simp,'Midas-V2_256x128.onnx')
 EOF
+fi
 
-echo "Running ONNX2TF..."
-onnx2tf -cind image $VBX_SDK/tutorials/coco2017_rgb_norm_20x128x256x3.npy [[[0.,0.,0.]]] [[[1.,1.,1.]]] \
+
+
+if [ ! -f Midas-V2_256x128.tflite ]; then
+   echo "Running ONNX2TF..."
+   onnx2tf -cind image $VBX_SDK/tutorials/coco2017_rgb_norm_20x128x256x3.npy [[[0.,0.,0.]]] [[[1.,1.,1.]]] \
 -i Midas-V2_256x128.onnx \
 --output_signaturedefs \
 --output_integer_quantized_tflite
-cp saved_model/Midas-V2_256x128_full_integer_quant.tflite Midas-V2_256x128.tflite
-
+   cp saved_model/Midas-V2_256x128_full_integer_quant.tflite Midas-V2_256x128.tflite
+fi
 if [ -f Midas-V2_256x128.tflite ]; then
    tflite_preprocess Midas-V2_256x128.tflite  --scale 255
 fi
 
 if [ -f Midas-V2_256x128.pre.tflite ]; then
-   tflite_postprocess Midas-V2_256x128.pre.tflite  --dataset depth \
+   tflite_postprocess Midas-V2_256x128.pre.tflite  --post-process-layer PIXEL_DEPTH \
 --opacity 0.8 \
 --height 1080 \
 --width 1920

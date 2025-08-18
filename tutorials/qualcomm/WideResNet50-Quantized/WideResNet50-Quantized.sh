@@ -18,12 +18,22 @@ if [ -z $VBX_SDK ]; then
 fi
 source $VBX_SDK/vbx_env/bin/activate
 
-echo "Downloading WideResNet50-Quantized..."
-# model details @ https://huggingface.co/qualcomm/WideResNet50-Quantized
+echo "Checking for WideResNet50-Quantized files..."
+
+# model details @ https://huggingface.co/qualcomm/WideResNet50
 if [ ! -f WideResNet50-Quantized.tflite ]; then
-    wget -q --no-check-certificate https://huggingface.co/qualcomm/WideResNet50-Quantized/resolve/main/WideResNet50-Quantized.tflite
+    wget -q --no-check-certificate https://huggingface.co/qualcomm/WideResNet50/blob/v0.32.0/WideResNet50.onnx
 fi
 
+
+if [ ! -f WideResNet50-Quantized.tflite ]; then
+   echo "Running ONNX2TF..."
+   onnx2tf -cind image_tensor $VBX_SDK/tutorials/coco2017_rgb_norm_20x224x224x3.npy [[[0.,0.,0.]]] [[[1.,1.,1.]]] \
+-i WideResNet50.onnx \
+--output_signaturedefs \
+--output_integer_quantized_tflite
+   cp saved_model/WideResNet50_full_integer_quant.tflite WideResNet50-Quantized.tflite
+fi
 if [ -f WideResNet50-Quantized.tflite ]; then
    tflite_preprocess WideResNet50-Quantized.tflite  --scale 255
 fi

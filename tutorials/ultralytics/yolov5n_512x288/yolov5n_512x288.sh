@@ -23,30 +23,37 @@ if [ ! -f $VBX_SDK/tutorials/coco2017_rgb_norm_20x288x512x3.npy ]; then
     generate_npy $VBX_SDK/tutorials/coco2017_rgb_20x416x416x3.npy -o $VBX_SDK/tutorials/coco2017_rgb_norm_20x288x512x3.npy -s 288 512  --norm 
 fi
 
-echo "Downloading yolov5n_512x288..."
-# model details @ https://github.com/ultralytics/yolov5
-[ -f yolov5n.pt ] || wget -q https://github.com/ultralytics/yolov5/releases/download/v6.0/yolov5n.pt
-[ -f coco.names ] || wget -q https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
-[ -d yolov5 ] || git clone --branch v7.0 https://github.com/ultralytics/yolov5
-cd yolov5
-python3 -m venv ultralytics
-source ultralytics/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
-pip install onnx
-pip install torch==2.5.0 torchvision==0.20.0
-python export.py --weights ../yolov5n.pt --include onnx --imgsz 288 512
-cd ..
-source $VBX_SDK/vbx_env/bin/activate
+echo "Checking for yolov5n_512x288 files..."
 
-echo "Running ONNX2TF..."
-onnx2tf -cind images $VBX_SDK/tutorials/coco2017_rgb_norm_20x288x512x3.npy [[[[0.,0.,0.]]]] [[[[1.,1.,1.]]]] \
+# model details @ https://github.com/ultralytics/yolov5
+[ -f coco.names ] || wget -q https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
+if [ ! -f yolov5n_512x288.tflite ]; then
+   [ -f yolov5n.pt ] || wget -q https://github.com/ultralytics/yolov5/releases/download/v6.0/yolov5n.pt
+   [ -d yolov5 ] || git clone --branch v7.0 https://github.com/ultralytics/yolov5
+   if [ -d yolov5 ]; then
+       cd yolov5
+       python3 -m venv ultralytics
+       source ultralytics/bin/activate
+       pip install --upgrade pip
+       pip install -r requirements.txt
+       pip install onnx
+       pip install torch==2.5.0 torchvision==0.20.0
+       python export.py --weights ../yolov5n.pt --include onnx --imgsz 288 512
+       cd ..
+       source $VBX_SDK/vbx_env/bin/activate
+   fi
+fi
+
+
+if [ ! -f yolov5n_512x288.tflite ]; then
+   echo "Running ONNX2TF..."
+   onnx2tf -cind images $VBX_SDK/tutorials/coco2017_rgb_norm_20x288x512x3.npy [[[[0.,0.,0.]]]] [[[[1.,1.,1.]]]] \
 --output_names_to_interrupt_model_conversion "/model.24/m.0/Conv_output_0" "/model.24/m.1/Conv_output_0" "/model.24/m.2/Conv_output_0" \
 -i yolov5n.onnx \
 --output_signaturedefs \
 --output_integer_quantized_tflite
-cp saved_model/yolov5n_full_integer_quant.tflite yolov5n_512x288.tflite
-
+   cp saved_model/yolov5n_full_integer_quant.tflite yolov5n_512x288.tflite
+fi
 if [ -f yolov5n_512x288.tflite ]; then
    tflite_preprocess yolov5n_512x288.tflite  --scale 255
 fi

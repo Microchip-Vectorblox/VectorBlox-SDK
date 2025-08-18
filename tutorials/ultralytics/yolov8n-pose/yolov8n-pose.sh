@@ -18,25 +18,30 @@ if [ -z $VBX_SDK ]; then
 fi
 source $VBX_SDK/vbx_env/bin/activate
 
-echo "Downloading yolov8n-pose..."
+echo "Checking for yolov8n-pose files..."
+
 # model details @ https://github.com/ultralytics/ultralytics/
 [ -f coco.names ] || wget -q https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
 if [ ! -f yolov8n-pose.tflite ]; then
     # ignore ultralytics yolo command error, we only care about the Tflite which is generated
     yolo export model=yolov8n-pose.pt format=tflite int8 || true
-fi
-cp yolov8n-pose_saved_model/yolov8n-pose_full_integer_quant.tflite yolov8n-pose.tflite
-
-tflite_cut yolov8n-pose.tflite -c 189 215 241 198 205 224 231 261 268
-mv yolov8n-pose.0.tflite yolov8n-pose.tflite
-
-if [ -f yolov8n-pose.tflite ]; then
-   tflite_preprocess yolov8n-pose.tflite  --scale 255
+    cp yolov8n-pose_saved_model/yolov8n-pose_full_integer_quant.tflite yolov8n-pose.tflite
 fi
 
-if [ -f yolov8n-pose.pre.tflite ]; then
+
+if [ -f yolov8n-pose.tflite ]; then 
+   echo "Cutting graph" 
+   tflite_cut yolov8n-pose.tflite -c 189 215 241 198 205 224 231 261 268
+   mv yolov8n-pose.0.tflite yolov8n-pose.cut.tflite 
+fi
+
+if [ -f yolov8n-pose.cut.tflite ]; then
+   tflite_preprocess yolov8n-pose.cut.tflite  --scale 255
+fi
+
+if [ -f yolov8n-pose.cut.pre.tflite ]; then
     echo "Generating VNNX for V1000 configuration..."
-    vnnx_compile -c V1000 -t yolov8n-pose.pre.tflite -o yolov8n-pose.vnnx
+    vnnx_compile -c V1000 -t yolov8n-pose.cut.pre.tflite -o yolov8n-pose.vnnx
 fi
 
 if [ -f yolov8n-pose.vnnx ]; then

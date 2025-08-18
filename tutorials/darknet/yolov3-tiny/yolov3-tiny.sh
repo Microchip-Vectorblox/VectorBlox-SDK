@@ -23,21 +23,26 @@ if [ ! -f $VBX_SDK/tutorials/coco2017_rgb_norm_20x416x416x3.npy ]; then
     generate_npy $VBX_SDK/tutorials/coco2017_rgb_20x416x416x3.npy -o $VBX_SDK/tutorials/coco2017_rgb_norm_20x416x416x3.npy -s 416 416  --norm 
 fi
 
-echo "Downloading yolov3-tiny..."
-# model details @ https://pjreddie.com/darknet/yolo/
-[ -f yolov3-tiny.cfg ] || wget -q https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3-tiny.cfg
-[ -f yolov3-tiny.weights ] || wget -q http://web.archive.org/web/20210224135857/https://pjreddie.com/media/files/yolov3-tiny.weights
-[ -f coco.names ] || wget -q https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
-python $VBX_SDK/tutorials/darknet/darknet_to_onnx.py yolov3-tiny.cfg
+echo "Checking for yolov3-tiny files..."
 
-echo "Running ONNX2TF..."
-onnx2tf -cind X0 $VBX_SDK/tutorials/coco2017_rgb_norm_20x416x416x3.npy [[[[0.,0.,0.]]]] [[[[1.,1.,1.]]]] \
+# model details @ https://pjreddie.com/darknet/yolo/
+[ -f coco.names ] || wget -q https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
+if [ ! -f yolov3-tiny.json ]; then
+   [ -f yolov3-tiny.cfg ] || wget -q https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3-tiny.cfg
+   [ -f yolov3-tiny.weights ] || wget -q http://web.archive.org/web/20210224135857/https://pjreddie.com/media/files/yolov3-tiny.weights
+   python $VBX_SDK/tutorials/darknet/darknet_to_onnx.py yolov3-tiny.cfg
+fi
+
+
+if [ ! -f yolov3-tiny.tflite ]; then
+   echo "Running ONNX2TF..."
+   onnx2tf -cind X0 $VBX_SDK/tutorials/coco2017_rgb_norm_20x416x416x3.npy [[[[0.,0.,0.]]]] [[[[1.,1.,1.]]]] \
 -b 1 \
 -i yolov3-tiny.onnx \
 --output_signaturedefs \
 --output_integer_quantized_tflite
-cp saved_model/yolov3-tiny_full_integer_quant.tflite yolov3-tiny.tflite
-
+   cp saved_model/yolov3-tiny_full_integer_quant.tflite yolov3-tiny.tflite
+fi
 if [ -f yolov3-tiny.tflite ]; then
    tflite_preprocess yolov3-tiny.tflite  --scale 255
 fi

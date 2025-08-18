@@ -23,17 +23,20 @@ if [ ! -f $VBX_SDK/tutorials/imagenetv2_rgb_norm_20x224x224x3.npy ]; then
     generate_npy $VBX_SDK/tutorials/imagenetv2_rgb_20x224x224x3.npy -o $VBX_SDK/tutorials/imagenetv2_rgb_norm_20x224x224x3.npy -s 224 224  --norm 
 fi
 
-echo "Downloading torchvision_resnet18..."
+echo "Checking for torchvision_resnet18 files..."
+if [ ! -f torchvision_resnet18.tflite ]; then
 # model details @ https://pytorch.org/vision/0.14/models/generated/torchvision.models.resnet18.html#torchvision.models.resnet18
 python $VBX_SDK/tutorials/torchvision_to_onnx.py resnet18
+fi
 
-echo "Running ONNX2TF..."
-onnx2tf -cind input.1 $VBX_SDK/tutorials/imagenetv2_rgb_norm_20x224x224x3.npy [[[[0.485,0.456,0.406]]]] [[[[0.229,0.224,0.225]]]] \
+if [ ! -f torchvision_resnet18.tflite ]; then
+   echo "Running ONNX2TF..."
+   onnx2tf -cind input.1 $VBX_SDK/tutorials/imagenetv2_rgb_norm_20x224x224x3.npy [[[[0.485,0.456,0.406]]]] [[[[0.229,0.224,0.225]]]] \
 -i resnet18.onnx \
 --output_signaturedefs \
 --output_integer_quantized_tflite
-cp saved_model/resnet18_full_integer_quant.tflite torchvision_resnet18.tflite
-
+   cp saved_model/resnet18_full_integer_quant.tflite torchvision_resnet18.tflite
+fi
 if [ -f torchvision_resnet18.tflite ]; then
    tflite_preprocess torchvision_resnet18.tflite  --mean 123.675 116.28 103.53 --scale 58.4 57.1 57.38
 fi

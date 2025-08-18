@@ -19,11 +19,31 @@
     },
     "tflite_BuiltinOperator" : {
       "type" : "string",
-      "enum": ["ADD", "AVERAGE_POOL_2D", "CONCATENATION", "CONV_2D", "DEPTHWISE_CONV_2D", "DEPTH_TO_SPACE", "DEQUANTIZE", "EMBEDDING_LOOKUP", "FLOOR", "FULLY_CONNECTED", "HASHTABLE_LOOKUP", "L2_NORMALIZATION", "L2_POOL_2D", "LOCAL_RESPONSE_NORMALIZATION", "LOGISTIC", "LSH_PROJECTION", "LSTM", "MAX_POOL_2D", "MUL", "RELU", "RELU_N1_TO_1", "RELU6", "RESHAPE", "RESIZE_BILINEAR", "RNN", "SOFTMAX", "SPACE_TO_DEPTH", "SVDF", "TANH", "CONCAT_EMBEDDINGS", "SKIP_GRAM", "CALL", "CUSTOM", "EMBEDDING_LOOKUP_SPARSE", "PAD", "UNIDIRECTIONAL_SEQUENCE_RNN", "GATHER", "BATCH_TO_SPACE_ND", "SPACE_TO_BATCH_ND", "TRANSPOSE", "MEAN", "SUB", "DIV", "SQUEEZE", "UNIDIRECTIONAL_SEQUENCE_LSTM", "STRIDED_SLICE", "BIDIRECTIONAL_SEQUENCE_RNN", "EXP", "TOPK_V2", "SPLIT", "LOG_SOFTMAX", "DELEGATE", "BIDIRECTIONAL_SEQUENCE_LSTM", "CAST", "PRELU", "MAXIMUM", "ARG_MAX", "MINIMUM", "LESS", "NEG", "PADV2", "GREATER", "GREATER_EQUAL", "LESS_EQUAL", "SELECT", "SLICE", "SIN", "TRANSPOSE_CONV", "SPARSE_TO_DENSE", "TILE", "EXPAND_DIMS", "EQUAL", "NOT_EQUAL", "LOG", "SUM", "SQRT", "RSQRT", "SHAPE", "POW", "ARG_MIN", "FAKE_QUANT", "REDUCE_PROD", "REDUCE_MAX", "PACK", "LOGICAL_OR", "ONE_HOT", "LOGICAL_AND", "LOGICAL_NOT", "UNPACK", "REDUCE_MIN", "FLOOR_DIV", "REDUCE_ANY", "SQUARE", "ZEROS_LIKE", "FILL", "FLOOR_MOD", "RANGE", "RESIZE_NEAREST_NEIGHBOR", "LEAKY_RELU", "SQUARED_DIFFERENCE", "MIRROR_PAD", "ABS", "SPLIT_V", "UNIQUE", "CEIL", "REVERSE_V2", "ADD_N", "GATHER_ND", "COS", "WHERE", "RANK", "ELU", "REVERSE_SEQUENCE", "MATRIX_DIAG", "QUANTIZE", "MATRIX_SET_DIAG", "ROUND", "HARD_SWISH", "IF", "WHILE", "NON_MAX_SUPPRESSION_V4", "NON_MAX_SUPPRESSION_V5", "SCATTER_ND", "SELECT_V2", "DENSIFY", "SEGMENT_SUM", "BATCH_MATMUL", "PLACEHOLDER_FOR_GREATER_OP_CODES", "CUMSUM", "CALL_ONCE", "BROADCAST_TO", "RFFT2D", "CONV_3D", "IMAG", "REAL", "COMPLEX_ABS", "HASHTABLE", "HASHTABLE_FIND", "HASHTABLE_IMPORT", "HASHTABLE_SIZE", "REDUCE_ALL", "CONV_3D_TRANSPOSE", "VAR_HANDLE", "READ_VARIABLE", "ASSIGN_VARIABLE", "BROADCAST_ARGS", "RANDOM_STANDARD_NORMAL", "BUCKETIZE", "RANDOM_UNIFORM", "MULTINOMIAL", "GELU", "DYNAMIC_UPDATE_SLICE", "RELU_0_TO_1", "UNSORTED_SEGMENT_PROD", "UNSORTED_SEGMENT_MAX", "UNSORTED_SEGMENT_SUM", "ATAN2", "UNSORTED_SEGMENT_MIN", "SIGN", "BITCAST", "BITWISE_XOR", "RIGHT_SHIFT"]
+      "enum": ["ADD", "AVERAGE_POOL_2D", "CONCATENATION", "CONV_2D", "DEPTHWISE_CONV_2D", "DEPTH_TO_SPACE", "DEQUANTIZE", "EMBEDDING_LOOKUP", "FLOOR", "FULLY_CONNECTED", "HASHTABLE_LOOKUP", "L2_NORMALIZATION", "L2_POOL_2D", "LOCAL_RESPONSE_NORMALIZATION", "LOGISTIC", "LSH_PROJECTION", "LSTM", "MAX_POOL_2D", "MUL", "RELU", "RELU_N1_TO_1", "RELU6", "RESHAPE", "RESIZE_BILINEAR", "RNN", "SOFTMAX", "SPACE_TO_DEPTH", "SVDF", "TANH", "CONCAT_EMBEDDINGS", "SKIP_GRAM", "CALL", "CUSTOM", "EMBEDDING_LOOKUP_SPARSE", "PAD", "UNIDIRECTIONAL_SEQUENCE_RNN", "GATHER", "BATCH_TO_SPACE_ND", "SPACE_TO_BATCH_ND", "TRANSPOSE", "MEAN", "SUB", "DIV", "SQUEEZE", "UNIDIRECTIONAL_SEQUENCE_LSTM", "STRIDED_SLICE", "BIDIRECTIONAL_SEQUENCE_RNN", "EXP", "TOPK_V2", "SPLIT", "LOG_SOFTMAX", "DELEGATE", "BIDIRECTIONAL_SEQUENCE_LSTM", "CAST", "PRELU", "MAXIMUM", "ARG_MAX", "MINIMUM", "LESS", "NEG", "PADV2", "GREATER", "GREATER_EQUAL", "LESS_EQUAL", "SELECT", "SLICE", "SIN", "TRANSPOSE_CONV", "SPARSE_TO_DENSE", "TILE", "EXPAND_DIMS", "EQUAL", "NOT_EQUAL", "LOG", "SUM", "SQRT", "RSQRT", "SHAPE", "POW", "ARG_MIN", "FAKE_QUANT", "REDUCE_PROD", "REDUCE_MAX", "PACK", "LOGICAL_OR", "ONE_HOT", "LOGICAL_AND", "LOGICAL_NOT", "UNPACK", "REDUCE_MIN", "FLOOR_DIV", "REDUCE_ANY", "SQUARE", "ZEROS_LIKE", "FILL", "FLOOR_MOD", "RANGE", "RESIZE_NEAREST_NEIGHBOR", "LEAKY_RELU", "SQUARED_DIFFERENCE", "MIRROR_PAD", "ABS", "SPLIT_V", "UNIQUE", "CEIL", "REVERSE_V2", "ADD_N", "GATHER_ND", "COS", "WHERE", "RANK", "ELU", "REVERSE_SEQUENCE", "MATRIX_DIAG", "QUANTIZE", "MATRIX_SET_DIAG", "ROUND", "HARD_SWISH", "IF", "WHILE", "NON_MAX_SUPPRESSION_V4", "NON_MAX_SUPPRESSION_V5", "SCATTER_ND", "SELECT_V2", "DENSIFY", "SEGMENT_SUM", "BATCH_MATMUL", "PLACEHOLDER_FOR_GREATER_OP_CODES", "CUMSUM", "CALL_ONCE", "BROADCAST_TO", "RFFT2D", "CONV_3D", "IMAG", "REAL", "COMPLEX_ABS", "HASHTABLE", "HASHTABLE_FIND", "HASHTABLE_IMPORT", "HASHTABLE_SIZE", "REDUCE_ALL", "CONV_3D_TRANSPOSE", "VAR_HANDLE", "READ_VARIABLE", "ASSIGN_VARIABLE", "BROADCAST_ARGS", "RANDOM_STANDARD_NORMAL", "BUCKETIZE", "RANDOM_UNIFORM", "MULTINOMIAL", "GELU", "DYNAMIC_UPDATE_SLICE", "RELU_0_TO_1", "UNSORTED_SEGMENT_PROD", "UNSORTED_SEGMENT_MAX", "UNSORTED_SEGMENT_SUM", "ATAN2", "UNSORTED_SEGMENT_MIN", "SIGN", "BITCAST", "BITWISE_XOR", "RIGHT_SHIFT", "STABLEHLO_LOGISTIC", "STABLEHLO_ADD", "STABLEHLO_DIVIDE", "STABLEHLO_MULTIPLY", "STABLEHLO_MAXIMUM", "STABLEHLO_RESHAPE", "STABLEHLO_CLAMP", "STABLEHLO_CONCATENATE", "STABLEHLO_BROADCAST_IN_DIM", "STABLEHLO_CONVOLUTION", "STABLEHLO_SLICE", "STABLEHLO_CUSTOM_CALL", "STABLEHLO_REDUCE", "STABLEHLO_ABS", "STABLEHLO_AND", "STABLEHLO_COSINE", "STABLEHLO_EXPONENTIAL", "STABLEHLO_FLOOR", "STABLEHLO_LOG", "STABLEHLO_MINIMUM", "STABLEHLO_NEGATE", "STABLEHLO_OR", "STABLEHLO_POWER", "STABLEHLO_REMAINDER", "STABLEHLO_RSQRT", "STABLEHLO_SELECT", "STABLEHLO_SUBTRACT", "STABLEHLO_TANH", "STABLEHLO_SCATTER", "STABLEHLO_COMPARE", "STABLEHLO_CONVERT", "STABLEHLO_DYNAMIC_SLICE", "STABLEHLO_DYNAMIC_UPDATE_SLICE", "STABLEHLO_PAD", "STABLEHLO_IOTA", "STABLEHLO_DOT_GENERAL", "STABLEHLO_REDUCE_WINDOW", "STABLEHLO_SORT", "STABLEHLO_WHILE", "STABLEHLO_GATHER", "STABLEHLO_TRANSPOSE", "DILATE", "STABLEHLO_RNG_BIT_GENERATOR", "REDUCE_WINDOW"]
     },
     "tflite_BuiltinOptions" : {
       "type" : "string",
       "enum": ["NONE", "Conv2DOptions", "DepthwiseConv2DOptions", "ConcatEmbeddingsOptions", "LSHProjectionOptions", "Pool2DOptions", "SVDFOptions", "RNNOptions", "FullyConnectedOptions", "SoftmaxOptions", "ConcatenationOptions", "AddOptions", "L2NormOptions", "LocalResponseNormalizationOptions", "LSTMOptions", "ResizeBilinearOptions", "CallOptions", "ReshapeOptions", "SkipGramOptions", "SpaceToDepthOptions", "EmbeddingLookupSparseOptions", "MulOptions", "PadOptions", "GatherOptions", "BatchToSpaceNDOptions", "SpaceToBatchNDOptions", "TransposeOptions", "ReducerOptions", "SubOptions", "DivOptions", "SqueezeOptions", "SequenceRNNOptions", "StridedSliceOptions", "ExpOptions", "TopKV2Options", "SplitOptions", "LogSoftmaxOptions", "CastOptions", "DequantizeOptions", "MaximumMinimumOptions", "ArgMaxOptions", "LessOptions", "NegOptions", "PadV2Options", "GreaterOptions", "GreaterEqualOptions", "LessEqualOptions", "SelectOptions", "SliceOptions", "TransposeConvOptions", "SparseToDenseOptions", "TileOptions", "ExpandDimsOptions", "EqualOptions", "NotEqualOptions", "ShapeOptions", "PowOptions", "ArgMinOptions", "FakeQuantOptions", "PackOptions", "LogicalOrOptions", "OneHotOptions", "LogicalAndOptions", "LogicalNotOptions", "UnpackOptions", "FloorDivOptions", "SquareOptions", "ZerosLikeOptions", "FillOptions", "BidirectionalSequenceLSTMOptions", "BidirectionalSequenceRNNOptions", "UnidirectionalSequenceLSTMOptions", "FloorModOptions", "RangeOptions", "ResizeNearestNeighborOptions", "LeakyReluOptions", "SquaredDifferenceOptions", "MirrorPadOptions", "AbsOptions", "SplitVOptions", "UniqueOptions", "ReverseV2Options", "AddNOptions", "GatherNdOptions", "CosOptions", "WhereOptions", "RankOptions", "ReverseSequenceOptions", "MatrixDiagOptions", "QuantizeOptions", "MatrixSetDiagOptions", "HardSwishOptions", "IfOptions", "WhileOptions", "DepthToSpaceOptions", "NonMaxSuppressionV4Options", "NonMaxSuppressionV5Options", "ScatterNdOptions", "SelectV2Options", "DensifyOptions", "SegmentSumOptions", "BatchMatMulOptions", "CumsumOptions", "CallOnceOptions", "BroadcastToOptions", "Rfft2dOptions", "Conv3DOptions", "HashtableOptions", "HashtableFindOptions", "HashtableImportOptions", "HashtableSizeOptions", "VarHandleOptions", "ReadVariableOptions", "AssignVariableOptions", "RandomOptions", "BucketizeOptions", "GeluOptions", "DynamicUpdateSliceOptions", "UnsortedSegmentProdOptions", "UnsortedSegmentMaxOptions", "UnsortedSegmentMinOptions", "UnsortedSegmentSumOptions", "ATan2Options", "SignOptions", "BitcastOptions", "BitwiseXorOptions", "RightShiftOptions"]
+    },
+    "tflite_BuiltinOptions2" : {
+      "type" : "string",
+      "enum": ["NONE", "StablehloConcatenateOptions", "StablehloBroadcastInDimOptions", "StablehloSliceOptions", "StablehloConvolutionOptions", "StablehloCustomCallOptions", "StablehloReduceOptions", "StablehloScatterOptions", "StablehloCompareOptions", "StablehloDynamicSliceOptions", "StablehloPadOptions", "StablehloIotaOptions", "StablehloDotGeneralOptions", "StablehloReduceWindowOptions", "StablehloSortOptions", "StablehloWhileOptions", "StablehloGatherOptions", "StablehloTransposeOptions", "DilateOptions", "StablehloRngBitGeneratorOptions", "ReduceWindowOptions"]
+    },
+    "tflite_StablehloPrecisionConfig" : {
+      "type" : "string",
+      "enum": ["DEFAULT", "HIGH", "HIGHEST"]
+    },
+    "tflite_StablehloComparisonDirection" : {
+      "type" : "string",
+      "enum": ["STABLEHLO_COMPARISON_DIRECTION_EQ", "STABLEHLO_COMPARISON_DIRECTION_NE", "STABLEHLO_COMPARISON_DIRECTION_GE", "STABLEHLO_COMPARISON_DIRECTION_GT", "STABLEHLO_COMPARISON_DIRECTION_LE", "STABLEHLO_COMPARISON_DIRECTION_LT"]
+    },
+    "tflite_StablehloComparisonType" : {
+      "type" : "string",
+      "enum": ["STABLEHLO_COMPARISON_TYPE_NOTYPE", "STABLEHLO_COMPARISON_TYPE_FLOAT", "STABLEHLO_COMPARISON_TYPE_FLOAT_TOTAL_ORDER", "STABLEHLO_COMPARISON_TYPE_SIGNED", "STABLEHLO_COMPARISON_TYPE_UNSIGNED"]
+    },
+    "tflite_RngAlgorithm" : {
+      "type" : "string",
+      "enum": ["DEFAULT", "PHILOX", "THREEFRY"]
     },
     "tflite_Padding" : {
       "type" : "string",
@@ -52,6 +72,10 @@
     "tflite_MirrorPadMode" : {
       "type" : "string",
       "enum": ["REFLECT", "SYMMETRIC"]
+    },
+    "tflite_ReduceWindowFunction" : {
+      "type" : "string",
+      "enum": ["UNSUPPORTED", "ADD", "MUL", "MINIMUM", "MAXIMUM", "ALL", "ANY"]
     },
     "tflite_CustomOptionsFormat" : {
       "type" : "string",
@@ -210,6 +234,318 @@
       },
       "additionalProperties" : false
     },
+    "tflite_StablehloGatherOptions" : {
+      "type" : "object",
+      "properties" : {
+        "offset_dims" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              },
+        "collapsed_slice_dims" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              },
+        "start_index_map" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              },
+        "index_vector_dim" : {
+                "type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807
+              },
+        "slice_sizes" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              },
+        "indices_are_sorted" : {
+                "type" : "boolean"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_StablehloTransposeOptions" : {
+      "type" : "object",
+      "properties" : {
+        "permutation" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_StablehloDotGeneralOptions" : {
+      "type" : "object",
+      "properties" : {
+        "lhs_batching_dimensions" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              },
+        "rhs_batching_dimensions" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              },
+        "lhs_contracting_dimensions" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              },
+        "rhs_contracting_dimensions" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              },
+        "precision_config" : {
+                "type" : "array", "items" : {"$ref" : "#/definitions/tflite_StablehloPrecisionConfig"}
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_StablehloReduceWindowOptions" : {
+      "type" : "object",
+      "properties" : {
+        "window_dimensions" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              },
+        "window_strides" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              },
+        "base_dilations" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              },
+        "window_dilations" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              },
+        "padding" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              },
+        "body_subgraph_index" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_StablehloWhileOptions" : {
+      "type" : "object",
+      "properties" : {
+        "cond_subgraph_index" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "body_subgraph_index" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_StablehloSortOptions" : {
+      "type" : "object",
+      "properties" : {
+        "dimension" : {
+                "type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807
+              },
+        "is_stable" : {
+                "type" : "boolean"
+              },
+        "comparator_subgraph_index" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_StablehloConcatenateOptions" : {
+      "type" : "object",
+      "properties" : {
+        "dimension" : {
+                "type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_StablehloBroadcastInDimOptions" : {
+      "type" : "object",
+      "properties" : {
+        "broadcast_dimensions" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_StablehloCompareOptions" : {
+      "type" : "object",
+      "properties" : {
+        "comparison_direction" : {
+                "$ref" : "#/definitions/tflite_StablehloComparisonDirection"
+              },
+        "compare_type" : {
+                "$ref" : "#/definitions/tflite_StablehloComparisonType"
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_StablehloDynamicSliceOptions" : {
+      "type" : "object",
+      "properties" : {
+        "slice_sizes" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_StablehloPadOptions" : {
+      "type" : "object",
+      "properties" : {
+        "edge_padding_low" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              },
+        "edge_padding_high" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              },
+        "interior_padding" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_StablehloIotaOptions" : {
+      "type" : "object",
+      "properties" : {
+        "iota_dimension" : {
+                "type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_StablehloCustomCallOptions" : {
+      "type" : "object",
+      "properties" : {
+        "call_target_name" : {
+                "type" : "string"
+              },
+        "has_side_effect" : {
+                "type" : "boolean"
+              },
+        "backend_config" : {
+                "type" : "string"
+              },
+        "api_version" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "called_computations" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647}
+              },
+        "custom_attributes" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : 0, "maximum" :255}
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_StablehloReduceOptions" : {
+      "type" : "object",
+      "properties" : {
+        "dimensions" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              },
+        "body_subgraph_index" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_StablehloSliceOptions" : {
+      "type" : "object",
+      "properties" : {
+        "start_indices" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              },
+        "limit_indices" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              },
+        "strides" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_StablehloConvolutionOptions" : {
+      "type" : "object",
+      "properties" : {
+        "window_strides" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              },
+        "padding" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              },
+        "lhs_dilation" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              },
+        "rhs_dilation" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              },
+        "window_reversal" : {
+                "type" : "array", "items" : {"type" : "boolean"}
+              },
+        "input_batch_dimension" : {
+                "type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807
+              },
+        "input_feature_dimension" : {
+                "type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807
+              },
+        "input_spatial_dimensions" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              },
+        "kernel_input_feature_dimension" : {
+                "type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807
+              },
+        "kernel_output_feature_dimension" : {
+                "type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807
+              },
+        "kernel_spatial_dimensions" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              },
+        "output_batch_dimension" : {
+                "type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807
+              },
+        "output_feature_dimension" : {
+                "type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807
+              },
+        "output_spatial_dimensions" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              },
+        "feature_group_count" : {
+                "type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807
+              },
+        "batch_group_count" : {
+                "type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807
+              },
+        "precision_config" : {
+                "type" : "array", "items" : {"$ref" : "#/definitions/tflite_StablehloPrecisionConfig"}
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_StablehloScatterOptions" : {
+      "type" : "object",
+      "properties" : {
+        "indices_are_sorted" : {
+                "type" : "boolean"
+              },
+        "update_window_dims" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              },
+        "inserted_window_dims" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              },
+        "scatter_dims_to_operand_dims" : {
+                "type" : "array", "items" : {"type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807}
+              },
+        "index_vector_dim" : {
+                "type" : "integer", "minimum" : -9223372036854775808, "maximum" : 9223372036854775807
+              },
+        "unique_indices" : {
+                "type" : "boolean"
+              },
+        "update_computation_subgraph_index" : {
+                "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              }
+      },
+      "additionalProperties" : false
+    },
+    "tflite_StablehloRngBitGeneratorOptions" : {
+      "type" : "object",
+      "properties" : {
+        "algorithm" : {
+                "$ref" : "#/definitions/tflite_RngAlgorithm"
+              }
+      },
+      "additionalProperties" : false
+    },
     "tflite_Conv2DOptions" : {
       "type" : "object",
       "properties" : {
@@ -230,6 +566,9 @@
               },
         "dilation_h_factor" : {
                 "type" : "integer", "minimum" : -2147483648, "maximum" : 2147483647
+              },
+        "quantized_bias_type" : {
+                "$ref" : "#/definitions/tflite_TensorType"
               }
       },
       "additionalProperties" : false
@@ -413,6 +752,9 @@
               },
         "asymmetric_quantize_inputs" : {
                 "type" : "boolean"
+              },
+        "quantized_bias_type" : {
+                "$ref" : "#/definitions/tflite_TensorType"
               }
       },
       "additionalProperties" : false
@@ -898,6 +1240,9 @@
               },
         "fused_activation_function" : {
                 "$ref" : "#/definitions/tflite_ActivationFunctionType"
+              },
+        "quantized_bias_type" : {
+                "$ref" : "#/definitions/tflite_TensorType"
               }
       },
       "additionalProperties" : false
@@ -1409,6 +1754,21 @@
       },
       "additionalProperties" : false
     },
+    "tflite_DilateOptions" : {
+      "type" : "object",
+      "properties" : {
+      },
+      "additionalProperties" : false
+    },
+    "tflite_ReduceWindowOptions" : {
+      "type" : "object",
+      "properties" : {
+        "reduce_function" : {
+                "$ref" : "#/definitions/tflite_ReduceWindowFunction"
+              }
+      },
+      "additionalProperties" : false
+    },
     "tflite_OperatorCode" : {
       "type" : "object",
       "properties" : {
@@ -1462,6 +1822,12 @@
               },
         "large_custom_options_size" : {
                 "type" : "integer", "minimum" : 0, "maximum" : 18446744073709551615
+              },
+        "builtin_options_2_type" : {
+                "$ref" : "#/definitions/tflite_BuiltinOptions2"
+              },
+        "builtin_options_2" : {
+                "anyOf": [{ "$ref" : "#/definitions/tflite_StablehloConcatenateOptions" },{ "$ref" : "#/definitions/tflite_StablehloBroadcastInDimOptions" },{ "$ref" : "#/definitions/tflite_StablehloSliceOptions" },{ "$ref" : "#/definitions/tflite_StablehloConvolutionOptions" },{ "$ref" : "#/definitions/tflite_StablehloCustomCallOptions" },{ "$ref" : "#/definitions/tflite_StablehloReduceOptions" },{ "$ref" : "#/definitions/tflite_StablehloScatterOptions" },{ "$ref" : "#/definitions/tflite_StablehloCompareOptions" },{ "$ref" : "#/definitions/tflite_StablehloDynamicSliceOptions" },{ "$ref" : "#/definitions/tflite_StablehloPadOptions" },{ "$ref" : "#/definitions/tflite_StablehloIotaOptions" },{ "$ref" : "#/definitions/tflite_StablehloDotGeneralOptions" },{ "$ref" : "#/definitions/tflite_StablehloReduceWindowOptions" },{ "$ref" : "#/definitions/tflite_StablehloSortOptions" },{ "$ref" : "#/definitions/tflite_StablehloWhileOptions" },{ "$ref" : "#/definitions/tflite_StablehloGatherOptions" },{ "$ref" : "#/definitions/tflite_StablehloTransposeOptions" },{ "$ref" : "#/definitions/tflite_DilateOptions" },{ "$ref" : "#/definitions/tflite_StablehloRngBitGeneratorOptions" },{ "$ref" : "#/definitions/tflite_ReduceWindowOptions" }]
               }
       },
       "additionalProperties" : false

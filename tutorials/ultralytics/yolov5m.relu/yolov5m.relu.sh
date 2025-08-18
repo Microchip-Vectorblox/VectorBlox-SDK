@@ -23,20 +23,25 @@ if [ ! -f $VBX_SDK/tutorials/coco2017_rgb_norm_20x416x416x3.npy ]; then
     generate_npy $VBX_SDK/tutorials/coco2017_rgb_20x416x416x3.npy -o $VBX_SDK/tutorials/coco2017_rgb_norm_20x416x416x3.npy -s 416 416  --norm 
 fi
 
-echo "Downloading yolov5m.relu..."
+echo "Checking for yolov5m.relu files..."
+
 # model details @ https://github.com/ultralytics/yolov5
 [ -f coco.names ] || wget -q https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
-wget -q --no-check-certificate https://github.com/Microchip-Vectorblox/assets/releases/download/assets/ultralytics.yolov5m.relu.onnx
+if [ ! -f yolov5m.relu.tflite ]; then
+   wget -q --no-check-certificate https://github.com/Microchip-Vectorblox/assets/releases/download/assets/ultralytics.yolov5m.relu.onnx
+fi
 
-echo "Running ONNX2TF..."
-onnx2tf -cind images $VBX_SDK/tutorials/coco2017_rgb_norm_20x416x416x3.npy [[[[0.,0.,0.]]]] [[[[1.,1.,1.]]]] \
+
+if [ ! -f yolov5m.relu.tflite ]; then
+   echo "Running ONNX2TF..."
+   onnx2tf -cind images $VBX_SDK/tutorials/coco2017_rgb_norm_20x416x416x3.npy [[[[0.,0.,0.]]]] [[[[1.,1.,1.]]]] \
 --overwrite_input_shape images:1,3,416,416 \
 --output_names_to_interrupt_model_conversion "onnx::Reshape_367" "onnx::Reshape_405" "onnx::Reshape_443" \
 -i ultralytics.yolov5m.relu.onnx \
 --output_signaturedefs \
 --output_integer_quantized_tflite
-cp saved_model/ultralytics.yolov5m.relu_full_integer_quant.tflite yolov5m.relu.tflite
-
+   cp saved_model/ultralytics.yolov5m.relu_full_integer_quant.tflite yolov5m.relu.tflite
+fi
 if [ -f yolov5m.relu.tflite ]; then
    tflite_preprocess yolov5m.relu.tflite  --scale 255
 fi

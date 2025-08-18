@@ -22,13 +22,13 @@
 
 
 struct model_descr_t models[] = {
-		{"Yolo v8n", "/home/root/samples_V1000_2.0.2/yolov8n_512x288.vnnx", 0, "ULTRALYTICS"},		
-		{"SCRFD", "/home/root/samples_V1000_2.0.2/scrfd_500m_bnkps.vnnx", 0, "SCRFD"},
-		{"mobileface-arcface", "/home/root/samples_V1000_2.0.2/mobilefacenet-arcface.vnnx", 0, "ARCFACE"},
-		{"MobileNet V2", "/home/root/samples_V1000_2.0.2/mobilenet-v2.vnnx", 0, "CLASSIFY"},	
-		{"Yolov8 Pose", "/home/root/samples_V1000_2.0.2/yolov8n-pose_512x288_split.vnnx", 0, "ULTRALYTICS_POSE"},	
-		{"FFNet 122NS", "/home/root/samples_V1000_2.0.2/FFNet-122NS-LowRes_512x288.vnnx", 0, "PIXEL"},	
-		{"Midas V2", "/home/root/samples_V1000_2.0.2/Midas-V2_256x128.vnnx", 0, "PIXEL"},
+		{"Yolo v8n", "/home/root/samples_V1000_2.0.3/yolov8n_512x288_argmax.vnnx", 0, "ULTRALYTICS"},		
+		{"SCRFD", "/home/root/samples_V1000_2.0.3/scrfd_500m_bnkps.vnnx", 0, "SCRFD"},
+		{"mobileface-arcface", "/home/root/samples_V1000_2.0.3/mobilefacenet-arcface.vnnx", 0, "ARCFACE"},
+		{"MobileNet V2", "/home/root/samples_V1000_2.0.3/mobilenet-v2.vnnx", 0, "CLASSIFY"},	
+		{"Yolov8 Pose", "/home/root/samples_V1000_2.0.3/yolov8n-pose_512x288_split.vnnx", 0, "ULTRALYTICS_POSE"},	
+		{"FFNet 122NS", "/home/root/samples_V1000_2.0.3/FFNet-122NS-LowRes_512x288.vnnx", 0, "PIXEL"},	
+		{"Midas V2", "/home/root/samples_V1000_2.0.3/Midas-V2-Quantized.vnnx", 0, "PIXEL"},
 };
 
 #define UIO_DMA_LIMIT 512*1024*1024*2
@@ -40,6 +40,14 @@ int add_embedding_mode = 0;
 int capture_embedding = 0;
 int delete_embedding_mode=0;
 char id_entered[128];
+
+#ifdef HLS_RESIZE
+    int set_screen_width = 1920;//1920;
+    int set_screen_height = 1080;//1080;
+    int set_screen_y_offset = 0;
+    int set_screen_x_offset = 0;
+    int set_screen_stride = 0x2000;
+#endif
 
 void enable_interrupt(vbx_cnn_t *vbx_cnn){
 	uint32_t reenable = 1;
@@ -392,6 +400,9 @@ int main(int argc, char **argv) {
 	int embedding_modify = 0;
 	int* input_dims;
     short privacy = 0;
+	int use_attribute_model = 0;
+	int x_offset = 0;
+	int y_offset = 0;
 
 	input_dims = model_get_input_shape(models[mode].model, 0);
 
@@ -424,11 +435,11 @@ int main(int argc, char **argv) {
 		while(status > 0) {
 			if (privacy)
 				if (!strcmp(models[mode].post_process_type, "POSENET") || !strcmp(models[mode].post_process_type, "ULTRALYTICS_POSE")){ //blank screen
-					int split = 24;
+					int split = 1;
 					privacy_draw(split);
 				}		
 			if(!strcmp(models[mode].post_process_type, "RETINAFACE") || !strcmp(models[mode].post_process_type, "SCRFD") || !strcmp(models[mode].post_process_type, "LPD")) {
-				status = runRecognitionDemo(models, vbx_cnn, mode, 0, 1080, 1920, 0, 0);
+				status = runRecognitionDemo(models, vbx_cnn, mode, use_attribute_model, 1080, 1920, y_offset, x_offset);
 			} else {
 				status = runDetectionDemo(models, vbx_cnn, mode);
 			}			

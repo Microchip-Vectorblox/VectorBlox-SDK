@@ -23,23 +23,30 @@ if [ ! -f $VBX_SDK/tutorials/imagenetv2_20x227x227x3.npy ]; then
     generate_npy $VBX_SDK/tutorials/imagenetv2_rgb_20x224x224x3.npy -o $VBX_SDK/tutorials/imagenetv2_20x227x227x3.npy -s 227 227  -b 
 fi
 
-echo "Downloading squeezenet1.1..."
-# model details @ https://github.com/openvinotoolkit/open_model_zoo/tree/2021.4.2/models/public/squeezenet1.1/
-omz_downloader --name squeezenet1.1
+echo "Checking for squeezenet1.1 files..."
 
-echo "Running Model Optimizer..."
-mo --input_model public/squeezenet1.1/squeezenet1.1.caffemodel \
+# model details @ https://github.com/openvinotoolkit/open_model_zoo/tree/2021.4.2/models/public/squeezenet1.1/
+if [ ! -f squeezenet1.1.tflite ]; then 
+omz_downloader --name squeezenet1.1
+fi
+
+
+if [ ! -f squeezenet1.1.tflite ]; then
+   echo "Running Model Optimizer..."
+   mo --input_model public/squeezenet1.1/squeezenet1.1.caffemodel \
 --reverse_input_channels \
 --mean_values [104,117,123] \
 --static_shape \
 --input_shape [1,3,227,227]
-
-echo "Running OpenVINO2Tensorflow..."
-openvino2tensorflow --load_dest_file_path_for_the_calib_npy $VBX_SDK/tutorials/imagenetv2_20x227x227x3.npy \
+fi
+if [ ! -f squeezenet1.1.tflite ]; then
+   echo "Running OpenVINO2Tensorflow..."
+   openvino2tensorflow --load_dest_file_path_for_the_calib_npy $VBX_SDK/tutorials/imagenetv2_20x227x227x3.npy \
 --model_path squeezenet1.1.xml \
 --output_full_integer_quant_tflite \
 --string_formulas_for_normalization '(data - [0.,0.,0.]) / [1.,1.,1.]'
-cp saved_model/model_full_integer_quant.tflite squeezenet1.1.tflite
+   cp saved_model/model_full_integer_quant.tflite squeezenet1.1.tflite
+fi
 
 if [ -f squeezenet1.1.tflite ]; then
    tflite_preprocess squeezenet1.1.tflite   

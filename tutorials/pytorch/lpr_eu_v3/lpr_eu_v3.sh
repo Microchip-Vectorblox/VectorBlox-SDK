@@ -23,22 +23,29 @@ if [ ! -f $VBX_SDK/tutorials/sample_plates_20x34x146x3.npy ]; then
     generate_npy $VBX_SDK/tutorials/sample_plates_20x34x146x3.npy -o $VBX_SDK/tutorials/sample_plates_20x34x146x3.npy -s 34 146  -b 
 fi
 
-echo "Downloading lpr_eu_v3..."
-# model details @ pytorch/lpr_eu_v3/README.md
-[ -f lpr_eu_v3.onnx ] || wget -q --no-check-certificate https://github.com/Microchip-Vectorblox/assets/releases/download/assets/lpr_eu_v3.onnx
+echo "Checking for lpr_eu_v3 files..."
 
-echo "Running Model Optimizer..."
-mo --input_model lpr_eu_v3.onnx \
+# model details @ pytorch/lpr_eu_v3/README.md
+if [ ! -f lpr_eu_v3.tflite ]; then
+   [ -f lpr_eu_v3.onnx ] || wget -q --no-check-certificate https://github.com/Microchip-Vectorblox/assets/releases/download/assets/lpr_eu_v3.onnx
+fi
+
+
+if [ ! -f lpr_eu_v3.tflite ]; then
+   echo "Running Model Optimizer..."
+   mo --input_model lpr_eu_v3.onnx \
 --scale_values [255.] \
 --static_shape \
 --input_shape [1,3,34,146]
-
-echo "Running OpenVINO2Tensorflow..."
-openvino2tensorflow --load_dest_file_path_for_the_calib_npy $VBX_SDK/tutorials/sample_plates_20x34x146x3.npy \
+fi
+if [ ! -f lpr_eu_v3.tflite ]; then
+   echo "Running OpenVINO2Tensorflow..."
+   openvino2tensorflow --load_dest_file_path_for_the_calib_npy $VBX_SDK/tutorials/sample_plates_20x34x146x3.npy \
 --model_path lpr_eu_v3.xml \
 --output_full_integer_quant_tflite \
 --string_formulas_for_normalization '(data - [0.,0.,0.]) / [1.,1.,1.]'
-cp saved_model/model_full_integer_quant.tflite lpr_eu_v3.tflite
+   cp saved_model/model_full_integer_quant.tflite lpr_eu_v3.tflite
+fi
 
 if [ -f lpr_eu_v3.tflite ]; then
    tflite_preprocess lpr_eu_v3.tflite   

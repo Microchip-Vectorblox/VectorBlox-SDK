@@ -5,6 +5,7 @@ from math import floor, ceil, log2, sqrt
 MXP_DOUBLE_BUFFER = 1   # Will remove later
 FIA_WRITE_DB = 0
 FORCE_SB = 0
+OPTIMIZED_AVERAGE_POOL = 0
 
 # Split shaper buffers to use 2 buffers
 SPLIT_WEIGHT_SHAPER_BUFFERS = 1 # Will remove later
@@ -146,7 +147,7 @@ def min_output_tile(node):
                      BuiltinOperator.ABS,
                      BuiltinOperator.RSQRT,
                      BuiltinOperator.NEG,
-                     BuiltinOperator.MUL,
+                    #  BuiltinOperator.MUL,
                      BuiltinOperator.ADD,
                      BuiltinOperator.SUB,
                      BuiltinOperator.DEQUANTIZE,
@@ -164,7 +165,6 @@ def min_output_tile(node):
                      BuiltinOperator.LESS_EQUAL,
                      BuiltinOperator.EQUAL,
                      BuiltinOperator.NOT_EQUAL,
-                     BuiltinOperator.MIRROR_PAD,
                      BuiltinOperator.CONCATENATION,
                      VNNXOperator.IDENTITY,
                      BuiltinOperator.MINIMUM,
@@ -278,11 +278,35 @@ def min_output_tile(node):
             return np.asarray([batch, imaps, irows, icols, maps, rows, cols])
         return x 
        
-    elif e in [BuiltinOperator.MAX_POOL_2D, BuiltinOperator.AVERAGE_POOL_2D]:
+    elif e in [BuiltinOperator.AVERAGE_POOL_2D]:
+        kh, kw = node.kernel_shape
+        sh, sw = node.strides
+        pads = node.pads.copy()
+
+        def x(tile):
+            batch, imaps, irows, icols, maps, rows, cols = tile
+            if cols != node.tensor_array[0].shape[-1]:
+                return np.asarray([batch, imaps, irows, icols, maps, (rows-kh) // sh + 1, 0])
+
+            if OPTIMIZED_AVERAGE_POOL:
+                if node.tensor_array[0].shape[-3] % 2 == 0 and kh == 2 and kw == 2 and sh == 1 and sw == 1 and np.sum(pads) == 0:
+                    if maps % 2 != 0:
+                        return np.asarray([batch, imaps, irows, icols, 0, (rows-kh) // sh + 1, (cols-kw) // sw + 1])
+
+                if node.tensor_array[0].shape[-2] % 2 == 0 and node.tensor_array[0].shape[-1] % 2 == 0 and kh == 2 and kw == 2 and sh == 2 and sw == 2 and np.sum(pads) == 0:
+                    if cols % 2 != 0:
+                        return np.asarray([batch, imaps, irows, icols, maps, (rows-kh) // sh + 1, 0])
+                    if rows % 2 != 0:
+                        return np.asarray([batch, imaps, irows, icols, maps, 0, (cols-kw) // sw + 1])
+            return np.asarray([batch, imaps, irows, icols, maps, (rows-kh) // sh + 1, (cols-kw) // sw + 1])
+        return x 
+
+    elif e in [BuiltinOperator.MAX_POOL_2D]:
         kh, kw = node.kernel_shape
         sh, sw = node.strides
 
         return lambda s: np.concatenate((s[:ROWS],[(s[ROWS] - kh) // sh + 1],[(s[COLUMNS] - kw) // sw + 1]))
+
     elif e == BuiltinOperator.TRANSPOSE:
         permutation = node.TransposeOptions.permutation
         def x(tile):
@@ -301,6 +325,16 @@ def min_output_tile(node):
                 assert(permutation == [0,1,2])
                 return np.asarray([batch, imaps, irows, icols, maps, rows, cols])
         return x
+
+    elif e == VNNXOperator.PIXEL_SHUFFLE:
+        r = node.PixelShuffleOptions.r
+        def x(tile):
+            batch, imaps, irows, icols, maps, rows, cols = tile
+            if maps % r**2:
+                return np.asarray([batch, imaps, irows, icols, 0, rows*r, cols*r])
+            return np.asarray([batch, imaps, irows, icols, maps // (r**2), rows*r, cols*r])
+        return x
+
     elif e == BuiltinOperator.TILE:
         tile_n, tile_c, tile_h, tile_w = node.TileOptions.tile
         def x(tile):
@@ -343,34 +377,52 @@ def min_output_tile(node):
                 return np.asarray([batch, imaps, irows, icols, 0, rows, cols])
             return np.asarray([batch, imaps, irows, icols, maps, rows, cols])
         return x 
-    elif e == BuiltinOperator.PAD:
+    elif e in [BuiltinOperator.PAD, BuiltinOperator.DILATE, BuiltinOperator.MIRROR_PAD]:
         pads = node.pads.copy()
 
-        dh, dw = node.PadOptions.transpose_dilate_h, node.PadOptions.transpose_dilate_w
-        dhf = dh - 1
-        dwf = dw - 1
+        if e in [BuiltinOperator.PAD, BuiltinOperator.DILATE]:
+            dh, dw = node.PadOptions.transpose_dilate_h, node.PadOptions.transpose_dilate_w
+            dhf = dh - 1
+            dwf = dw - 1
 
-        if dhf == 0 and dwf == 0:
-            return default
+            if dhf == 0 and dwf == 0:
+                return default
 
-        m = node.tensor_array[0].shape[-2]
-        n = node.tensor_array[0].shape[-1]
+            m = node.tensor_array[0].shape[-2]
+            n = node.tensor_array[0].shape[-1]
 
-        def x(tile):
-            batch, imaps, irows, icols, maps, rows, cols = tile
+            def x(tile):
+                batch, imaps, irows, icols, maps, rows, cols = tile
 
-            omaps = maps + pads[0] + pads[3]
-            orows = rows + (dhf*rows)
-            ocols = cols + (dwf*cols)
-            if rows == m:
-                orows = rows + pads[1] + pads[4] + (dhf*rows)
-                orows -= dhf
-            if cols == n:
-                ocols = cols + pads[2] + pads[5] + (dwf*cols)
-                ocols -= dwf
+                omaps = maps + pads[0] + pads[3]
+                orows = rows + (dhf*rows)
+                ocols = cols + (dwf*cols)
+                if rows == m:
+                    orows = rows + pads[1] + pads[4] + (dhf*rows)
+                    orows -= dhf
+                if cols == n:
+                    ocols = cols + pads[2] + pads[5] + (dwf*cols)
+                    ocols -= dwf
 
-            return np.asarray([batch, imaps, irows, icols, omaps, orows, ocols])
-        return x
+                return np.asarray([batch, imaps, irows, icols, omaps, orows, ocols])
+            return x
+        else:
+            def x(tile):
+                batch, imaps, irows, icols, maps, rows, cols = tile
+                omaps = maps + pads[0] + pads[3]
+                orows =  pads[1] + pads[4]
+                ocols =  pads[2] + pads[5]
+                mode = node.MirrorPadOptions.mode
+                if rows < orows*2+1 and orows > 0:
+                    return np.asarray([batch, imaps, irows, icols, maps, 0, ocols])
+                
+                if cols < ocols*2+1 and ocols > 0:
+                    return np.asarray([batch, imaps, irows, icols, maps, orows, 0])
+                # omaps = maps + pads[0] + pads[3]
+                orows += rows 
+                ocols += cols
+                return np.asarray([batch, imaps, irows, icols, omaps, orows, ocols])
+            return x
 
     elif e == BuiltinOperator.UNPACK:
         shape = node.tensor_array[0].shape
@@ -459,9 +511,12 @@ def min_output_tile(node):
                 temp_col = out_cols
 
             if e == BuiltinOperator.RESIZE_BILINEAR:
-                if sh==2.0 and sw ==2.0:
-                    temp_row = (rows-1)*sh
-                    temp_col = (cols-1)*sw 
+                temp_row = (rows-1)*sh
+                temp_col = (cols-1)*sw 
+
+                if (sh==2.0 and sw ==2.0) or (sh==4.0 and sw ==4.0):
+                    temp_row = (rows)*sh
+                    temp_col = (cols)*sw 
                     if temp_col != int(temp_col) or cols<2:
                         return np.asarray([batch, imaps, irows, icols, maps, temp_row , 0])
                 
@@ -484,7 +539,26 @@ def min_output_tile(node):
             return np.asarray([batch, imaps, irows, icols, maps, int(temp_row) , int(temp_col)])
 
         return x
-    
+    elif e == BuiltinOperator.MUL:
+        def x(tile):
+            batch, imaps, irows, icols, maps, rows, cols = tile
+            filter_dim = node.broadcast8.filter_shape_dims
+            filter_rows = filter_dim[2]
+            filter_columns = filter_dim[3]
+            if e == BuiltinOperator.MUL:
+                if filter_rows == node.tensor_array[0].shape[-2] and filter_columns == node.tensor_array[0].shape[-1]:
+                    if cols != node.tensor_array[0].shape[-1]:
+                        return np.asarray([batch, imaps, irows, icols, maps, rows, 0])
+            
+            # if e in [BuiltinOperator.MUL, BuiltinOperator.ADD]:
+            #     if filter_rows == node.tensor_array[0].shape[-2] and filter_columns == node.tensor_array[0].shape[-1]:
+            #         if cols != node.tensor_array[0].shape[-1]:
+            #             # print('min_output_tile', e, cols, node.tensor_array[0].shape[-1])
+            #             return np.asarray([batch, imaps, irows, icols, maps, rows, 0])
+                    
+            return np.asarray([batch, imaps, irows, icols, maps, rows, cols])
+        return x
+        
     elif e == VNNXOperator.UNKNOWN:
         pass
     print(e, 'min_output_tile')
@@ -548,32 +622,40 @@ def max_output_tile(node):
             
         return x
 
-    elif e == BuiltinOperator.PAD:
+    elif e in [BuiltinOperator.PAD, BuiltinOperator.DILATE, BuiltinOperator.MIRROR_PAD]:
         pads = node.pads.copy()
+        if e in [BuiltinOperator.PAD, BuiltinOperator.DILATE]:
+            dh, dw = node.PadOptions.transpose_dilate_h, node.PadOptions.transpose_dilate_w
+            dhf = dh - 1
+            dwf = dw - 1
 
-        dh, dw = node.PadOptions.transpose_dilate_h, node.PadOptions.transpose_dilate_w
-        dhf = dh - 1
-        dwf = dw - 1
+            if dhf == 0 and dwf == 0:
+                return default
 
-        if dhf == 0 and dwf == 0:
-            return default
+            m = node.tensor_array[0].shape[2]
+            n = node.tensor_array[0].shape[3]
 
-        m = node.tensor_array[0].shape[2]
-        n = node.tensor_array[0].shape[3]
+            def x(tile):
+                batch, imaps, irows, icols, maps, rows, cols = tile
 
-        def x(tile):
-            batch, imaps, irows, icols, maps, rows, cols = tile
+                omaps = maps + pads[0] + pads[3]
+                orows = rows + pads[1] + pads[4] + (dhf*rows)
+                ocols = cols + pads[2] + pads[5] + (dwf*cols)
+                if rows == m:
+                    orows -= dhf
+                if cols == n:
+                    ocols -= dwf
 
-            omaps = maps + pads[0] + pads[3]
-            orows = rows + pads[1] + pads[4] + (dhf*rows)
-            ocols = cols + pads[2] + pads[5] + (dwf*cols)
-            if rows == m:
-                orows -= dhf
-            if cols == n:
-                ocols -= dwf
-
-            return np.asarray([batch, imaps, irows, icols, omaps, orows, ocols])
-        return x
+                return np.asarray([batch, imaps, irows, icols, omaps, orows, ocols])
+            return x
+        else:
+            def x(tile):
+                batch, imaps, irows, icols, maps, rows, cols = tile
+                omaps = maps + pads[0] + pads[3]
+                orows = rows + pads[1] + pads[4]
+                ocols = cols + pads[2] + pads[5]
+                return np.asarray([batch, imaps, irows, icols, omaps, orows, ocols])
+            return x
 
     return min_output_tile(node)
     
@@ -776,11 +858,39 @@ def max_sp_tile(node, vector_lanes, sp=None):
 
             return [v_out, v_tmp]
         return x
-    elif e == BuiltinOperator.AVERAGE_POOL_2D:
+    elif e == VNNXOperator.PIXEL_SHUFFLE:
+        r = node.PixelShuffleOptions.r
         def x(tile):
             batch, imaps, irows, icols, maps, rows, cols = tile
-            v_out = aligned(batch*maps*rows*cols)
-            v_tmp = aligned(batch*maps*rows*cols*2*2) #TODO
+            v_out = aligned(batch*(maps//(r**2))*rows*r*cols*r) # v_in == v_out
+            v_tmp = 0
+
+            return [v_out, v_tmp]
+        return x
+    elif e == BuiltinOperator.AVERAGE_POOL_2D:
+        kh, kw = node.kernel_shape
+        sh, sw = node.strides
+        pads = node.pads.copy()
+        def x(tile):
+            batch, imaps, irows, icols, maps, rows, cols = tile
+
+            padded_height = rows + pads[1] + pads[4]
+            padded_width = cols + pads[2] + pads[5]
+            out_rows = (padded_height - kh)//sh + 1 
+            out_cols = (padded_width - kw)//sw + 1 
+            strided_out_cols  = (padded_width - kw)//1 + 1
+
+            v_tmp = aligned(batch*maps*out_rows*out_cols*2)
+            v_tmp += aligned(batch*maps*out_rows*strided_out_cols*2)
+
+            if OPTIMIZED_AVERAGE_POOL:
+                if node.tensor_array[0].shape[-2] % 2 == 0 and node.tensor_array[0].shape[-1] % 2 == 0 and kh == 2 and kw == 2 and sh == 2 and sw == 2 and np.sum(pads) == 0:
+                    v_tmp = 0
+
+                if node.tensor_array[0].shape[-3] % 2 == 0 and kh == 2 and kw == 2 and sh == 1 and sw == 1 and np.sum(pads) == 0:
+                    v_tmp = 0
+
+            v_out = aligned(batch*maps*out_rows*out_cols)
 
             return [v_out, v_tmp]
         return x
@@ -856,11 +966,11 @@ def max_sp_tile(node, vector_lanes, sp=None):
 
             return [v_out, v_tmp]
         return x
-    elif e in [BuiltinOperator.PAD, BuiltinOperator.MIRROR_PAD]:
+    elif e in [BuiltinOperator.PAD, BuiltinOperator.MIRROR_PAD, BuiltinOperator.DILATE]:
         pads = node.pads.copy()
         dhf = 0
         dwf = 0
-        if e == BuiltinOperator.PAD:
+        if e in [BuiltinOperator.PAD, BuiltinOperator.DILATE]:
             dh, dw = node.PadOptions.transpose_dilate_h, node.PadOptions.transpose_dilate_w
             dhf = dh - 1
             dwf = dw - 1
@@ -893,7 +1003,6 @@ def max_sp_tile(node, vector_lanes, sp=None):
                 padded_cols = cols + pads[2] + pads[5]
                 v_out = aligned(batch * padded_maps * padded_rows * padded_cols)
                 v_tmp = 0
-
                 return [v_out, v_tmp]            
         return x
     elif e == BuiltinOperator.DEQUANTIZE:
@@ -909,7 +1018,7 @@ def max_sp_tile(node, vector_lanes, sp=None):
             
             return [v_out, v_tmp]
         return x
-    elif e in [BuiltinOperator.MUL, BuiltinOperator.ADD, BuiltinOperator.SUB, BuiltinOperator.SQUARED_DIFFERENCE]:
+    elif e in [BuiltinOperator.MUL, BuiltinOperator.ADD, BuiltinOperator.SUB, BuiltinOperator.SQUARED_DIFFERENCE, BuiltinOperator.MAXIMUM, BuiltinOperator.MINIMUM]:
         def x(tile):
             batch, imaps, irows, icols, maps, rows, cols = tile
             if node.broadcast8.optimized:
@@ -929,7 +1038,7 @@ def max_sp_tile(node, vector_lanes, sp=None):
                 if node.broadcast8.broadcast != 1:
                     v_tmp += aligned(batch * maps * rows * cols * 4)
             v_out = aligned(batch * maps * rows * cols)
-            
+           
             return [v_out, v_tmp]
         return x
     elif e == BuiltinOperator.TRANSPOSE:
@@ -1013,12 +1122,24 @@ def max_sp_tile(node, vector_lanes, sp=None):
 
                 return [v_out, v_tmp]
             return x
+        elif sh == 4.0 and sw == 4.0:
+            def x(tile):
+                batch, imaps, irows, icols, maps, rows, cols = tile
+                size = batch * maps * rows * cols
+                v_tmp = 0 #aligned(size)
+                v_out = aligned(size*4*4)
+
+                return [v_out, v_tmp]
+            return x
         else:
             def x(tile):
                 batch, imaps, irows, icols, maps, rows, cols = tile
                 size = batch * maps * rows * cols
                 # v_tmp = aligned(size)
-                v_tmp = aligned(int(rows * sw *cols))
+                if  sw <1 :
+                    v_tmp = aligned(int(rows * cols))
+                else:
+                    v_tmp = aligned(int(rows * sw *cols))
                 # v_tmp += aligned(int(rows*sw*cols +0.5))
                 v_out = aligned(int((size*sh)*sw))
 
@@ -1030,15 +1151,20 @@ def max_sp_tile(node, vector_lanes, sp=None):
             batch, imaps, irows, icols, maps, rows, cols = tile
             size = batch * maps * rows * cols      
             v_tmp_size = max(rows, int(cols*sw))    
-            # v_tmp = aligned(rows*int(sw*cols+0.5)) #xp_temp2
             v_tmp = aligned(v_tmp_size*4)
-            v_tmp += aligned(v_tmp_size*4)
+            v_tmp += aligned(cols*sw*rows*sh)
 
-            if sw>1 :    #upscale    
+            if sh==4.0 and sh==2.0:
+                v_tmp=aligned(cols*4)
+                v_tmp+=aligned(cols*4)
+                v_tmp+=aligned(cols*sw)
+            elif sw>1 :    #upscale    
                 v_tmp_size2 = rows*int(sw*cols)
                 v_tmp += aligned(v_tmp_size2) #xp_temp
+                v_tmp += aligned(4*2) #xp_temp
             elif sw<1:   #downscale
-                v_tmp += aligned(rows * cols) #xp_temp
+                v_tmp += aligned(rows * cols)
+                v_tmp += aligned(rows * cols*sw)  #xp_temp2
             
             v_out = aligned(int((size*sh)*sw))
 
@@ -1059,6 +1185,9 @@ def max_sp_tile(node, vector_lanes, sp=None):
 
                 v_tmp += aligned(isize * 2) # v_tmp
                 v_tmp += aligned(isize * 2) # v_add
+            elif node.eltwise8.type in [eltwise_type.ELTWISE_MAXIMUM, eltwise_type.ELTWISE_MINIMUM]:
+                v_tmp = aligned(batch * maps * rows * cols) #v_in
+                node.eltwise8.isize = 0
             else:
                 node.eltwise8.isize = 0
                 v_tmp += aligned(batch * maps * rows * cols * 4) # v_tmp
@@ -1076,7 +1205,7 @@ def max_sp_tile(node, vector_lanes, sp=None):
     elif e in [BuiltinOperator.MAXIMUM, BuiltinOperator.MINIMUM]:
         def x(tile):
             batch, imaps, irows, icols, maps, rows, cols = tile
-            size = batch  * rows * cols
+            size = batch  * rows * cols * maps
             filter_shape = node.MinMaxOptions.filter_shape_dims
             filter_size = np.prod(filter_shape)
 
@@ -1109,7 +1238,7 @@ def max_sp_tile(node, vector_lanes, sp=None):
 def get_tile_steps(fx, idx, len_idx, limit_idx, start, stop, max_input_len):
     if start + max_input_len == stop:
         return [0], [max_input_len]
-    layer = [0 for _ in range(15)]
+    layer = [1 for _ in range(15)]
     layer[limit_idx] = stop
 
     layer[idx], layer[len_idx] = start, stop
@@ -1124,6 +1253,7 @@ def get_tile_steps(fx, idx, len_idx, limit_idx, start, stop, max_input_len):
         input_len = max_input_len
         layer[idx], layer[len_idx] = i, input_len
         max_output_len = fx(layer)[len_idx] 
+        assert(max_output_len > 0)
 
         # shrink if maximum output length exceeds total output length
         if (fx(layer)[idx] + max_output_len) > total_output_len:
@@ -1242,10 +1372,7 @@ def set_tile_attr(node, vector_lanes, sp, tile, cores=1):
     outer_idx, batches_idx, channels_idx, y_idx, x_idx = 10, 11, 12, 13, 14
     
     y, r = get_tile_steps(fx, y_idx, rows_idx, m_idx, y_start, y_stop, rows)
-    # print(y, r)
-
     x, c = get_tile_steps(fx, x_idx, cols_idx, n_idx, x_start, x_stop, cols)
-    # print(x,c)
 
     y_diff = [a-b for a,b in zip(y[1:], y[:-1])]
     x_diff = [a-b for a,b in zip(x[1:], x[:-1])]
@@ -1503,44 +1630,23 @@ def adjust_tile(node):
                 col=floor(col*sw)
             # for each min input tile, we return th output tile size
             elif e == BuiltinOperator.RESIZE_BILINEAR:
-                if sh==2.0 and sw==2.0:
+                if (sh==2.0 and sw==2.0) or (sh==4.0 and sw==4.0):
                     y= floor(y*sh)
                     x=floor(x*sw)
                     r=floor(r-1)*sh
                     col=floor(col-1)*sw
                 else:
                     y= floor(y*sh)
-                    x=floor(x*sw)
-                    r=floor(r*sh)
-                    col=floor(col*sw)
-                # last_y = y + r== m
-                # last_x = x + col >= n
-
-                # if not last_y:
-                    # if r==m:
-                        # r=r*sh
-                    # else:
-                        # r=((r/2)*sh)
-                # else:
-                    # r=r*sh
-
-                # if not last_x:
-                    # if(col==n):
-                        # col=(col*sw)
-                    # else:
-                        # col=((col/2)*sw)
-                # else:
-                    # col=(col*sw)
-
-                # x=(x*sw)
-                # y= (y*sh)
+                    x=floor(x*sw)                    
+                    r=floor(r-1)*sh
+                    col=floor(col-1)*sw
 
             return o, b, c, m*sh, n*sw, o_step, b_step, maps, r, col, outer, batches, channels, y, x
         return adjust
-    elif e in [BuiltinOperator.PAD, BuiltinOperator.MIRROR_PAD]:
+    elif e in [BuiltinOperator.PAD, BuiltinOperator.MIRROR_PAD, BuiltinOperator.DILATE]:
         dhf = 0
         dwf = 0
-        if e == BuiltinOperator.PAD:
+        if e in [BuiltinOperator.PAD, BuiltinOperator.DILATE]:
             dh, dw = node.PadOptions.transpose_dilate_h, node.PadOptions.transpose_dilate_w
             dhf = dh - 1
             dwf = dw - 1
@@ -1639,6 +1745,12 @@ def adjust_tile(node):
                 pass
 
             return o, b, c, m, n, o_step, b_step, maps, r, col, outer, batches, channels, y, x
+        return adjust
+    elif e == VNNXOperator.PIXEL_SHUFFLE:
+        r = node.PixelShuffleOptions.r
+        def adjust(layer):
+            o, b, c, m, n, o_step, b_step, maps, row, col, outer, batches, channels, y, x = layer
+            return o, b, c // (r**2), m*r, n*r, o_step, b_step, maps // (r**2), row*r, col*r, outer, batches, channels // (r**2), y*r, x*r
         return adjust
     elif e == BuiltinOperator.TILE:
         tile_n, tile_c, tile_h, tile_w = node.TileOptions.tile
@@ -2284,8 +2396,13 @@ def fit_conv(tile, node, vl, sp, fx, preset, use_db=None, row_db=None, split_wei
                 if t[MAPS] % parallel_output_maps:
                     next_t[MAPS] -= (t[MAPS] % parallel_output_maps)
                 else:
-                    # next_t[MAPS] -= parallel_output_maps
                     next_t[MAPS] //= 2
+
+            # max columns now if unable to do so before
+            limit_cols = node.n # adjust COLUMN limit to be maximum valid fia COLUMN limit
+            while limit_cols > next_t[COLUMNS] and not v(next_t[MAPS],next_t[IMAPS],next_t[ROWS],limit_cols):
+                limit_cols -= 1
+            next_t = increment_tile(node, vl, sp, fx, next_t, COLUMNS, limit=limit_cols)
 
             # grow rows for next_t
             limit_rows = node.m
@@ -2306,8 +2423,13 @@ def fit_conv(tile, node, vl, sp, fx, preset, use_db=None, row_db=None, split_wei
 
                 # reduce omaps until rows or imaps changes from the prev tile, and compare
                 while next_t[MAPS] > parallel_output_maps and next_t[ROWS] == t[ROWS] and next_t[IMAPS] == t[IMAPS]:
-                    # next_t[MAPS] -= parallel_output_maps
                     next_t[MAPS] //= 2
+
+                    # max columns now if unable to do so before
+                    limit_cols = node.n # adjust COLUMN limit to be maximum valid fia COLUMN limit
+                    while limit_cols > next_t[COLUMNS] and not v(next_t[MAPS],next_t[IMAPS],next_t[ROWS],limit_cols):
+                        limit_cols -= 1
+                    next_t = increment_tile(node, vl, sp, fx, next_t, COLUMNS, limit=limit_cols)
 
                     # grow rows for next_t
                     limit_rows = node.m
@@ -2323,6 +2445,42 @@ def fit_conv(tile, node, vl, sp, fx, preset, use_db=None, row_db=None, split_wei
             
             return True, t, conv_rows
 
+        else:
+            # can't fit full anything, start with setting tile omaps to parallel maps
+            tile[MAPS] = min(node.Conv2DOptions.filter_shape_dims[0], parallel_output_maps)
+            t = tile
+
+            # max columns
+            limit_cols = node.n # adjust COLUMN limit to be maximum valid fia COLUMN limit
+            while limit_cols > t[COLUMNS] and not v(t[MAPS],t[IMAPS],t[ROWS],limit_cols):
+                limit_cols -= 1
+            t = increment_tile(node, vl, sp, fx, t, COLUMNS, limit=limit_cols)
+
+            # max rows
+            limit_rows = node.m
+            while limit_rows > t[ROWS] and not v(t[MAPS],t[IMAPS],limit_rows, t[COLUMNS]):
+                limit_rows -= 1
+            t = increment_tile(node, vl, sp, fx, t, ROWS, limit=limit_rows)
+
+            # max imaps
+            limit_imaps = node.Conv2DOptions.filter_shape_dims[1]
+            while not v(t[MAPS],limit_imaps,t[ROWS],t[COLUMNS]):
+                limit_imaps -= 1
+            t = increment_tile(node, vl, sp, fx, t, IMAPS, limit=limit_imaps)
+
+            # max maps
+            limit_maps = node.Conv2DOptions.filter_shape_dims[0]
+            while limit_maps > t[MAPS] and not v(limit_maps,t[IMAPS],t[ROWS],t[COLUMNS]):
+                limit_maps -= 1
+            if limit_maps != node.Conv2DOptions.filter_shape_dims[0]:
+                limit_maps = limit_maps // parallel_output_maps * parallel_output_maps
+            t = increment_tile(node, vl, sp, fx, t, MAPS, limit=limit_maps)
+
+            if t[MAPS] != node.Conv2DOptions.filter_shape_dims[0]:
+                if t[MAPS] % parallel_output_maps and t[MAPS] > parallel_output_maps:
+                    t[MAPS] = t[MAPS] // parallel_output_maps * parallel_output_maps  
+
+            return True, t, conv_rows          
 
 def usage(node, tile, preset):
 
@@ -2408,9 +2566,8 @@ def tile_subgraph(node, preset, opcode):
         v = lambda m,im,r,c : valid_fia(m, im, r, c, node, preset)
         is_allocated = False
 
-        if FORCE_SB:
-            node.Conv2DOptions.conv_rows = 0
-            node.Conv2DOptions.use_db = 0
+        node.Conv2DOptions.conv_rows    = (not FORCE_SB)
+        node.Conv2DOptions.use_db       = (not FORCE_SB)
 
         if not node.Conv2DOptions.use_fia: # scalar + vector
             tile = increment_tile(node, vl, sp, fx, tile, COLUMNS, limit=node.n)
@@ -2448,7 +2605,6 @@ def tile_subgraph(node, preset, opcode):
 
             kh = node.Conv2DOptions.filter_shape_dims[-2]
             if kh == 1 and node.Conv2DOptions.use_db and (5 < rows_db_rows < tile_conv_db_rows[ROWS] < node.m):
-            # if node.Conv2DOptions.use_db and (rows_db_rows <= tile_conv_db_rows[ROWS] <= node.m):
                 tile = tile_conv_db_rows
                 is_allocated = conv_db_rows
                 node.Conv2DOptions.conv_rows = rows_db_rows
@@ -2538,7 +2694,8 @@ def tile_subgraph(node, preset, opcode):
             tile = increment_tile(node, vl, sp, fx, tile, ICOLUMNS, limit=accum_depth)
             tile = increment_tile(node, vl, sp, fx, tile, COLUMNS, limit=output_depth)
             tile = increment_tile(node, vl, sp, fx, tile, IROWS, limit=output_depth)
-    
+
+
     else: # common case
         tile = increment_tile(node, vl, sp, fx, tile, COLUMNS, limit=node.n)
         tile = increment_tile(node, vl, sp, fx, tile, ROWS, limit=node.m)

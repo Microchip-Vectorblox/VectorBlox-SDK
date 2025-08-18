@@ -6,7 +6,7 @@
     ```
     wget --no-check-certificate https://raw.githubusercontent.com/Microchip-Vectorblox/assets/refs/heads/main/quick_start.sh
     ```
-- Run the script with the realease version you want to download. The command below shows how to download the `2.0.2` release:
+- Run the script with the realease version you want to download. The command below shows how to download the `2.0.2` release (if no version is specified it will download the latest):
     ```
     bash quick_start.sh 2.0.2
     ```

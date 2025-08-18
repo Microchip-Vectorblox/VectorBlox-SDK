@@ -23,25 +23,29 @@ if [ ! -f $VBX_SDK/tutorials/imagenetv2_rgb_norm_20x224x224x3.npy ]; then
     generate_npy $VBX_SDK/tutorials/imagenetv2_rgb_20x224x224x3.npy -o $VBX_SDK/tutorials/imagenetv2_rgb_norm_20x224x224x3.npy -s 300 300  --norm 
 fi
 
-echo "Downloading efficientnet-lite4-int8..."
+echo "Checking for efficientnet-lite4-int8 files..."
+
 # model details @ https://www.kaggle.com/models/google/efficientnet/tensorFlow1/b4-classification/1
-if [ ! -f efficientnet-lite4.tar.gz ]; then
+if [ ! -f efficientnet-lite4-int8.tflite ]; then
     wget -q --no-check-certificate https://storage.googleapis.com/cloud-tpu-checkpoints/efficientnet/lite/efficientnet-lite4.tar.gz
-fi
-tar -xzf efficientnet-lite4.tar.gz
-cp efficientnet-lite4/efficientnet-lite4-int8.tflite .
-tflite_cut efficientnet-lite4-int8.tflite -c 0
-mv efficientnet-lite4-int8.1.tflite efficientnet-lite4-int8.tflite
-tflite_cut efficientnet-lite4-int8.tflite -c 117
-mv efficientnet-lite4-int8.0.tflite efficientnet-lite4-int8.tflite
-
-if [ -f efficientnet-lite4-int8.tflite ]; then
-   tflite_preprocess efficientnet-lite4-int8.tflite  --scale 255
+   tar -xzf efficientnet-lite4.tar.gz
+   cp efficientnet-lite4/efficientnet-lite4-int8.tflite .
 fi
 
-if [ -f efficientnet-lite4-int8.pre.tflite ]; then
+
+if [ -f efficientnet-lite4-int8.tflite ]; then 
+   echo "Cutting graph" 
+   tflite_cut efficientnet-lite4-int8.tflite -c 0 118
+   mv efficientnet-lite4-int8.1.tflite efficientnet-lite4-int8.cut.tflite 
+fi
+
+if [ -f efficientnet-lite4-int8.cut.tflite ]; then
+   tflite_preprocess efficientnet-lite4-int8.cut.tflite  --scale 255
+fi
+
+if [ -f efficientnet-lite4-int8.cut.pre.tflite ]; then
     echo "Generating VNNX for V1000 configuration..."
-    vnnx_compile -c V1000 -t efficientnet-lite4-int8.pre.tflite -o efficientnet-lite4-int8.vnnx
+    vnnx_compile -c V1000 -t efficientnet-lite4-int8.cut.pre.tflite -o efficientnet-lite4-int8.vnnx
 fi
 
 if [ -f efficientnet-lite4-int8.vnnx ]; then

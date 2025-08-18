@@ -23,19 +23,22 @@ if [ ! -f $VBX_SDK/tutorials/coco2017_rgb_norm_20x224x224x3.npy ]; then
     generate_npy $VBX_SDK/tutorials/coco2017_rgb_20x416x416x3.npy -o $VBX_SDK/tutorials/coco2017_rgb_norm_20x224x224x3.npy -s 224 224  --norm 
 fi
 
-echo "Downloading yolov8m-cls..."
+echo "Checking for yolov8m-cls files..."
+
 # model details @ https://github.com/ultralytics/ultralytics/
-if [ ! -f yolov8m-cls.onnx ]; then
+if [ ! -f yolov8m-cls.tflite ]; then
     yolo export model=yolov8m-cls.pt format=onnx
 fi
 
-echo "Running ONNX2TF..."
-onnx2tf -cind images $VBX_SDK/tutorials/coco2017_rgb_norm_20x224x224x3.npy [[[[0.,0.,0.]]]] [[[[1.,1.,1.]]]] \
+
+if [ ! -f yolov8m-cls.tflite ]; then
+   echo "Running ONNX2TF..."
+   onnx2tf -cind images $VBX_SDK/tutorials/coco2017_rgb_norm_20x224x224x3.npy [[[[0.,0.,0.]]]] [[[[1.,1.,1.]]]] \
 -i yolov8m-cls.onnx \
 --output_signaturedefs \
 --output_integer_quantized_tflite
-cp saved_model/yolov8m-cls_full_integer_quant.tflite yolov8m-cls.tflite
-
+   cp saved_model/yolov8m-cls_full_integer_quant.tflite yolov8m-cls.tflite
+fi
 if [ -f yolov8m-cls.tflite ]; then
    tflite_preprocess yolov8m-cls.tflite  --scale 255
 fi

@@ -23,25 +23,32 @@ if [ ! -f $VBX_SDK/tutorials/imagenetv2_20x224x224x3.npy ]; then
     generate_npy $VBX_SDK/tutorials/imagenetv2_rgb_20x224x224x3.npy -o $VBX_SDK/tutorials/imagenetv2_20x224x224x3.npy -s 224 224  -b 
 fi
 
-echo "Downloading mobilenet-v2-1.0-224..."
-# model details @ https://github.com/openvinotoolkit/open_model_zoo/tree/2021.4.2/models/public/mobilenet-v2-1.0-224
-omz_downloader --name mobilenet-v2-1.0-224
+echo "Checking for mobilenet-v2-1.0-224 files..."
 
-echo "Running Model Optimizer..."
-mo --input_model public/mobilenet-v2-1.0-224/mobilenet_v2_1.0_224_frozen.pb \
+# model details @ https://github.com/openvinotoolkit/open_model_zoo/tree/2021.4.2/models/public/mobilenet-v2-1.0-224
+if [ ! -f mobilenet-v2-1.0-224.tflite ]; then 
+omz_downloader --name mobilenet-v2-1.0-224
+fi
+
+
+if [ ! -f mobilenet-v2-1.0-224.tflite ]; then
+   echo "Running Model Optimizer..."
+   mo --input_model public/mobilenet-v2-1.0-224/mobilenet_v2_1.0_224_frozen.pb \
 --input_shape [1,224,224,3] \
 --mean_values [127.5,127.5,127.5] \
 --scale_values [127.5] \
 --static_shape
-
-echo "Running OpenVINO2Tensorflow..."
-openvino2tensorflow --load_dest_file_path_for_the_calib_npy $VBX_SDK/tutorials/imagenetv2_20x224x224x3.npy \
+fi
+if [ ! -f mobilenet-v2-1.0-224.tflite ]; then
+   echo "Running OpenVINO2Tensorflow..."
+   openvino2tensorflow --load_dest_file_path_for_the_calib_npy $VBX_SDK/tutorials/imagenetv2_20x224x224x3.npy \
 --keep_input_tensor_in_nchw \
 --weight_replacement_config fix.json \
 --model_path mobilenet_v2_1.0_224_frozen.xml \
 --output_full_integer_quant_tflite \
 --string_formulas_for_normalization '(data - [0.,0.,0.]) / [1.,1.,1.]'
-cp saved_model/model_full_integer_quant.tflite mobilenet-v2-1.0-224.tflite
+   cp saved_model/model_full_integer_quant.tflite mobilenet-v2-1.0-224.tflite
+fi
 
 if [ -f mobilenet-v2-1.0-224.tflite ]; then
    tflite_preprocess mobilenet-v2-1.0-224.tflite   

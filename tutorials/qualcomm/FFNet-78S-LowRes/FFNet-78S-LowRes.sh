@@ -23,23 +23,26 @@ if [ ! -f $VBX_SDK/tutorials/coco2017_rgb_norm_20x512x1024x3.npy ]; then
     generate_npy $VBX_SDK/tutorials/coco2017_rgb_20x416x416x3.npy -o $VBX_SDK/tutorials/coco2017_rgb_norm_20x512x1024x3.npy -s 512 1024  --norm 
 fi
 
-echo "Downloading FFNet-78S-LowRes..."
+echo "Checking for FFNet-78S-LowRes files..."
+if [ ! -f FFNet-78S-LowRes.tflite ]; then
 # model details @ 
-[ -f FFNet-78S-LowRes.onnx ] || wget -q --no-check-certificate https://huggingface.co/qualcomm/FFNet-78S-LowRes/resolve/main/FFNet-78S-LowRes.onnx
+[ -f FFNet-78S-LowRes.onnx ] || wget -q --no-check-certificate https://huggingface.co/qualcomm/FFNet-78S-LowRes/resolve/97c8b73201f973dffdb4588e881c4dec786d63f3/FFNet-78S-LowRes.onnx
+fi
 
-echo "Running ONNX2TF..."
-onnx2tf -cind image $VBX_SDK/tutorials/coco2017_rgb_norm_20x512x1024x3.npy [[[0.,0.,0.]]] [[[1.,1.,1.]]] \
+if [ ! -f FFNet-78S-LowRes.tflite ]; then
+   echo "Running ONNX2TF..."
+   onnx2tf -cind image $VBX_SDK/tutorials/coco2017_rgb_norm_20x512x1024x3.npy [[[0.,0.,0.]]] [[[1.,1.,1.]]] \
 -i FFNet-78S-LowRes.onnx \
 --output_signaturedefs \
 --output_integer_quantized_tflite
-cp saved_model/FFNet-78S-LowRes_full_integer_quant.tflite FFNet-78S-LowRes.tflite
-
+   cp saved_model/FFNet-78S-LowRes_full_integer_quant.tflite FFNet-78S-LowRes.tflite
+fi
 if [ -f FFNet-78S-LowRes.tflite ]; then
    tflite_preprocess FFNet-78S-LowRes.tflite  --scale 255
 fi
 
 if [ -f FFNet-78S-LowRes.pre.tflite ]; then
-   tflite_postprocess FFNet-78S-LowRes.pre.tflite  --dataset cityscapes \
+   tflite_postprocess FFNet-78S-LowRes.pre.tflite  --post-process-layer PIXEL_CITYSCAPES \
 --opacity 0.8 \
 --height 1080 \
 --width 1920

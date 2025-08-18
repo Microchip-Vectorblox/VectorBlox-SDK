@@ -268,9 +268,9 @@ int main(int argc, char **argv) {
 	}
 
 #if INT8FLAG	
-	if (argc > 3) pprint_post_process(argv[1], argv[3], model, (vbx_cnn_io_ptr_t*)pdma_buffer,1,0,vbx_cnn);
+	if (argc > 3) pprint_post_process(argv[1], argv[3], model, (fix16_t**)(uintptr_t)pdma_buffer,1,0);
 #else	
-	if (argc > 3) pprint_post_process(argv[1], argv[3], model, (vbx_cnn_io_ptr_t*)fix16_output_buffers,0,0,vbx_cnn);
+	if (argc > 3) pprint_post_process(argv[1], argv[3], model, fix16_output_buffers,0,0);
 #endif
 
 	int output_bytes = model_get_output_datatype(model,0) == VBX_CNN_CALC_TYPE_INT16 ? 2 : 1;

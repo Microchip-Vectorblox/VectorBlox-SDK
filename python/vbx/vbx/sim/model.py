@@ -137,6 +137,9 @@ def main(model_file,expected_checksum,debug=False,verbose=True):
 
     model_bytes = open(model_file, 'rb').read()
     m = Model(model_bytes)
+    if verbose:
+        print("DATA_BYTES = {:3.2f} MB".format(len(model_bytes)/(2**20)))
+        print("ALLOCATE_BYTES = {:3.2f} MB".format(len(m.model_bytes)/(2**20)))
     # c.vbxsim_reset_stats()
     odata = m.run(m.test_input)
     checksum = Fletcher32(odata[0])
@@ -157,16 +160,19 @@ def main(model_file,expected_checksum,debug=False,verbose=True):
             data['outputs'].append({'data': arr.tolist(), 'shape': shape, 'zero': zero, 'scale': scale, 'dtype': dtype.name.upper()})
             np.save(os.path.join(os.path.dirname(model_file),'test.output.{}.npy'.format(o)), test_arr.reshape(shape))
             data['test_outputs'].append({'data': test_arr.tolist(), 'shape': shape, 'zero': zero, 'scale': scale, 'dtype': dtype.name.upper()})
-            heat = arr.reshape(shape) - test_arr.reshape(shape)
-            while len(heat.shape) < 3:
-                heat = np.expand_dims(heat, axis=0)
-            np.save("heatmap.{}.npy".format(o), heat)
+            try:
+                heat = arr.reshape(shape) - test_arr.reshape(shape)
+                while len(heat.shape) < 3:
+                    heat = np.expand_dims(heat, axis=0)
+                np.save("heatmap.{}.npy".format(o), heat)
 
-            print('\nTotal absdiff between VNNX and test outputs', np.sum(np.abs(heat)))
-            for c,channel in enumerate(np.squeeze(heat, axis=0)):
-                absdiff = np.sum(np.abs(channel))
-                if absdiff != 0:
-                    print('\tChannel', c, absdiff)
+                print('\nTotal absdiff between VNNX and test outputs', np.sum(np.abs(heat)))
+                for c,channel in enumerate(np.squeeze(heat, axis=0)):
+                    absdiff = np.sum(np.abs(channel))
+                    if absdiff != 0:
+                        print('\tChannel', c, absdiff)
+            except:
+                pass
 
         with open('io.json', 'w') as f:
             json.dump(data, f)

@@ -16,7 +16,7 @@ C_SRCS+=../../drivers/vectorblox/vbx_cnn_api.c ../../drivers/vectorblox/vbx_cnn_
 CXX_SRCS=run-video-model.cpp
 C_OBJS=$(addsuffix .o,$(addprefix obj/,$(abspath $(C_SRCS))))
 CXX_OBJS=$(addsuffix .o,$(addprefix obj/,$(abspath $(CXX_SRCS))))
-C_FLAGS=-Wall -O3 -I./ -I../../drivers/vectorblox/ -IframeDrawing/ -IimageScaler/ -IwarpAffine/ -I../postprocess/libfixmath/ -I../postprocess/libfixmatrix/ -I../postprocess -MD -DVBX_SOC_DRIVER -DHARDWARE_DRAW
+C_FLAGS=-Wall -O3 -I./ -I../../drivers/vectorblox/ -IframeDrawing/ -IimageScaler/ -IwarpAffine/ -I../postprocess/libfixmath/ -I../postprocess/libfixmatrix/ -I../postprocess -MD -DVBX_SOC_DRIVER -DHARDWARE_DRAW -DPDMA
 
 $(CXX_OBJS) $(C_OBJS):
 $(C_OBJS) $(CXX_OBJS):obj/%.o:%

@@ -18,7 +18,7 @@ then
     sudo apt install -y \
 	    python3.10-dev python3.10-venv \
 
-    wget https://github.com/PINTO0309/onnx2tf/releases/download/1.16.31/flatc.tar.gz \
+    wget --no-check-certificate https://github.com/PINTO0309/onnx2tf/releases/download/1.16.31/flatc.tar.gz \
         && tar -zxvf flatc.tar.gz \
         && sudo chmod +x flatc \
         && sudo mv flatc /usr/bin/

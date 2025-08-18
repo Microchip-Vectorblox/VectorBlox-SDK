@@ -18,12 +18,14 @@ if [ -z $VBX_SDK ]; then
 fi
 source $VBX_SDK/vbx_env/bin/activate
 
-echo "Downloading yolov8s-cls..."
+echo "Checking for yolov8s-cls files..."
+
 # model details @ https://github.com/ultralytics/ultralytics/
 if [ ! -f yolov8s-cls.tflite ]; then
     yolo export model=yolov8s-cls.pt format=tflite int8 || true
     cp yolov8s-cls_saved_model/yolov8s-cls_full_integer_quant.tflite yolov8s-cls.tflite
 fi
+
 
 if [ -f yolov8s-cls.tflite ]; then
    tflite_preprocess yolov8s-cls.tflite  --scale 255.

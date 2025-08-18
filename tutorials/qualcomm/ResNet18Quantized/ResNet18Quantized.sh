@@ -18,11 +18,14 @@ if [ -z $VBX_SDK ]; then
 fi
 source $VBX_SDK/vbx_env/bin/activate
 
-echo "Downloading ResNet18Quantized..."
-# model details @ https://aihub.qualcomm.com/models/resnet18quantized
+echo "Checking for ResNet18Quantized files..."
+
+# model details @ https://aihub.qualcomm.com/models/resnet18
 if [ ! -f ResNet18Quantized.tflite ]; then
-    wget -q --no-check-certificate https://huggingface.co/qualcomm/ResNet18Quantized/resolve/main/ResNet18Quantized.tflite
+    wget -q --no-check-certificate https://huggingface.co/qualcomm/ResNet18/resolve/v0.32.0/ResNet18_w8a8.tflite
+    mv ResNet18_w8a8.tflite ResNet18Quantized.tflite
 fi
+
 
 if [ -f ResNet18Quantized.tflite ]; then
    tflite_preprocess ResNet18Quantized.tflite  --scale 255

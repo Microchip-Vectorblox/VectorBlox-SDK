@@ -18,7 +18,8 @@ if [ -z $VBX_SDK ]; then
 fi
 source $VBX_SDK/vbx_env/bin/activate
 
-echo "Downloading yolov8m..."
+echo "Checking for yolov8m files..."
+
 # model details @ https://github.com/ultralytics/ultralytics/
 [ -f coco.names ] || wget -q https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
 if [ ! -f yolov8m.tflite ]; then
@@ -27,16 +28,20 @@ if [ ! -f yolov8m.tflite ]; then
     cp yolov8m_saved_model/yolov8m_full_integer_quant.tflite yolov8m.tflite
 fi
 
-tflite_cut yolov8m.tflite -c 256 263 273 280 290 297
-mv yolov8m.0.tflite yolov8m.tflite
 
-if [ -f yolov8m.tflite ]; then
-   tflite_preprocess yolov8m.tflite  --scale 255
+if [ -f yolov8m.tflite ]; then 
+   echo "Cutting graph" 
+   tflite_cut yolov8m.tflite -c 256 263 273 280 290 297
+   mv yolov8m.0.tflite yolov8m.cut.tflite 
 fi
 
-if [ -f yolov8m.pre.tflite ]; then
+if [ -f yolov8m.cut.tflite ]; then
+   tflite_preprocess yolov8m.cut.tflite  --scale 255
+fi
+
+if [ -f yolov8m.cut.pre.tflite ]; then
     echo "Generating VNNX for V1000 configuration..."
-    vnnx_compile -c V1000 -t yolov8m.pre.tflite -o yolov8m.vnnx
+    vnnx_compile -c V1000 -t yolov8m.cut.pre.tflite -o yolov8m.vnnx
 fi
 
 if [ -f yolov8m.vnnx ]; then

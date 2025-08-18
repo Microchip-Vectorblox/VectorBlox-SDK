@@ -18,18 +18,21 @@ if [ -z $VBX_SDK ]; then
 fi
 source $VBX_SDK/vbx_env/bin/activate
 
-echo "Downloading Midas-V2-Quantized..."
+echo "Checking for Midas-V2-Quantized files..."
+
 # model details @ https://aihub.qualcomm.com/models/midas
 if [ ! -f Midas-V2-Quantized.tflite ]; then
-    wget -q --no-check-certificate https://huggingface.co/qualcomm/Midas-V2-Quantized/resolve/main/Midas-V2-Quantized.tflite
+    wget -q --no-check-certificate https://huggingface.co/qualcomm/Midas-V2/resolve/v0.32.0/Midas-V2_w8a8.tflite
+    mv Midas-V2_w8a8.tflite Midas-V2-Quantized.tflite
 fi
+
 
 if [ -f Midas-V2-Quantized.tflite ]; then
    tflite_preprocess Midas-V2-Quantized.tflite  --scale 255
 fi
 
 if [ -f Midas-V2-Quantized.pre.tflite ]; then
-   tflite_postprocess Midas-V2-Quantized.pre.tflite  --dataset depth \
+   tflite_postprocess Midas-V2-Quantized.pre.tflite  --post-process-layer PIXEL_DEPTH \
 --opacity 0.8 \
 --height 1080 \
 --width 1920

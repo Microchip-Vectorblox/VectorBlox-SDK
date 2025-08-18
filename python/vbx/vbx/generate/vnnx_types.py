@@ -60,8 +60,8 @@ Graph_struct = [('uint32_t', 'version'),
                 ('uint32_t', 'fixed_replay_buffer2'),
                 ('uint32_t', 'fixed_replay_buffer3'),
                 ('int32_t', 'include_io_data'),
-                ('int32_t', 'data_bytes'),
-                ('int32_t', 'allocate_bytes'),
+                ('uint32_t', 'data_bytes'),
+                ('uint32_t', 'allocate_bytes'),
                 ('offset', 'io_nodes'),
                 ('offset', 'io_offsets'),
                 ('int32_t', 'num_layers'),
@@ -191,7 +191,9 @@ Node_struct = [('int32_t', 'type'),
                           'reduce':[('int32_t', 'm0')],
                           'reorg':[('int32_t', 'stride')],
                           'ResizeOptions':[('float[2]', 'scale'),
-                                    ('int32_t', 'mode')],
+                                    ('int32_t', 'mode'),
+                                    ('int32_t', 'num_c_inc'),
+                                    ('offset', 'c_inc')],
                           'TransposeOptions':[('int32_t[3]', 'permutation'),
                                        ('int32_t','out_maps_at_once'),
                                        ('int32_t','out_rows_at_once')],
@@ -331,12 +333,14 @@ Subnode_struct = [('int32_t', 'type'),
                                        ('offset', 'crop_data')],
                              "MirrorPadOptions":[('int32_t', 'mode')],
                              "ReshapeOptions":[('int32_t', 'mode')],
+                             "PixelShuffleOptions":[('int32_t', 'r')],
                              "PackOptions":[('int32_t', 'axis'),
                                        ('int32_t', 'count'),
                                        ('int32_t', 'dims')],
                           'ResizeOptions':[('float[2]', 'scale'),
                                     ('int32_t', 'mode'),
-                                    ('int32_t', 'mode')],
+                                    ('int32_t', 'num_c_inc'),
+                                    ('offset', 'c_inc')], #for bilinear only
                           'TransposeOptions':[('int32_t[3]', 'permutation'),
                                        ('int32_t','out_maps_at_once'),
                                        ('int32_t','out_rows_at_once')],
@@ -647,11 +651,12 @@ class VNNXLUTOperator(enum.IntEnum):
         return VNNXLUTOperator.UNKNOWN
 
 class VNNXOperator(enum.IntEnum):
-    IDENTITY = 200
-    ELTWISE = 201
-    PREFETCH = 202
-    LUT = 203
-    UNKNOWN = 204
+    IDENTITY = 300
+    ELTWISE = 301
+    PREFETCH = 302
+    LUT = 303
+    PIXEL_SHUFFLE = 304
+    UNKNOWN = 305
 
     def from_str(e):
         e = e.upper()
@@ -663,6 +668,8 @@ class VNNXOperator(enum.IntEnum):
             return VNNXOperator.PREFETCH
         if e == "LUT":
             return VNNXOperator.LUT
+        if e == "PIXEL_SHUFFLE":
+            return VNNXOperator.PIXEL_SHUFFLE
         return VNNXOperator.UNKNOWN
 
 
@@ -829,6 +836,50 @@ class BuiltinOperator(enum.IntEnum):
     BITCAST = 159
     BITWISE_XOR = 160
     RIGHT_SHIFT = 161
+    STABLEHLO_LOGISTIC = 162
+    STABLEHLO_ADD = 163
+    STABLEHLO_DIVIDE = 164
+    STABLEHLO_MULTIPLY = 165
+    STABLEHLO_MAXIMUM = 166
+    STABLEHLO_RESHAPE = 167
+    STABLEHLO_CLAMP = 168
+    STABLEHLO_CONCATENATE = 169
+    STABLEHLO_BROADCAST_IN_DIM = 170
+    STABLEHLO_CONVOLUTION = 171
+    STABLEHLO_SLICE = 172
+    STABLEHLO_CUSTOM_CALL = 173
+    STABLEHLO_REDUCE = 174
+    STABLEHLO_ABS = 175
+    STABLEHLO_AND = 176
+    STABLEHLO_COSINE = 177
+    STABLEHLO_EXPONENTIAL = 178
+    STABLEHLO_FLOOR = 179
+    STABLEHLO_LOG = 180
+    STABLEHLO_MINIMUM = 181
+    STABLEHLO_NEGATE = 182
+    STABLEHLO_OR = 183
+    STABLEHLO_POWER = 184
+    STABLEHLO_REMAINDER = 185
+    STABLEHLO_RSQRT = 186
+    STABLEHLO_SELECT = 187
+    STABLEHLO_SUBTRACT = 188
+    STABLEHLO_TANH = 189
+    STABLEHLO_SCATTER = 190
+    STABLEHLO_COMPARE = 191
+    STABLEHLO_CONVERT = 192
+    STABLEHLO_DYNAMIC_SLICE = 193
+    STABLEHLO_DYNAMIC_UPDATE_SLICE = 194
+    STABLEHLO_PAD = 195
+    STABLEHLO_IOTA = 196
+    STABLEHLO_DOT_GENERAL = 197
+    STABLEHLO_REDUCE_WINDOW = 198
+    STABLEHLO_SORT = 199
+    STABLEHLO_WHILE = 200
+    STABLEHLO_GATHER = 201
+    STABLEHLO_TRANSPOSE = 202
+    DILATE = 203
+    STABLEHLO_RNG_BIT_GENERATOR = 204
+    REDUCE_WINDOW = 205
 
 
 def enum_to_union_name(e):
@@ -836,6 +887,7 @@ def enum_to_union_name(e):
                    (BuiltinOperator.FULLY_CONNECTED, "FullyConnectedOptions"),
                    (BuiltinOperator.CONCATENATION, "ConcatOptions"), 
                    (VNNXOperator.ELTWISE, "eltwise8"),
+                   (VNNXOperator.PIXEL_SHUFFLE, "PixelShuffleOptions"),
                    (BuiltinOperator.TRANSPOSE_CONV, "Conv2DOptions"),
                    (BuiltinOperator.UNIDIRECTIONAL_SEQUENCE_LSTM, "LSTMOptions"),
                    (BuiltinOperator.TRANSPOSE, "TransposeOptions"),
@@ -850,6 +902,7 @@ def enum_to_union_name(e):
                    (BuiltinOperator.LEAKY_RELU, "leakyrelu"),
                    (BuiltinOperator.PRELU, "prelu"),
                    (BuiltinOperator.PAD, "PadOptions"),
+                   (BuiltinOperator.DILATE, "PadOptions"),
                    (BuiltinOperator.MUL, "broadcast8"),
                    (BuiltinOperator.ADD, "broadcast8"),
                    (BuiltinOperator.SUB, "broadcast8"),

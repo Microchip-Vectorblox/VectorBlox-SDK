@@ -7,7 +7,7 @@ import vbx.postprocess.lpr as lpr
 import json
 from vbx.generate.utils import openvino_infer, openvino_input_shape
 from vbx.generate.utils import load_input
-import model_run as mr
+import vbx.sim.model_run as mr
   
   
 def main():
@@ -26,7 +26,7 @@ def main():
     img = cv2.imread(args.image)
     scale=args.scale
     
-    arr, input_shape = mr.preprocess_img_to_input_array(img, args.model, args.bgr, scale, args.mean)
+    arr, _, _, _ = mr.preprocess_img_to_input_array(img, args.model, args.bgr, scale, args.mean)
     outputs, output_shapes = mr.model_run(arr, args.model)
     output=outputs[0].squeeze()
     

@@ -29,7 +29,21 @@ def preprocess_img_to_input_array(img, model, bgr, preprocess_scale=1, preproces
         with open(model) as f:
             data = json.load(f)
             input_shape = data['inputs'][0]['shape']            
-            return None, input_shape
+
+            channels_last = input_shape[-1] < input_shape[-3]
+            if channels_last:
+                channels, input_height, input_width = input_shape[-1], input_shape[-3], input_shape[-2]
+            else:
+                channels, input_height, input_width = input_shape[-3], input_shape[-2], input_shape[-1]
+
+            v_idx = [-1] + [i for i,_ in enumerate(model) if _ == 'v']
+            t_idx = [-1] + [i for i,_ in enumerate(model) if _ == 't']
+            if max(v_idx) > max(t_idx):
+                channels_last = False
+            elif max(v_idx) < max(t_idx):
+                channels_last = True
+
+            return None, input_height, input_width, channels_last
 
     elif model.endswith('.onnx'):
         input_shape = onnx_input_shape(model)[0]    
@@ -86,7 +100,7 @@ def preprocess_img_to_input_array(img, model, bgr, preprocess_scale=1, preproces
 
     arr = arr.astype(input_dtype)
 
-    return arr ,input_shape
+    return arr, input_height, input_width, channels_last
     
 
 def transpose_outputs(outputs):
