@@ -20,6 +20,7 @@ setuptools.setup(
                    'tflite_cut=vbx.generate.split_tflite:cut',
                    'tflite_preprocess=vbx.generate.transform_tflite:preprocess',
                    'tflite_postprocess=vbx.generate.transform_tflite:postprocess',
+                   'tflite_verify=vbx.generate.verify_tflite:main',
                    'tflite_transform=vbx.generate.transform_tflite:main',
                    'tflite_split=vbx.generate.split_tflite:main',
                    'generate_vbx3_model=vbx.generate.generate_vbx3_model:main',

@@ -85,9 +85,9 @@ int main(int argc, char** argv){
 	//Initialize individual buffers
 	for (unsigned o = 0; o < model_get_num_outputs(model); ++o) {
 		int output_length = model_get_output_length(model, o);
-		io_buffers[model_get_num_inputs(model) + o] = (uintptr_t)malloc(output_length*sizeof(fix16_t));
 		output_buffers[o] = (uintptr_t)malloc(output_length*sizeof(uint32_t));
 		io_buffers[model_get_num_inputs(model) + o] = (uintptr_t)output_buffers[o];
+		memset((void *)(io_buffers[model_get_num_inputs(model) + o]), 0, (size_t)(output_length*sizeof(uint32_t)));
 	}
 
 	if (argc>2){
@@ -147,11 +147,15 @@ int main(int argc, char** argv){
 
 	int output_bytes = model_get_output_datatype(model,0) == VBX_CNN_CALC_TYPE_INT16 ? 2 : 1;
 	if (model_get_output_datatype(model,0) == VBX_CNN_CALC_TYPE_INT32) output_bytes = 4;
-	unsigned checksum = fletcher32((uint16_t*)(io_buffers[model_get_num_inputs(model)]),model_get_output_length(model, 0)*output_bytes/sizeof(uint16_t));
+	int size_of_output_in_bytes = model_get_output_length(model, 0)*output_bytes;
+	size_of_output_in_bytes += (size_of_output_in_bytes % sizeof(uint16_t)); // output buffers are init to uint32_t, OK to increase byte if odd (can only happen if int8)
+	unsigned checksum = fletcher32((uint16_t*)(io_buffers[model_get_num_inputs(model)]),size_of_output_in_bytes/sizeof(uint16_t));
 	for(unsigned o =1;o<model_get_num_outputs(model);++o){
 		int output_bytes = model_get_output_datatype(model,0) == VBX_CNN_CALC_TYPE_INT16 ? 2 : 1;
 		if (model_get_output_datatype(model,0) == VBX_CNN_CALC_TYPE_INT32) output_bytes = 4;
-		checksum ^= fletcher32((uint16_t*)io_buffers[model_get_num_inputs(model)+o], model_get_output_length(model, o)*output_bytes/sizeof(uint16_t));
+		int size_of_output_in_bytes = model_get_output_length(model, o)*output_bytes;
+		size_of_output_in_bytes += (size_of_output_in_bytes % sizeof(uint16_t));		
+		checksum ^= fletcher32((uint16_t*)io_buffers[model_get_num_inputs(model)+o], size_of_output_in_bytes/sizeof(uint16_t));
 	}
 	printf("CHECKSUM = 0x%08x\n",checksum);
 	if(WRITE_OUT){

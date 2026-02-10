@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v2.0                                                   #
+# v3.0                                                   #
 #                                                        #
 ##########################################################
 
@@ -39,15 +39,15 @@ if [ -f Midas-V2-Quantized.pre.tflite ]; then
 fi
 
 if [ -f Midas-V2-Quantized.pre.post.tflite ]; then
-    echo "Generating VNNX for V1000 configuration..."
-    vnnx_compile -c V1000 -t Midas-V2-Quantized.pre.post.tflite -o Midas-V2-Quantized.vnnx
+    echo "Generating VNNX for V1000 ncomp configuration..."
+    vnnx_compile -s V1000 -c ncomp -t Midas-V2-Quantized.pre.post.tflite  -o Midas-V2-Quantized_V1000_ncomp.vnnx
 fi
 
-if [ -f Midas-V2-Quantized.vnnx ]; then
+if [ -f Midas-V2-Quantized_V1000_ncomp.vnnx ]; then
     echo "Running Simulation..."
-    python $VBX_SDK/example/python/segmentation.py Midas-V2-Quantized.vnnx $VBX_SDK/tutorials/test_images/A0PQ76.jpg --dataset depth --inj 
+    python $VBX_SDK/example/python/segmentation.py Midas-V2-Quantized_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/A0PQ76.jpg --dataset depth --inj 
     echo "C Simulation Command:"
-    echo '$VBX_SDK/example/sim-c/sim-run-model Midas-V2-Quantized.vnnx $VBX_SDK/tutorials/test_images/A0PQ76.jpg  '
+    echo '$VBX_SDK/example/sim-c/sim-run-model Midas-V2-Quantized_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/A0PQ76.jpg  '
 fi
 
 deactivate

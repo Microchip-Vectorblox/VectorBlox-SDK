@@ -52,10 +52,10 @@ def main():
         #   (6, [1, 20, 9, 16])       
     ordered_outputs=[]
 
-    if '.vnnx' in args.model or '.tflite' in args.model :
-        idx = sorted(enumerate(_.shape for _ in outputs), key = lambda x: (x[1][-3],-x[1][-2]))           
-    elif '.onnx' in args.model:
+    if '.onnx' in args.model:
         idx = sorted(enumerate(_.shape for _ in outputs), key = lambda x: (x[1][-1], -x[1][-2]))
+    else:
+        idx = sorted(enumerate(_.shape for _ in outputs), key = lambda x: (x[1][-3],-x[1][-2]))
 
     for i,l in enumerate(idx):
         ordered_outputs.append(outputs[idx[i][0]].flatten().squeeze())

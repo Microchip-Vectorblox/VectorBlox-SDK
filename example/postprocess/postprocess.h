@@ -141,9 +141,10 @@ int post_process_ultra_nms(fix16_t *output, int output_boxes, int input_h, int i
  * @param is_obb Check if postprocess is done for oriented-bounding boxes
  * @param is_pose Check if postprocess is done for pose detection
  * @param num_outputs Number of outputs the model contains
+ * @param has_argmax If model has an argmax output
  * @return int Number of detected boxes
  */
-int post_process_ultra_int8(int8_t **outputs, int* outputs_shape[], fix16_t *post, fix16_t thresh, int zero_points[], fix16_t scale_outs[], const int max_boxes, const int is_obb, const int is_pose, int num_outputs);
+ int post_process_ultra_int8(int8_t **outputs, int* outputs_shape[], fix16_t *post, fix16_t thresh, int zero_points[], fix16_t scale_outs[], const int max_boxes, const int is_obb, const int is_pose,int num_outputs, int has_argmax);
 /**
  * @brief Post-processing for Yolov2/V3/V4/V5. Returns number of detected objects, along with  boxes containing coordinates, confidence, and class information.
  * 

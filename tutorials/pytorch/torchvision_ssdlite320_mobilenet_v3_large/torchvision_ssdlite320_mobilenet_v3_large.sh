@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v2.0                                                   #
+# v3.0                                                   #
 #                                                        #
 ##########################################################
 
@@ -52,15 +52,15 @@ if [ -f torchvision_ssdlite320_mobilenet_v3_large.tflite ]; then
 fi
 
 if [ -f torchvision_ssdlite320_mobilenet_v3_large.pre.tflite ]; then
-    echo "Generating VNNX for V1000 configuration..."
-    vnnx_compile -c V1000 -t torchvision_ssdlite320_mobilenet_v3_large.pre.tflite -o torchvision_ssdlite320_mobilenet_v3_large.vnnx
+    echo "Generating VNNX for V1000 ncomp configuration..."
+    vnnx_compile -s V1000 -c ncomp -t torchvision_ssdlite320_mobilenet_v3_large.pre.tflite  -o torchvision_ssdlite320_mobilenet_v3_large_V1000_ncomp.vnnx
 fi
 
-if [ -f torchvision_ssdlite320_mobilenet_v3_large.vnnx ]; then
+if [ -f torchvision_ssdlite320_mobilenet_v3_large_V1000_ncomp.vnnx ]; then
     echo "Running Simulation..."
-    python $VBX_SDK/example/python/ssdv2.py torchvision_ssdlite320_mobilenet_v3_large.vnnx $VBX_SDK/tutorials/test_images/dog.jpg --torch 
+    python $VBX_SDK/example/python/ssdv2.py torchvision_ssdlite320_mobilenet_v3_large_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/dog.jpg --torch 
     echo "C Simulation Command:"
-    echo '$VBX_SDK/example/sim-c/sim-run-model torchvision_ssdlite320_mobilenet_v3_large.vnnx $VBX_SDK/tutorials/test_images/dog.jpg SSDV2'
+    echo '$VBX_SDK/example/sim-c/sim-run-model torchvision_ssdlite320_mobilenet_v3_large_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/dog.jpg SSDV2'
 fi
 
 deactivate

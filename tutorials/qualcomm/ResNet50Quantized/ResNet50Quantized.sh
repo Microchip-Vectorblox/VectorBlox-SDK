@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v2.0                                                   #
+# v3.0                                                   #
 #                                                        #
 ##########################################################
 
@@ -32,15 +32,15 @@ if [ -f ResNet50Quantized.tflite ]; then
 fi
 
 if [ -f ResNet50Quantized.pre.tflite ]; then
-    echo "Generating VNNX for V1000 configuration..."
-    vnnx_compile -c V1000 -t ResNet50Quantized.pre.tflite -o ResNet50Quantized.vnnx
+    echo "Generating VNNX for V1000 ncomp configuration..."
+    vnnx_compile -s V1000 -c ncomp -t ResNet50Quantized.pre.tflite  -o ResNet50Quantized_V1000_ncomp.vnnx
 fi
 
-if [ -f ResNet50Quantized.vnnx ]; then
+if [ -f ResNet50Quantized_V1000_ncomp.vnnx ]; then
     echo "Running Simulation..."
-    python $VBX_SDK/example/python/classifier.py ResNet50Quantized.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg 
+    python $VBX_SDK/example/python/classifier.py ResNet50Quantized_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg 
     echo "C Simulation Command:"
-    echo '$VBX_SDK/example/sim-c/sim-run-model ResNet50Quantized.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg CLASSIFY'
+    echo '$VBX_SDK/example/sim-c/sim-run-model ResNet50Quantized_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg CLASSIFY'
 fi
 
 deactivate

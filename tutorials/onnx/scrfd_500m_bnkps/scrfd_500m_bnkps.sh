@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v2.0                                                   #
+# v3.0                                                   #
 #                                                        #
 ##########################################################
 
@@ -50,15 +50,15 @@ if [ -f scrfd_500m_bnkps.tflite ]; then
 fi
 
 if [ -f scrfd_500m_bnkps.pre.tflite ]; then
-    echo "Generating VNNX for V1000 configuration..."
-    vnnx_compile -c V1000 -t scrfd_500m_bnkps.pre.tflite -o scrfd_500m_bnkps.vnnx
+    echo "Generating VNNX for V1000 ncomp configuration..."
+    vnnx_compile -s V1000 -c ncomp -t scrfd_500m_bnkps.pre.tflite  -o scrfd_500m_bnkps_V1000_ncomp.vnnx
 fi
 
-if [ -f scrfd_500m_bnkps.vnnx ]; then
+if [ -f scrfd_500m_bnkps_V1000_ncomp.vnnx ]; then
     echo "Running Simulation..."
-    python $VBX_SDK/example/python/scrfdInfer.py scrfd_500m_bnkps.vnnx $VBX_SDK/tutorials/test_images/garden.jpg 
+    python $VBX_SDK/example/python/scrfdInfer.py scrfd_500m_bnkps_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/garden.jpg 
     echo "C Simulation Command:"
-    echo '$VBX_SDK/example/sim-c/sim-run-model scrfd_500m_bnkps.vnnx $VBX_SDK/tutorials/test_images/garden.jpg SCRFD'
+    echo '$VBX_SDK/example/sim-c/sim-run-model scrfd_500m_bnkps_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/garden.jpg SCRFD'
 fi
 
 deactivate

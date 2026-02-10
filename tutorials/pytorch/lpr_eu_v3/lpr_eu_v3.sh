@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v2.0                                                   #
+# v3.0                                                   #
 #                                                        #
 ##########################################################
 
@@ -52,15 +52,15 @@ if [ -f lpr_eu_v3.tflite ]; then
 fi
 
 if [ -f lpr_eu_v3.pre.tflite ]; then
-    echo "Generating VNNX for V1000 configuration..."
-    vnnx_compile -c V1000 -t lpr_eu_v3.pre.tflite -o lpr_eu_v3.vnnx
+    echo "Generating VNNX for V1000 ncomp configuration..."
+    vnnx_compile -s V1000 -c ncomp -t lpr_eu_v3.pre.tflite  -o lpr_eu_v3_V1000_ncomp.vnnx
 fi
 
-if [ -f lpr_eu_v3.vnnx ]; then
+if [ -f lpr_eu_v3_V1000_ncomp.vnnx ]; then
     echo "Running Simulation..."
-    python $VBX_SDK/example/python/recognize_plate_eu.py lpr_eu_v3.vnnx $VBX_SDK/tutorials/test_images/A358CC82.jpg 
+    python $VBX_SDK/example/python/recognize_plate_eu.py lpr_eu_v3_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/A358CC82.jpg 
     echo "C Simulation Command:"
-    echo '$VBX_SDK/example/sim-c/sim-run-model lpr_eu_v3.vnnx $VBX_SDK/tutorials/test_images/A358CC82.jpg LPR'
+    echo '$VBX_SDK/example/sim-c/sim-run-model lpr_eu_v3_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/A358CC82.jpg LPR'
 fi
 
 deactivate

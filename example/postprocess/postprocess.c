@@ -2065,14 +2065,12 @@ int ultralytics_process_box_int8(fix16_t *xywh, int8_t* arr, fix16_t angle, cons
 }
 
 
-int post_process_ultra_int8(int8_t **outputs, int* outputs_shape[], fix16_t *post, fix16_t thresh, int zero_points[], fix16_t scale_outs[], const int max_boxes, const int is_obb, const int is_pose,int num_outputs)
+int post_process_ultra_int8(int8_t **outputs, int* outputs_shape[], fix16_t *post, fix16_t thresh, int zero_points[], fix16_t scale_outs[], const int max_boxes, const int is_obb, const int is_pose,int num_outputs, int has_argmax)
 {
 	int total_count = 0;
 	int C = outputs_shape[0][1];	// number of classes (80 for COCO)
 	fix16_t fix16_log_odds = fix16_log(fix16_div(thresh, fix16_sub(fix16_one, thresh)));
-	bool has_argmax = false;
-	if (num_outputs ==9)
-		has_argmax = true;
+
 	int outputs_per_stride = 2; //increment should be done by stride sets, (usually 3 sets)
 	for(int o=0; o < 6; o+=outputs_per_stride){
 		int H = outputs_shape[o][2];
@@ -2549,7 +2547,7 @@ int pprint_post_process(const char *name, const char *pptype, model_t *model, fi
 	int num_outputs = (int)model_get_num_outputs(model);
 	int input_h = in_dims[total_dims-2];
 	int input_w = in_dims[total_dims-1];
-	
+	int has_argmax = strstr(name, "argmax")? 1 : 0;
 #ifdef HARDWARE_DRAW
 	fix16_t hratio = fix16_div(fix16_from_int(1080),fix16_from_int(input_h));
 	fix16_t wratio = fix16_div(fix16_from_int(1920),fix16_from_int(input_w));
@@ -2928,7 +2926,7 @@ int pprint_post_process(const char *name, const char *pptype, model_t *model, fi
 			const int max_detections = 200;
 			fix16_t post_buffer[max_detections*(4+80)];
 			int post_len;
-			post_len = post_process_ultra_int8(outputs_int8, outputs_shape, post_buffer, thresh, zero_points, scale_outs, max_detections, 0, 0,num_outputs);
+			post_len = post_process_ultra_int8(outputs_int8, outputs_shape, post_buffer, thresh, zero_points, scale_outs, max_detections, 0, 0, num_outputs, has_argmax);
 			valid_boxes = post_process_ultra_nms(post_buffer, post_len, input_h, input_w, thresh, iou, boxes, NULL, boxes_len, 80, 0, 0);
 
 		} else if (!strcmp(pptype, "YOLOV3") || !strcmp(pptype, "YOLOV4")){ //tiny yolo v3/v4 COCO
@@ -3279,7 +3277,7 @@ int pprint_post_process(const char *name, const char *pptype, model_t *model, fi
 		}	
 		const int max_detections = 200;
 		fix16_t post_buffer[max_detections*(4+1+17*3)];
-		post_len = post_process_ultra_int8(outputs_int8, outputs_shape, post_buffer, thresh, zero_points, scale_outs, max_detections, 0, split,num_outputs);
+		post_len = post_process_ultra_int8(outputs_int8, outputs_shape, post_buffer, thresh, zero_points, scale_outs, max_detections, 0, split, num_outputs, has_argmax);
 
 		valid_boxes = post_process_ultra_nms(post_buffer, post_len, input_h, input_w, thresh, iou, boxes, poses, boxes_len, 1, 0, 1);
 
@@ -3423,7 +3421,7 @@ int pprint_post_process(const char *name, const char *pptype, model_t *model, fi
 		const int max_detections = 4000;
 		fix16_t post_buffer[max_detections*4+15+1];
 		int post_len;
-		post_len = post_process_ultra_int8(outputs_int8, outputs_shape, post_buffer, thresh, zero_points, scale_outs, max_detections, 1, 0, num_outputs);
+		post_len = post_process_ultra_int8(outputs_int8, outputs_shape, post_buffer, thresh, zero_points, scale_outs, max_detections, 1, 0, num_outputs, has_argmax);
 		valid_boxes = post_process_ultra_nms(post_buffer, post_len, input_h, input_w, thresh, iou, boxes, NULL, boxes_len, 15, 1, 0);
 		char class_str[50];
 		for(int i=0;i<valid_boxes;++i){

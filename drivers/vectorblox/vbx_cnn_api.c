@@ -25,13 +25,47 @@ static const int ERR_OFFSET = 1;
 
 static const int MODEL_OFFSET = 4;
 static const int IO_OFFSET = 6;
-//static const int VERSION_OFFSET = 10;
+static const int VERSION_OFFSET = 10;
+
+static const int VERSION_SIZE_OFFSET = 8;
+static const int VERSION_COMP_OFFSET = 16;
+static const int VERSION_MAJOR_OFFSET = 28;
+
+static const int TSNP_AP_CONTROL_OFFSET = 512;
+//static const int TSNP_AP_VER_ID_OFFSET = 516;
+//static const int TSNP_AP_VER_TS_OFFSET = 518;
+static const int TSNP_PROG_PTR_LSB_OFFSET = 520;
+static const int TSNP_PROG_PTR_MSB_OFFSET = 521;
+static const int TSNP_PROG_LENGTH_OFFSET = 522;
+static const int TSNP_PROG_BATCH_OFFSET = 523;
+//static const int TSNP_IP_STATUS_LSB_OFFSET = 524;
+//static const int TSNP_IP_STATUS_MSB_OFFSET = 525;
+//static const int TSNP_IP_PCOUNTER_LSB_OFFSET = 526;
+//static const int TSNP_IP_PCOUNTER_MSB_OFFSET = 527;
+static const int TSNP_TABLE_BASE_LSB_OFFSET = 528;
+static const int TSNP_TABLE_BASE_MSB_OFFSET = 529;
+static const int TSNP_IN_BASE_LSB_OFFSET = 530;
+static const int TSNP_IN_BASE_MSB_OFFSET = 531;
+static const int TSNP_OUT_BASE_LSB_OFFSET = 532;
+static const int TSNP_OUT_BASE_MSB_OFFSET = 533;
+static const int TSNP_IN_STEP_SIZE_OFFSET = 534;
+static const int TSNP_OUT_STEP_SIZE_OFFSET = 535;
+//static const int TSNP_IP_ECOUNTER_LSB_OFFSET = 544;
+//static const int TSNP_IP_ECOUNTER_MSB_OFFSET = 545;
+//static const int TSNP_IP_TRACE_CONFIG = 546;
+//static const int TSNP_IP_TRACE_STATUS = 547;
+static const int MXP_BASE_LSB_OFFSET = 548;
+static const int MXP_BASE_MSB_OFFSET = 549;
 
 static const int CTRL_REG_SOFT_RESET = 0x00000001;
 static const int CTRL_REG_START = 0x00000002;
 static const int CTRL_REG_RUNNING = 0x00000004;
 static const int CTRL_REG_OUTPUT_VALID = 0x00000008;
 static const int CTRL_REG_ERROR = 0x00000010;
+
+static const int TSNP_AP_CONTROL_SOFT_RESET = 0x80000000;
+static const int TSNP_AP_CONTROL_START = 0x00000001;
+
 /*static uint32_t fletcher32(const void *d, size_t len) {
   uint32_t c0, c1;
   unsigned int i;
@@ -199,6 +233,26 @@ vbx_cnn_t *vbx_cnn_init(void *ctrl_reg_addr) {
   write_register(the_cnn->ctrl_reg,CTRL_OFFSET,CTRL_REG_SOFT_RESET);
   // start processor:
   write_register(the_cnn->ctrl_reg,CTRL_OFFSET, 0);
+  
+  uint32_t version_reg_value = read_register(the_cnn->ctrl_reg, VERSION_OFFSET);
+  the_cnn->version = (version_reg_value >> VERSION_MAJOR_OFFSET) & ((1U << 4) - 1);
+  the_cnn->size_config = (version_reg_value >> VERSION_SIZE_OFFSET) & ((1U << 8) - 1);
+  the_cnn->comp_config = (version_reg_value >> VERSION_COMP_OFFSET) & ((1U << 4) - 1);
+  
+  /* Configure TSNP registers if running unstructured compression models */
+  if (the_cnn->comp_config == 2) {
+	// Reset TSNP accelerator 
+	write_register(the_cnn->ctrl_reg, TSNP_AP_CONTROL_OFFSET, TSNP_AP_CONTROL_SOFT_RESET);
+	for (int i = 0; i < 10; i++);
+	write_register(the_cnn->ctrl_reg, TSNP_AP_CONTROL_OFFSET, 0);
+	// Write TSNP accelerator MSB registers to 0
+	write_register(the_cnn->ctrl_reg, TSNP_PROG_PTR_MSB_OFFSET, 0);
+	write_register(the_cnn->ctrl_reg, TSNP_PROG_BATCH_OFFSET, 1);
+	write_register(the_cnn->ctrl_reg, TSNP_TABLE_BASE_MSB_OFFSET, 0);
+	write_register(the_cnn->ctrl_reg, TSNP_IN_BASE_MSB_OFFSET, 0);
+	write_register(the_cnn->ctrl_reg, TSNP_OUT_BASE_MSB_OFFSET, 0);
+	write_register(the_cnn->ctrl_reg, MXP_BASE_MSB_OFFSET, 0);
+  }
   the_cnn->initialized = 1;
   the_cnn->output_valid = 0;
   the_cnn->debug_print_ptr=0;
@@ -258,19 +312,76 @@ int vbx_cnn_model_start(vbx_cnn_t *vbx_cnn, model_t *model,
   vbx_cnn_state_e state = vbx_cnn_get_state(vbx_cnn);
   if (state != FULL && state != ERROR) {
     // wait until start bit is low before starting next model
-    while (read_register(vbx_cnn->ctrl_reg,CTRL_OFFSET) & CTRL_REG_START);
-    write_register(vbx_cnn->ctrl_reg,IO_OFFSET , (uint32_t)(uintptr_t)virt_to_phys(vbx_cnn,io_buffers));
-    write_register(vbx_cnn->ctrl_reg,MODEL_OFFSET , (uint32_t)(uintptr_t)virt_to_phys(vbx_cnn,model));
-
+    while (read_register(vbx_cnn->ctrl_reg, CTRL_OFFSET) & CTRL_REG_START);
+    write_register(vbx_cnn->ctrl_reg, IO_OFFSET, (uint32_t)(uintptr_t)virt_to_phys(vbx_cnn, io_buffers));
+    write_register(vbx_cnn->ctrl_reg, MODEL_OFFSET, (uint32_t)(uintptr_t)virt_to_phys(vbx_cnn, model));	
     // Start should be written with 1, other bits should be written
     // with zeros.
-    write_register(vbx_cnn->ctrl_reg,CTRL_OFFSET,CTRL_REG_START);
+    write_register(vbx_cnn->ctrl_reg, CTRL_OFFSET, CTRL_REG_START);
     return 0;
   } else {
     return -1;
   }
 }
 
+int vbx_tsnp_model_start(vbx_cnn_t *vbx_cnn, model_t *model, model_t *tsnp_model, uint32_t input_offset,
+                        vbx_cnn_io_ptr_t io_buffers[]) {
+#if VBX_SOC_DRIVER
+  size_t num_io_buffers = (model_get_num_inputs(model)+
+                        model_get_num_outputs(model));
+  for(int io=0;io<num_io_buffers;io++){
+    vbx_cnn->io_buffers[io] = (vbx_cnn_io_ptr_t)virt_to_phys(vbx_cnn,(void*)io_buffers[io]);
+  }
+  io_buffers = vbx_cnn->io_buffers;
+#elif SPLASHKIT_PCIE
+    static uint8_t temp_buffer[64 * 1024];
+    model_t* readable_model = (model_t*)temp_buffer;
+    read_fpga((uintptr_t)model, readable_model, sizeof(temp_buffer));
+    size_t num_io_buffers = (model_get_num_inputs(readable_model) +
+            model_get_num_outputs(readable_model));
+    write_fpga((uintptr_t)vbx_cnn->io_buffers, io_buffers, num_io_buffers * sizeof(vbx_cnn_io_ptr_t));
+    io_buffers = vbx_cnn->io_buffers;
+#endif
+  vbx_cnn_state_e state = vbx_cnn_get_state(vbx_cnn);
+  if (state != FULL && state != ERROR) {
+    // wait until start bit is low before starting next model
+    while (read_register(vbx_cnn->ctrl_reg, CTRL_OFFSET) & CTRL_REG_START);
+    write_register(vbx_cnn->ctrl_reg, IO_OFFSET, (uint32_t)(uintptr_t)virt_to_phys(vbx_cnn, io_buffers));
+    write_register(vbx_cnn->ctrl_reg, MODEL_OFFSET, (uint32_t)(uintptr_t)virt_to_phys(vbx_cnn, model));
+	
+	/* Write TSNP registers if running unstructured compression models */
+	if (vbx_cnn->comp_config == 2) {
+		uint32_t program_start_address = read_register((uint32_t*)tsnp_model, 0);
+		uint32_t program_size = read_register((uint32_t*)tsnp_model, 2);
+		int input_length = 0;
+		for (unsigned i = 0; i < model_get_num_inputs(model); ++i){
+			input_length += model_get_input_length(model, i);
+		}
+		int output_length = 0;
+		for (unsigned o = 0; o < model_get_num_outputs(model); ++o) {
+			output_length += model_get_output_length(model, o);
+		}
+		write_register(vbx_cnn->ctrl_reg, TSNP_PROG_PTR_LSB_OFFSET, (uint32_t)(uintptr_t)virt_to_phys(vbx_cnn, tsnp_model) + program_start_address);
+		write_register(vbx_cnn->ctrl_reg, TSNP_PROG_LENGTH_OFFSET, program_size);
+		write_register(vbx_cnn->ctrl_reg, TSNP_IN_BASE_LSB_OFFSET, (uint32_t)(uintptr_t)io_buffers[0] - input_offset);
+		write_register(vbx_cnn->ctrl_reg, TSNP_OUT_BASE_LSB_OFFSET, (uint32_t)(uintptr_t)virt_to_phys(vbx_cnn, model));
+		write_register(vbx_cnn->ctrl_reg, MXP_BASE_LSB_OFFSET, (uint32_t)(uintptr_t)virt_to_phys(vbx_cnn, model));
+		write_register(vbx_cnn->ctrl_reg, TSNP_TABLE_BASE_LSB_OFFSET, (uint32_t)(uintptr_t)virt_to_phys(vbx_cnn, tsnp_model));
+		write_register(vbx_cnn->ctrl_reg, TSNP_IN_STEP_SIZE_OFFSET, input_length);
+		write_register(vbx_cnn->ctrl_reg, TSNP_OUT_STEP_SIZE_OFFSET, output_length);
+		
+		// Start TSNP Accelerator
+		write_register(vbx_cnn->ctrl_reg, TSNP_AP_CONTROL_OFFSET, TSNP_AP_CONTROL_START);
+	}
+	
+    // Start should be written with 1, other bits should be written
+    // with zeros.
+    write_register(vbx_cnn->ctrl_reg, CTRL_OFFSET, CTRL_REG_START);
+    return 0;
+  } else {
+    return -1;
+  }
+}
 
 vbx_cnn_state_e vbx_cnn_get_state(vbx_cnn_t *vbx_cnn) {
   uint32_t ctrl_reg = read_register(vbx_cnn->ctrl_reg,CTRL_OFFSET);
@@ -324,7 +435,13 @@ int vbx_cnn_model_poll(vbx_cnn_t *vbx_cnn) {
   }
   if (status & CTRL_REG_OUTPUT_VALID) {
     // write 1 to clear output valid
-    write_register(vbx_cnn->ctrl_reg,CTRL_OFFSET,CTRL_REG_OUTPUT_VALID);
+    write_register(vbx_cnn->ctrl_reg, CTRL_OFFSET, CTRL_REG_OUTPUT_VALID);
+	/* Reset TSNP Accelerator if running unstructured compression models */
+	if (vbx_cnn->comp_config == 2) {
+		write_register(vbx_cnn->ctrl_reg, TSNP_AP_CONTROL_OFFSET, TSNP_AP_CONTROL_SOFT_RESET);
+		for (int i = 0; i < 10; i++);
+		write_register(vbx_cnn->ctrl_reg, TSNP_AP_CONTROL_OFFSET, 0);
+	}
     return 0;
   }
   if ((status & CTRL_REG_START) || (status & CTRL_REG_RUNNING)) {

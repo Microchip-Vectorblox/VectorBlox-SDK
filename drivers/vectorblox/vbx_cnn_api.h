@@ -42,39 +42,52 @@ typedef enum {
 	VBX_CNN_SIZE_CONF_V1000 = 2,
 	VBX_CNN_SIZE_CONF_V2000 = 3,
 	VBX_CNN_SIZE_CONF_V4000 =  4,
-}vbx_cnn_size_conf_e;
+} vbx_cnn_size_conf_e;
 
 typedef enum {
-              INVALID_FIRMWARE_ADDRESS        = 1,
-              FIRMWARE_ADDRESS_NOT_READY      = 2,
-              START_NOT_CLEAR                 = 3,
-              OUTPUT_VALID_NOT_SET            = 4,
-              FIRMWARE_BLOB_VERSION_MISMATCH  = 5,
-              INVALID_NETWORK_ADDRESS         = 6,
-              MODEL_BLOB_INVALID              = 7,
-              MODEL_BLOB_VERSION_MISMATCH     = 8,
-              MODEL_BLOB_SIZE_CONFIGURATION_MISMATCH      = 9,
-              FIRMWARE_BLOB_STALE            = 10
-}vbx_cnn_err_e;
+	VBX_CNN_CONF_NO_COMPRESSION  = 0,
+	VBX_CNN_CONF_COMPRESSION  = 1,
+	VBX_CNN_CONF_UNSTRUCTURED_COMPRESSION = 2,
+} vbx_cnn_comp_conf_e;
 
-#define MAX_IO_BUFFERS 10
+typedef enum {
+              INVALID_FIRMWARE_ADDRESS                = 1,
+              FIRMWARE_ADDRESS_NOT_READY              = 2,
+              START_NOT_CLEAR                         = 3,
+              OUTPUT_VALID_NOT_SET                    = 4,
+              FIRMWARE_BLOB_VERSION_MISMATCH          = 5,
+              INVALID_NETWORK_ADDRESS                 = 6,
+              MODEL_BLOB_INVALID                      = 7,
+              MODEL_BLOB_VERSION_MISMATCH             = 8,
+              MODEL_BLOB_SIZE_CONFIGURATION_MISMATCH  = 9,
+              FIRMWARE_BLOB_STALE                     = 10
+} vbx_cnn_err_e;
+
+#define MAX_IO_BUFFERS 32
 typedef struct {
 	int32_t initialized;
 	uint32_t version;
-	uint32_t size;/*vbx_cnn_size_conf_e*/
+	uint32_t size_config;
+	uint32_t comp_config;
 	volatile uint32_t output_valid;
 	void* instruction_blob;
 	volatile uint32_t* ctrl_reg;
-  	int debug_print_ptr;
+	int debug_print_ptr;
   	size_t  dma_phys_trans_offset;
 #if defined(VBX_SOC_DRIVER) || defined(SPLASHKIT_PCIE)
-    	int fd;
-    	uint8_t* dma_buffer;
-    	uint8_t* dma_buffer_end;
+    int fd;
+    uint8_t* dma_buffer;
+    uint8_t* dma_buffer_end;
   	vbx_cnn_io_ptr_t *io_buffers;
 #endif
 
 }vbx_cnn_t;
+
+typedef struct {
+	uint8_t* header_info;
+	model_t* mxp_model;
+	model_t* tsnp_model;
+}ucomp_model_t;
 
 #if VBX_SOC_DRIVER || SPLASHKIT_PCIE
   void* vbx_allocate_dma_buffer(vbx_cnn_t* vbx_cnn,size_t request_size,size_t align);
@@ -88,14 +101,12 @@ typedef struct {
  * the result is undefined.
  *
  * @param ctrl_reg_addr The address of the VBX CNN S_control port
- * @param firmware_blob A block of memory containing valid instructions for the IP Core
  *         Users must ensure that the instruction blob is reachable by the VBX CNN IP Core's
  *         M_AXI port
  *
  * @return A vbx_cnn_t structure. On success .initialized is set, otherwise it is zero;
  *
  */
-//vbx_cnn_t* vbx_cnn_init(void* ctrl_reg_addr,void* firmware_blob);
 vbx_cnn_t* vbx_cnn_init(void* ctrl_reg_addr);
 
 /**
@@ -125,7 +136,29 @@ vbx_cnn_err_e vbx_cnn_get_error_val(vbx_cnn_t* vbx_cnn);
  * @param model The model
  * @return nonzero if model not run. Occurs if vbx_cnn_get_state() returns FULL or ERROR
  */
-int vbx_cnn_model_start(vbx_cnn_t* vbx_cnn,model_t* model,vbx_cnn_io_ptr_t io_buffers[]);
+int vbx_cnn_model_start(vbx_cnn_t* vbx_cnn, model_t* model, vbx_cnn_io_ptr_t io_buffers[]);
+
+/**
+ * Run the model specified with the IO buffers specified
+ * One Model can be queued while another model is running to achieve peak throughput.
+ * In that case the calling code would look something like:
+ * @code{.cpp}
+ *  vbx_tsnp_model_start(vbx_cnn,model,io_buffers);
+ *  while (input = get_input()){
+      io_buffers[0] = input;
+      vbx_cnn_model_start(vbx_cnn,model,io_buffers);
+      while(vbx_cnn_model_poll(vbx_cnn)>0);
+   }
+   while(vbx_cnn_model_poll(vbx_cnn)>0);
+ * @endcode
+ *
+ * @param vbx_cnn The vbx_cnn object to use
+ * @param model The model
+ * @param tsnp_model The tsnp version of the model
+ * @param input_offset The input offset from the model base
+ * @return nonzero if model not run. Occurs if vbx_cnn_get_state() returns FULL or ERROR
+ */
+int vbx_tsnp_model_start(vbx_cnn_t* vbx_cnn, model_t* model, model_t* tsnp_model, uint32_t input_offset, vbx_cnn_io_ptr_t io_buffers[]);
 
 typedef enum{
              READY = 1,         //< Can accept model immediately
@@ -187,6 +220,15 @@ void vbx_cnn_model_isr(vbx_cnn_t *vbx_cnn);
  * @return non zero if the model does not look valid
  */
 int model_check_sanity(const model_t* model);
+
+/**
+ * Check to see if the model is generated with 
+ * right Vectorblox Core configuration 
+ *
+ * @param model The model to check
+ * @return non zero if the model does not look valid
+ */
+int model_check_configuration(const model_t* model, vbx_cnn_t *vbx_cnn);
 
 /**
  * Get length in elements of an output buffer
@@ -281,6 +323,18 @@ size_t model_get_num_outputs(const model_t* model);
 vbx_cnn_size_conf_e model_get_size_conf(const model_t* model);
 
 /**
+ * Get compression configuration that the model was generated for
+ *   will be one of
+ *   NO Compression 0
+ *   Compression 1
+ *   Unstructured Compression 2
+
+ * @param model The model to query
+ * @return sizeot that the model was generated for
+ */
+vbx_cnn_comp_conf_e model_get_comp_conf(const model_t* model);
+
+/**
  * Get size required to store the data part of the model
  *
  * @param model The model to query
@@ -340,6 +394,9 @@ int model_get_input_scale_fix16_value(const model_t* model, int index);
 
 int model_get_output_zeropoint(const model_t* model, int index);
 int model_get_input_zeropoint(const model_t* model, int index);
+
+size_t model_get_input_offset(const model_t* model,int input_index);
+size_t model_get_output_offset(const model_t* model,int output_index);
 
 int vbx_cnn_get_debug_prints(vbx_cnn_t* vbx_cnn,char* buf,size_t max_chars)
     __attribute__((warning("vbx_cnn_get_debug_prints() is not part of the official Vectorblox API"

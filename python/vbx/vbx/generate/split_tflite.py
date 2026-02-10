@@ -1,5 +1,6 @@
 import argparse
-from .utils import existing_file, existing_dir
+from .utils import existing_file, existing_dir, json_load, json_dump
+from .transform_tflite import graph_pattern, is_forked, is_multi_input, get_numpy_data
 import json
 import copy
 import subprocess
@@ -12,7 +13,6 @@ from tqdm import tqdm
 import numpy as np
 import cv2
 import vbx.postprocess.dataset as rgb_color
-from .transform_tflite import get_splits2
 
 #LUT related optimizations options
 OPTIMIZED_WITH_LUT = 1
@@ -85,8 +85,7 @@ def is_input(idx, operators, cuts, prev_nodes=[]):
 
 
 def get_cuts(jname, cuts, include_outputs=True):
-    with open(jname) as f:
-        graph = json.load(f)
+    graph = json_load(jname)
     # assert(len(graph['subgraphs']) == 1)
 
     buffers = graph['buffers']
@@ -420,7 +419,7 @@ def fuse_pad_into_next_op(engine_op_types, prev_op, curr_op, next_op):
         return False
 
     # If next is Conv, split at the Pad so it can be combined into the next Conv
-    if next_op == 'CONV_2D' and 'CONV_2D' in engine_op_types.nx_op_types:
+    if next_op in engine_op_types.nx_op_types:
         return True
 
     return False
@@ -479,6 +478,16 @@ def is_singleton(shapes):
     return False
 
 
+def is_singleton_op(op, tensors):
+    shapes=[]
+    op_inputs = [_ for _ in op['inputs'] if _ != -1]
+    for op_input in op_inputs:
+        if 'shape' in tensors[op_input]:
+            shapes.append(tensors[op_input]['shape'])
+
+    return is_singleton(shapes)
+
+
 def is_sigmoid(a,b):
     if a == 'LOGISTIC' and b == 'MUL':
         return True
@@ -491,15 +500,12 @@ def is_lookup(a,b):
     return False
 
 
-
-def get_splits(jname, split_every_op=False, engine_op_types=None):
-    valid_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),'supported_ops.json') 
-    with open(valid_path) as f:
-        valid = json.load(f)
-
-    with open(jname) as f:
-        graph = json.load(f)
-    assert(len(graph['subgraphs']) == 1)
+def get_splits_vbx2(jname, split_every_op=False, size_config='V1000', engine_op_types=None):
+    if type(jname) is str:
+        graph = json_load(jname)
+        assert(len(graph['subgraphs']) == 1)
+    else:
+        graph = jname
 
     buffers = graph['buffers']
     subgraph = graph['subgraphs'][0]
@@ -511,6 +517,7 @@ def get_splits(jname, split_every_op=False, engine_op_types=None):
     errors = []
     specials = []
     current = []
+    current_lut_count = 0
     prev_op = None
     prev_opcode = None
     prev_inputs = None
@@ -523,113 +530,97 @@ def get_splits(jname, split_every_op=False, engine_op_types=None):
             opts = op['builtin_options']
         opcode = codes[op['opcode_index']]
 
-        next_op, next_opcode = None, ''
-        if i < len(operators)-1:
-            next_op = operators[i+1]
-            next_opcode = codes[next_op['opcode_index']]
-
-        next_next_op, next_next_opcode = None, ''
-        if i < len(operators)-2:
-            next_next_op = operators[i+2]
-            next_next_opcode = codes[next_next_op['opcode_index']]
-
         op_inputs = [_ for _ in op['inputs'] if _ != -1]
         op_outputs = [_ for _ in op['outputs'] if _ != -1]
       
-        input_shapes=[]
-        for op_input in op_inputs:
-            if 'shape' in tensors[op_input]:
-                input_shapes.append(tensors[op_input]['shape'])
-        # input_shapes = [tensors[_]['shape'] for _ in op_inputs]
-        input_buffers = [buffers[tensors[_]['buffer']] for _ in op_inputs]
-        multi_input = len(input_buffers) > 1 and not any(['data' in _ for _ in input_buffers]) 
-        output_shapes = [tensors[_]['shape'] for _ in op_outputs]
-        output_buffers = [buffers[tensors[_]['buffer']] for _ in op_outputs]
+        multi_input = is_multi_input(op, tensors, buffers)
+        singleton = is_singleton_op(op, tensors)
 
-        connected = True
+        connected, forked = True, False
         if prev_op != None:
             connected = any([_ in prev_outputs for _ in op_inputs])
+            forked, next_ops = is_forked(prev_op, operators, tensors)
 
-        forked = False
-        if prev_op != None:
-            forked = forks(prev_op, prev_inputs, prev_outputs, operators, tensors)
+        output = any([_ for _ in op_inputs if _ in outputs])
 
-        # If using another engine with limited op support, force a split when the current and prev
-        # op mismatch in which engine supports them.
-        # Example: Conv -> Pool would normally be 1 subgraph, but not in 3.0.
-        engine_split = False
-        if engine_op_types and prev_op != None:
-            engine_split = force_split_due_to_engine(engine_op_types, prev_opcode, opcode, next_opcode)
+        pattern_type, pattern = graph_pattern(operators[i:], codes, tensors, buffers)
+        pattern = [i+_ for _ in pattern]
+        partial_pattern = False
+        if len(pattern) and forked:
+            partial_pattern = not all([_ in pattern for _ in next_ops]) and forked
 
-        valid_op, error_param, param_value, input_param = check_valid(valid, opcode, op, tensors)
+        if prev_opcode in ['CONV_2D', 'DEPTHWISE_CONV_2D'] and 'stride_w' in opts and opts['stride_w'] > 1: #TODO
+            f_tensor = tensors[prev_op['inputs'][1]]
+            k, h, w, c = tuple(f_tensor['shape'])
+            if h > 3 or w > 3:
+                # print(prev_opcode, 'forced strided split')
+                if len(current):
+                    splits.append(current)
+                current = []
+                current_lut_count = 0
 
-        if not valid_op:
-            errors.append([i,op,opcode, error_param, param_value, input_param]) 
+        if prev_opcode in ['CONV_2D', 'DEPTHWISE_CONV_2D']:
+            i_tensor = tensors[prev_op['inputs'][0]]
+            k, h, w, c = tuple(i_tensor['shape'])
+            if (size_config in ['V1000'] and w > 1024) or (size_config in ['V500', 'V250'] and w > 640):
+                # print(prev_opcode, 'forced large split')
+                if len(current):
+                    splits.append(current)
+                current = []
+                current_lut_count = 0
 
-        # used for debugging, add ops to capture and save as solo graphs
-        if opcode in ['QUANTIZE']:
-            specials.append([i])
-
-        if split_every_op:
+        if prev_opcode in ['PAD'] and np.sum(get_numpy_data(tensors[prev_op['inputs'][1]], buffers)[-1]) > 0: #expands maps
             if len(current):
                 splits.append(current)
             current = []
-            current.append(i)
+            current_lut_count = 0
+
+        if prev_opcode in ['CONCATENATION', 'STRIDED_SLICE']:
+            if len(current):
+                splits.append(current)
+            current = []
+            current_lut_count = 0
+
+        if prev_opcode in ['DEPTHWISE_CONV_2D'] and opcode in ['PRELU', 'STRIDED_SLICE']: #TODO
+            if len(current):
+                splits.append(current)
+            current = []
+            current_lut_count = 0
+
+        if len(pattern):
+            if pattern_type == "TRANSFORM" or (pattern_type == "LUT" and (current_lut_count or partial_pattern)):
+                if len(current):
+                    splits.append(current)
+                current = []         
+                current_lut_count = 0
+
+            current += pattern
+            if pattern_type == "LUT":
+                current_lut_count += 1
+            i += len(pattern) - 1
+            # update outputs to be from last op in pattern
+            op = operators[i]
+            op_outputs = [_ for _ in op['outputs'] if _ != -1]
+
+
         elif prev_opcode in ['UNPACK', 'RESHAPE','TRANSPOSE']: #TODO start a new graph after OP
             if len(current):
                 splits.append(current)
             current = []
             current.append(i)
-              
-        # elif not connected or forked:
-        elif not connected:
+
+        elif forked or output or not connected or split_every_op:
             if len(current):
                 splits.append(current)
             current = []
+            current_lut_count = 0
             current.append(i)
-        elif is_sigmoid(opcode,next_opcode) and len(lut_pattern(operators, codes, tensors, buffers, i, opcode)):
-            patterns = lut_pattern(operators, codes, tensors, buffers, i, opcode) 
-            current += patterns
-            i += len(patterns) - 1
 
-            # update outputs to be from last op in pattern
-            op = operators[i]
-            op_outputs = [_ for _ in op['outputs'] if _ != -1]
-        elif (is_lookup(opcode,next_opcode) or is_lookup(next_opcode,next_next_opcode)) and len(lut_pattern(operators, codes, tensors, buffers, i, opcode)):
-            patterns = lut_pattern(operators, codes, tensors, buffers, i, opcode) 
-            if len(current):
-                splits.append(current)
-            current =[]         
-            current += patterns
-            i += len(patterns) - 1
-
-            # update outputs to be from last op in pattern
-            op = operators[i]
-            op_outputs = [_ for _ in op['outputs'] if _ != -1]
-        elif forked:
+        elif opcode in ['BATCH_MATMUL', 'CONCATENATION', 'DEPTHWISE_CONV_2D', 'CONV_2D', 'TRANSPOSE_CONV', 'FULLY_CONNECTED', 'UNIDIRECTIONAL_SEQUENCE_LSTM', 'SOFTMAX', 'ARG_MAX', 'CAST', 'TILE', 'SPLIT', 'SPLIT_V', 'PACK', 'UNPACK', 'RESHAPE','TRANSPOSE', 'AVERAGE_POOL_2D', 'MEAN']: # start a new graph before key subgraph OP
             if len(current):
                 splits.append(current)
             current = []
-            current.append(i)
-        elif any([_ for _ in op_inputs if _ in outputs]):
-            if len(current):
-                splits.append(current)
-            current = []
-            current.append(i)
-        elif len(reshape_pattern(operators, codes, tensors, buffers, i, opcode)):
-            patterns = reshape_pattern(operators, codes, tensors, buffers, i, opcode)
-
-            current += patterns
-            i += len(patterns) - 1
-            # update outputs to be from last op in pattern
-            op = operators[i]
-            op_outputs = [_ for _ in op['outputs'] if _ != -1]
-
-            # @TODO: Maybe inject an identity if we can fit full map  --> suppose to be only FIA layers
-        elif opcode in ['CONV_2D', 'TRANSPOSE_CONV', 'FULLY_CONNECTED', 'UNIDIRECTIONAL_SEQUENCE_LSTM', 'SOFTMAX', 'ARG_MAX', 'CAST', 'TILE', 'SPLIT', 'SPLIT_V', 'PACK', 'UNPACK', 'RESHAPE','TRANSPOSE', 'AVERAGE_POOL_2D', 'MEAN']: # start a new graph before key subgraph OP
-            if len(current):
-                splits.append(current)
-            current = []
+            current_lut_count = 0
             current.append(i)
 
         elif opcode in ['RESIZE_NEAREST_NEIGHBOR']:
@@ -638,43 +629,178 @@ def get_splits(jname, split_every_op=False, engine_op_types=None):
                 if len(current):
                     splits.append(current)
                 current = []
+                current_lut_count = 0
             current.append(i)
         elif opcode in ['RESIZE_BILINEAR']:
             if len(current):
                 splits.append(current)
             current = []
+            current_lut_count = 0
             current.append(i)
-        elif opcode in ['CONCATENATION']: # start a new graph before key subgraph OP
+
+        elif opcode in ['ADD', 'SUB', 'MUL', 'DIV', 'SQUARED_DIFFERENCE', "GREATER", "GREATER_EQUAL", "LESS", "LESS_EQUAL", "EQUAL", "NOT_EQUAL"] and multi_input and singleton: #split if singleton channelwise input
             if len(current):
                 splits.append(current)
             current = []
+            current_lut_count = 0
             current.append(i)
-        elif len(lut_pattern(operators, codes, tensors, buffers, i, opcode)):
-            patterns = lut_pattern(operators, codes, tensors, buffers, i, opcode)
 
-            current += patterns
-            i += len(patterns) - 1
+        else:
+            current.append(i)
+
+        prev_op = op
+        prev_opcode = opcode
+
+        prev_inputs = op_inputs
+        prev_outputs = op_outputs
+        i = i + 1
+
+    splits.append(current)
+    return splits, errors, specials
+
+
+
+def get_splits(jname, split_every_op=False, engine_op_types=None):
+    if type(jname) is str:
+        with open(jname) as f:
+            graph = json.load(f)
+        assert(len(graph['subgraphs']) == 1)
+    else:
+        graph = jname
+
+    buffers = graph['buffers']
+    subgraph = graph['subgraphs'][0]
+    outputs = subgraph['outputs']
+    operators = subgraph['operators'] # ops = subgraph['operators']
+    tensors = subgraph['tensors']
+    codes = [_['builtin_code'] for _ in graph['operator_codes']]
+    splits = []
+    errors = []
+    specials = []
+    current = []
+    current_lut_count = 0
+    prev_op = None
+    prev_opcode = None
+    prev_inputs = None
+    prev_outputs = None
+
+    i = 0
+    while i < len(operators):
+        op = operators[i]
+        if 'builtin_options' in op:
+            opts = op['builtin_options']
+        opcode = codes[op['opcode_index']]
+
+        op_inputs = [_ for _ in op['inputs'] if _ != -1]
+        op_outputs = [_ for _ in op['outputs'] if _ != -1]
+      
+        multi_input = is_multi_input(op, tensors, buffers)
+        singleton = is_singleton_op(op, tensors)
+
+        connected, forked = True, False
+        if prev_op != None:
+            connected = any([_ in prev_outputs for _ in op_inputs])
+            forked, next_ops = is_forked(prev_op, operators, tensors)
+
+        output = any([_ for _ in op_inputs if _ in outputs])
+
+        pattern_type, pattern = graph_pattern(operators[i:], codes, tensors, buffers)
+        pattern = [i+_ for _ in pattern]
+        partial_pattern = False
+        if len(pattern) and forked:
+            partial_pattern = not all([_ in pattern for _ in next_ops]) and forked
+
+        # If using another engine with limited op support, force a split when the current and prev
+        # op mismatch in which engine supports them.
+        # Example: Conv -> Pool would normally be 1 subgraph, but not in 3.0.
+        engine_split = False
+        next_op, next_opcode = None, ''
+        if i < len(operators)-1:
+            next_op = operators[i+1]
+            next_opcode = codes[next_op['opcode_index']]
+        if engine_op_types and prev_op != None:
+            engine_split = force_split_due_to_engine(engine_op_types, prev_opcode, opcode, next_opcode)
+
+        if prev_opcode in ['CONV_2D', 'DEPTHWISE_CONV_2D'] and 'stride_w' in opts and opts['stride_w'] > 1: #TODO
+            if len(current):
+                splits.append(current)
+            current = []
+            current_lut_count = 0
+
+        if prev_opcode in ['PAD'] and np.sum(get_numpy_data(tensors[prev_op['inputs'][1]], buffers)[-1]) > 0: #expands maps
+            if len(current):
+                splits.append(current)
+            current = []
+            current_lut_count = 0
+
+        if prev_opcode in ['CONCATENATION']:
+            if len(current):
+                splits.append(current)
+            current = []
+            current_lut_count = 0
+
+        if len(pattern):
+            if pattern_type == "LUT" and (current_lut_count or partial_pattern):
+                if len(current):
+                    splits.append(current)
+                current = []         
+                current_lut_count = 0
+
+            current += pattern
+            if pattern_type == "LUT":
+                current_lut_count += 1
+            i += len(pattern) - 1
             # update outputs to be from last op in pattern
             op = operators[i]
             op_outputs = [_ for _ in op['outputs'] if _ != -1]
             
-        # elif opcode in ['DEPTHWISE_CONV_2D'] and 'padding' in opts and opts['padding'] != 'VALID': # start a new graph before key subgraph OP
-        elif opcode in ['DEPTHWISE_CONV_2D']: # start a new graph before key subgraph OP
+        elif prev_opcode in ['UNPACK', 'RESHAPE','TRANSPOSE']: #TODO start a new graph after OP
             if len(current):
                 splits.append(current)
             current = []
             current.append(i)
 
-        elif opcode in ['ADD', 'SUB', 'MUL', 'DIV', 'SQUARED_DIFFERENCE', "GREATER", "GREATER_EQUAL", "LESS", "LESS_EQUAL", "EQUAL", "NOT_EQUAL"] and multi_input and is_singleton(input_shapes): #split if singleton channelwise input
+        elif forked or output or not connected or split_every_op:
             if len(current):
                 splits.append(current)
             current = []
+            current_lut_count = 0
+            current.append(i)
+
+        elif opcode in ['BATCH_MATMUL', 'CONCATENATION', 'DEPTHWISE_CONV_2D', 'CONV_2D', 'TRANSPOSE_CONV', 'FULLY_CONNECTED', 'UNIDIRECTIONAL_SEQUENCE_LSTM', 'SOFTMAX', 'ARG_MAX', 'CAST', 'TILE', 'SPLIT', 'SPLIT_V', 'PACK', 'UNPACK', 'RESHAPE','TRANSPOSE', 'AVERAGE_POOL_2D', 'MEAN']: # start a new graph before key subgraph OP
+            if len(current):
+                splits.append(current)
+            current = []
+            current_lut_count = 0
+            current.append(i)
+
+        elif opcode in ['RESIZE_NEAREST_NEIGHBOR']:
+            sf_h, sf_w = get_scale_factor(operators, tensors, i)
+            if sf_h > 2 or sf_w > 2 or prev_opcode in ['RESIZE_NEAREST_NEIGHBOR']:
+                if len(current):
+                    splits.append(current)
+                current = []
+                current_lut_count = 0
+            current.append(i)
+        elif opcode in ['RESIZE_BILINEAR']:
+            if len(current):
+                splits.append(current)
+            current = []
+            current_lut_count = 0
+            current.append(i)
+
+        elif opcode in ['ADD', 'SUB', 'MUL', 'DIV', 'SQUARED_DIFFERENCE', "GREATER", "GREATER_EQUAL", "LESS", "LESS_EQUAL", "EQUAL", "NOT_EQUAL"] and multi_input and singleton: #split if singleton channelwise input
+            if len(current):
+                splits.append(current)
+            current = []
+            current_lut_count = 0
             current.append(i)
 
         elif engine_split:
             if len(current):
                 splits.append(current)
             current = []
+            current_lut_count = 0
             current.append(i)
 
         else:
@@ -930,10 +1056,9 @@ def combine_nx_splits(splits, engine_graphs_nx, engine_graphs_mxp):
 
     return splits, engine_graphs_nx, engine_graphs_mxp
 
-def gen_subgraph(idir, odir, jname, splits, vnnx, forced_shape=None):
+def gen_subgraph(idir, odir, jname, splits, vnnx, sim, forced_shape=None):
 
-    with open(jname) as f:
-        g = json.load(f)
+    g = json_load(jname)
 
     buffers = g['buffers']
     subgraph = g['subgraphs'][0]
@@ -1044,24 +1169,27 @@ def gen_subgraph(idir, odir, jname, splits, vnnx, forced_shape=None):
         ssubgraph['inputs'] = input_idx
         ssubgraph['outputs'] = output_idx
 
-        graph_inputs = [{'name': n, 'tensor_index': i} for n, i in zip(input_names, input_tensors)]
-        graph_outputs = [{'name': n, 'tensor_index': i} for n, i in zip(output_names, output_tensors)]
+        graph_inputs = [{'name': n, 'tensor_index': i} for n, i in zip(input_names, input_idx)]
+        graph_outputs = [{'name': n, 'tensor_index': i} for n, i in zip(output_names, output_idx)]
 
         sg['signature_defs'][0]['inputs'] = graph_inputs
         sg['signature_defs'][0]['outputs'] = graph_outputs
 
         schema_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),'schema.fbs') 
         
-        with open(subgraph_jname, 'w+') as f:
-            json.dump(sg, f)
+        json_dump(sg, subgraph_jname)
         cmd = 'flatc -b --strict-json --defaults-json -o {} {} {}'.format(odir, schema_path, subgraph_jname)
         subprocess.run(shlex.split(cmd))
 
         if vnnx:
             subgraph_tflite = subgraph_jname.replace('.json', '.tflite')
             subgraph_vnnx = subgraph_jname.replace('.json', '.vnnx')
-            cmd = 'vnnx_compile -c {} -t {} -o {}'.format(os.environ.get('HW_CONFIG'),subgraph_tflite, subgraph_vnnx)
+            cmd = 'vnnx_compile -s {} -c {} -t {} -o {}'.format(os.environ.get('HW_SIZE'), os.environ.get('HW_COMP'),subgraph_tflite, subgraph_vnnx)
             subprocess.run(cmd, shell=True, check=True)
+
+            if sim:
+                cmd = 'python -m vbx.sim {} -d'.format(subgraph_vnnx)
+                subprocess.run(cmd, shell=True, check=True)
 
     return json_subgraphs
 
@@ -1099,10 +1227,10 @@ def write_json_graph_and_mxp_ops_for_nx(jname: str, nx_dirname: str, engine_grap
     # Read full graph from JSON
     with open(jname) as f:
         graph = json.load(f)
-
+    
     # Write the JSON graph to a file
     assert os.path.isdir(nx_dirname)
-    graph_fname = os.path.join(nx_dirname, "graph.json")
+    graph_fname = os.path.join(nx_dirname, os.path.basename(jname))
     with open(graph_fname, 'w') as json_file:
         json.dump(graph, json_file, indent=4)
 
@@ -1135,7 +1263,7 @@ def write_json_per_nx_engine_graph(jname, tmp_dir, splits, nx_dirname,\
     nx_subdir = os.path.join(tmp_dir, 'subgraphs_nx_merged')
     if not os.path.exists(nx_subdir):
         os.mkdir(nx_subdir)
-    json_subgraphs_merged_nx = gen_subgraph(nx_subdir, nx_subdir, jname, merged_splits, vnnx=False)
+    json_subgraphs_merged_nx = gen_subgraph(nx_subdir, nx_subdir, jname, merged_splits, False, False)
 
     # Write the JSON for each graph engine
     # It might be possible to do this more efficiently. E.g., instead of load and write the
@@ -1372,8 +1500,7 @@ def update_mxp_ops_with_removed_ops(mxp_ops, removed_ops):
 # can be done in the NX TFLite parser, although then other changes will be needed to not
 # use the TFLite graph inputs/outputs as the IR inputs/outputs but instead the new tensors
 # that become inputs/outputs after the pre/post-processing nodes are removed.
-def write_json_graph_without_mxp_pre_post_processing(jname, tmp_dir, splits, nx_dirname,\
-    engine_graphs_mxp, output_name):
+def write_json_graph_without_mxp_pre_post_processing(jname, tmp_dir, splits, nx_dirname, engine_graphs_mxp):
 
     # Get a list of all ops and all ops on MXP
     # The engine graph concept (list of lists) is not useful and can be removed.
@@ -1407,19 +1534,17 @@ def write_json_graph_without_mxp_pre_post_processing(jname, tmp_dir, splits, nx_
 
     # If the graph is entirely on MXP, no need to write JSON for NX
     if all_ops:
-        json_subgraphs_no_pre_post = gen_subgraph(nx_subdir, nx_subdir, jname, [all_ops], vnnx=False)
+        json_subgraphs_no_pre_post = gen_subgraph(nx_subdir, nx_subdir, jname, [all_ops], False, False)
         assert len(json_subgraphs_no_pre_post) == 1
         jname_truncated = json_subgraphs_no_pre_post[0]
-
+        
         # Read graph from JSON and write it to a file.
         # It might be possible to do this more efficiently. E.g., instead of load and write the
         # NX JSON files, just copy them from their location in json_subgraphs_merged_nx.
         with open(jname_truncated) as f:
             graph = json.load(f)
         assert os.path.isdir(nx_dirname)
-        assert output_name != None
-        output_name = output_name.replace('-', '_').replace('.', '_')
-        graph_fname = os.path.join(nx_dirname, f"{output_name}.json")
+        graph_fname = os.path.join(nx_dirname, os.path.basename(jname))
         with open(graph_fname, 'w') as json_file:
             json.dump(graph, json_file, indent=4)
 
@@ -1435,22 +1560,21 @@ def delete_and_remake_dir(dirname):
         shutil.rmtree(dirname)
     os.mkdir(dirname)
 
-def write_json_for_nx(jname, tmp_dir, splits, engine_graphs_nx, engine_graphs_mxp, output_name):
+def write_json_for_nx(jname, tmp_dir, splits, engine_graphs_nx, engine_graphs_mxp):
 
     # Make an nx_dir for the final engine graph JSON files
-    nx_dirname = "nx_engine"
+    nx_dirname = os.path.join(tmp_dir, "nx_engine")
     delete_and_remake_dir(nx_dirname)
 
     # Also make a sync dir
-    nx_sync_dir = os.path.join(nx_dirname, 'sync')
-    os.mkdir(nx_sync_dir)
+    #nx_sync_dir = os.path.join(nx_dirname, 'sync')
+    #os.mkdir(nx_sync_dir)
 
     # Write the entire graph to JSON, along with a list of which ops are on MXP.
     write_json_graph_and_mxp_ops_for_nx(jname, nx_dirname, engine_graphs_mxp, splits)
 
     # Write the JSON graph without the pre and post processing ops (on MXP).
-    write_json_graph_without_mxp_pre_post_processing(jname, tmp_dir, splits, nx_dirname,\
-        engine_graphs_mxp, output_name)
+    write_json_graph_without_mxp_pre_post_processing(jname, tmp_dir, splits, nx_dirname, engine_graphs_mxp)
 
     # This next function is unused and can be deleted, along with the helper functions
     # it calls. It writes each individual NX engine graph to a separete JSON file.
@@ -1461,25 +1585,22 @@ def write_json_for_nx(jname, tmp_dir, splits, engine_graphs_nx, engine_graphs_mx
     write_json_per_nx_engine_graph(jname, tmp_dir, splits, nx_dirname,\
         engine_graphs_nx, engine_graphs_mxp)
 
-def generate_split_graphs(tflite_model, dir, split_every_op=False, cuts=None, vnnx=False, vbx_version=2,\
-    output_name=None):
+def generate_split_graphs(tflite_model, dir, split_every_op=False, cuts=None, vnnx=False, sim=False, compression_vbx='ncomp', size_config='V1000', output_name=None):
     schema_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),'schema.fbs') 
     jname = os.path.join(dir, os.path.basename(tflite_model).replace('.tflite','.json'))
-
+    
     cmd = 'flatc -t --strict-json --defaults-json -o {} {} -- {}'.format(dir, schema_path, tflite_model)
     subprocess.run(shlex.split(cmd))
 
     #update operator builtin_code
-    with open(schema_path.replace('.fbs', '.json')) as f:
-        schema = json.load(f)
-        operators = schema["definitions"]["tflite_BuiltinOperator"]["enum"]
-        with open(jname) as f:
-            graph = json.load(f)
-            for i,g in enumerate(graph['operator_codes']):
-                if 'deprecated_builtin_code' in g and not g['deprecated_builtin_code'] == 127:
-                    graph['operator_codes'][i]['builtin_code'] = operators[g['deprecated_builtin_code']]
-        with open(jname, 'w') as f:
-            json.dump(graph, f)
+    schema = json_load(schema_path.replace('.fbs', '.json'))
+    operators = schema["definitions"]["tflite_BuiltinOperator"]["enum"]
+    with open(jname) as f:
+        graph = json.load(f)
+        for i,g in enumerate(graph['operator_codes']):
+            if 'deprecated_builtin_code' in g and not g['deprecated_builtin_code'] == 127:
+                graph['operator_codes'][i]['builtin_code'] = operators[g['deprecated_builtin_code']]
+    json_dump(graph, jname)
 
 
     subdir = os.path.join(dir, 'subgraphs') 
@@ -1487,17 +1608,16 @@ def generate_split_graphs(tflite_model, dir, split_every_op=False, cuts=None, vn
         os.mkdir(subdir)
 
     # errors.append([i,op,opcode])
-    if vbx_version == 3:
-        nx_op_types = ['CONV_2D', ]
+    if compression_vbx == 'ucomp':
+        nx_op_types = ['CONV_2D', 'MAX_POOL_2D']
         agnostic_op_types = ['QUANTIZE', 'RESIZE_NEAREST_NEIGHBOR', 'PAD', 'ADD', 'CONCATENATION',\
-                             'STRIDED_SLICE', ]
+                             'STRIDED_SLICE', 'LOGISTIC', 'MUL', 'SPLIT', 'CAST', 'GATHER']
         engine_op_types = EngineOpTypes(nx_op_types, agnostic_op_types)
 
         # Pass in nx_op_types in case need to add additional splits at engine graph boundaries
         splits, error_ops, special_ops = get_splits(jname, split_every_op, engine_op_types)
     else:
-        # splits, error_ops, special_ops = get_splits(jname, split_every_op)
-        splits, error_ops, special_ops = get_splits2(jname, split_every_op)
+        splits, error_ops, special_ops = get_splits_vbx2(jname, split_every_op, size_config=size_config)
 
     if len(error_ops)>0: 
         errors_dir = os.path.join(os.path.join(os.getcwd(), 'unsupported_ops'))
@@ -1523,16 +1643,16 @@ def generate_split_graphs(tflite_model, dir, split_every_op=False, cuts=None, vn
         if not os.path.exists(special_dir):
             os.makedirs(special_dir)
         gen_subgraph(subdir, special_dir, jname, special_ops, False) #, [256,])
-    json_subgraphs = gen_subgraph(subdir, subdir, jname, splits, vnnx)
+    json_subgraphs = gen_subgraph(subdir, subdir, jname, splits, vnnx, sim)
 
-    if vbx_version == 3:
+    if compression_vbx == 'ucomp':
         # Map each split to an engine
         # TODO: Currently these are only being used as lists of splits. The engine graph concept
         # (list of lists) is not used anywhere. If it will never be needed, can simplify this.
         engine_graphs_nx, engine_graphs_mxp = get_splits_per_engine(jname, splits, engine_op_types)
-
+        
         # For NX, write the required engine graphs to JSON files
-        write_json_for_nx(jname, dir, splits, engine_graphs_nx, engine_graphs_mxp, output_name)
+        write_json_for_nx(jname, dir, splits, engine_graphs_nx, engine_graphs_mxp)
 
         # For MXP, return all subgraphs but also which are on NX.
         # It may be possible to just return the subgraphs which are on MXP, rather than return all
@@ -1543,7 +1663,7 @@ def generate_split_graphs(tflite_model, dir, split_every_op=False, cuts=None, vn
     return json_subgraphs, None
 
 
-def generate_cut_graphs(tflite_model, cuts=None, vnnx=False):
+def generate_cut_graphs(tflite_model, cuts=None, vnnx=False, sim=False):
     schema_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),'schema.fbs') 
     dir = os.path.dirname(tflite_model)
     if dir == '':
@@ -1569,7 +1689,7 @@ def generate_cut_graphs(tflite_model, cuts=None, vnnx=False):
     subprocess.run(shlex.split(cmd))
 
     cuts = get_cuts(jname, cuts)
-    return gen_subgraph(dir, dir, jname, cuts, vnnx)
+    return gen_subgraph(dir, dir, jname, cuts, vnnx, sim)
 
 
 def join_graph(graphs):
@@ -1689,10 +1809,9 @@ def get_quantize_values(scale, mean, dtype='INT8'):
     
 
 def inject_preprocess(i, o0, t0, opcodes, tensors, buffers, graph_inputs, inputs, operators, scale, mean, dtype='INT8'):
-
-    # add QUANTIZE only for
+    # add QUANTIZE
     ops_num = i
-    if dtype.upper() != "UINT8":
+    if dtype.upper() != "UINT8":     
         buffers.append({'offset': 0, 'size': 0})
         tensors.append({'shape': t0['shape'],
             'type': 'UINT8',
@@ -1709,14 +1828,15 @@ def inject_preprocess(i, o0, t0, opcodes, tensors, buffers, graph_inputs, inputs
                     'outputs': [o0]}
         operators = operators[:ops_num] + [inject_op] + operators[ops_num:]
         ops_num += 1
-
+            
+        
     do_mul = isinstance(scale, list) or (scale != 1.0)
     do_add = isinstance(mean, list) or (mean != 0.0)
     output_scale = 1.0
     output_zeropoint = -128
     channel = 1
     mul_offset = 0
-
+    
     if do_mul:
         mul_offset = 1
         scale_details, shift_details = get_quantize_values(scale, mean, dtype)
@@ -1756,6 +1876,7 @@ def inject_preprocess(i, o0, t0, opcodes, tensors, buffers, graph_inputs, inputs
         else:
             graph_inputs[i]['tensor_index'] = len(tensors)-1
             inputs[i] = len(tensors)-1 
+        
         buffers.append({'data': scale_q_value, 'offset': 0, 'size': 0})
         tensors.append({'shape': [1,1,1,channel],
             'type': dtype.upper(),
@@ -2492,6 +2613,7 @@ def cut():
     parser.add_argument("tflite", type=existing_file)
     parser.add_argument("-c", "--cuts", type=int, nargs='*')
     parser.add_argument("--vnnx", action='store_true')
+    parser.add_argument("--sim", action='store_true')
     args = parser.parse_args()
 
     tmp_dir_obj = tempfile.TemporaryDirectory()
@@ -2499,7 +2621,7 @@ def cut():
     tmp_tflite = os.path.join(tmp_dir, os.path.basename(args.tflite))
     shutil.copyfile(args.tflite, tmp_tflite)
 
-    generate_cut_graphs(tmp_tflite, args.cuts, args.vnnx)
+    generate_cut_graphs(tmp_tflite, args.cuts, args.vnnx, args.sim)
     graphs = list(glob.glob(os.path.join(tmp_dir, "*.tflite")))
     graphs += list(glob.glob(os.path.join(tmp_dir, "*.vnnx")))
     for src in graphs:
@@ -2517,10 +2639,11 @@ def main():
     parser.add_argument("-e", "--split-every-op", action='store_true')
     parser.add_argument("-c", "--cuts", type=int, nargs='*')
     parser.add_argument("--vnnx", action='store_true')
+    parser.add_argument("--sim", action='store_true')
     args = parser.parse_args()
 
     if not args.join:
-        generate_split_graphs(args.tflite, args.dir, args.split_every_op, args.cuts, args.vnnx)
+        generate_split_graphs(args.tflite, args.dir, args.split_every_op, args.cuts, args.vnnx, args.sim)
     else:
         generate_join_graphs(args.tflite, args.dir, args.debug)
 

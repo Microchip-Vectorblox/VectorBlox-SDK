@@ -146,13 +146,30 @@ short detectionDemoInit(vbx_cnn_t* the_vbx_cnn, struct model_descr_t* models, ui
 	// Determine the input and output lengths of the Object Model, and re-order output buffers if applicable
 	int num_outputs = model_get_num_outputs(object_model->model);
 	for(int output = 0; output < num_outputs; output++) {
-		int output_length = model_get_output_length(object_model->model, output) * 4; // fix16 outputs are 4 bytes per element?
-		object_model->pipelined_output_buffers[0][output] = vbx_allocate_dma_buffer(the_vbx_cnn, output_length, 0);
-		object_model->pipelined_output_buffers[1][output] = vbx_allocate_dma_buffer(the_vbx_cnn, output_length, 0);
-		object_model->model_io_buffers[output+1] = (uintptr_t)object_model->pipelined_output_buffers[0][output];
-		if(!object_model->pipelined_output_buffers[0][output] || !object_model->pipelined_output_buffers[1][output]){
-			printf("Memory allocation issue for model output buffers.\n");
-			return -1;	
+		int output_length = model_get_output_length(object_model->model, output);
+		if (the_vbx_cnn->comp_config == 2) {
+			unsigned j;
+			uint32_t output_offset = 0;
+			for(j = 0; j < num_outputs; j++) {
+				uint32_t output_size = *((uint32_t*)object_model->model_header + 7 + (2 * j));
+				output_offset = *((uint32_t*)object_model->model_header + 8 + (2 * j));
+				if (output_length == output_size) {
+					break;
+				}
+			}
+			object_model->pipelined_output_buffers[0][output] = (fix16_t*)((uint32_t)(uintptr_t)object_model->model + output_offset);
+			object_model->pipelined_output_buffers[1][output] = (fix16_t*)((uint32_t)(uintptr_t)object_model->model + output_offset);
+			object_model->model_io_buffers[output+1] = (uintptr_t)object_model->pipelined_output_buffers[0][output];
+		}
+		else {
+			output_length *= 4; // fix16 outputs are 4 bytes per element?
+			object_model->pipelined_output_buffers[0][output] = vbx_allocate_dma_buffer(the_vbx_cnn, output_length, 0);
+			object_model->pipelined_output_buffers[1][output] = vbx_allocate_dma_buffer(the_vbx_cnn, output_length, 0);
+			object_model->model_io_buffers[output+1] = (uintptr_t)object_model->pipelined_output_buffers[0][output];
+			if(!object_model->pipelined_output_buffers[0][output] || !object_model->pipelined_output_buffers[1][output]){
+				printf("Memory allocation issue for model output buffers.\n");
+				return -1;	
+			}
 		}
 	}
 
@@ -182,7 +199,7 @@ int runDetectionDemo(struct model_descr_t* models, vbx_cnn_t* the_vbx_cnn, uint8
 	//Start processing the network if not already running - 1st pass only (frame 0 )
 	if(!object_model->is_running) {		
 #ifdef HLS_RESIZE	
-	resize_image_hls(SCALER_BASE_ADDRESS,(uint32_t*)(intptr_t)(*PROCESSING_FRAME_ADDRESS),
+		resize_image_hls(SCALER_BASE_ADDRESS,(uint32_t*)(intptr_t)(*PROCESSING_FRAME_ADDRESS),
 				set_screen_width, set_screen_height, set_screen_stride, 
 				set_screen_x_offset, set_screen_y_offset,
 				(uint8_t*)virt_to_phys(the_vbx_cnn, (void*)object_model->pipelined_input_buffer[object_model->buf_idx]),
@@ -219,8 +236,12 @@ int runDetectionDemo(struct model_descr_t* models, vbx_cnn_t* the_vbx_cnn, uint8
 		// Start model
 #if VBX_SOC_DRIVER		
 		gettimeofday(&m_run1, NULL);
-#endif		
-		err = vbx_cnn_model_start(the_vbx_cnn, object_model->model, object_model->model_io_buffers); 
+#endif	
+		if (the_vbx_cnn->comp_config == 2) {
+			err = vbx_tsnp_model_start(the_vbx_cnn, object_model->model, object_model->tsnp_model, object_model->input_offset, object_model->model_io_buffers); 
+		} else {
+			err = vbx_cnn_model_start(the_vbx_cnn, object_model->model, object_model->model_io_buffers); 
+		}
 #ifdef HLS_RESIZE
 		resize_image_hls_start(SCALER_BASE_ADDRESS,(uint32_t*)(intptr_t)(*PROCESSING_NEXT_FRAME_ADDRESS),
                 set_screen_width, set_screen_height, set_screen_stride,
@@ -254,8 +275,11 @@ int runDetectionDemo(struct model_descr_t* models, vbx_cnn_t* the_vbx_cnn, uint8
 			object_model->model_io_buffers[o+1] = (uintptr_t)object_model->pipelined_output_buffers[!object_model->buf_idx][o];
 		}	
 		//Start model inference
-		
-		err = vbx_cnn_model_start(the_vbx_cnn, object_model->model, object_model->model_io_buffers); 
+		if (the_vbx_cnn->comp_config == 2) {
+			err = vbx_tsnp_model_start(the_vbx_cnn, object_model->model, object_model->tsnp_model, object_model->input_offset, object_model->model_io_buffers); 
+		} else {
+			err = vbx_cnn_model_start(the_vbx_cnn, object_model->model, object_model->model_io_buffers); 
+		}
 		if(err != 0) return err;
 		object_model->is_running = 1;
 #ifdef HLS_RESIZE
@@ -266,29 +290,27 @@ int runDetectionDemo(struct model_descr_t* models, vbx_cnn_t* the_vbx_cnn, uint8
 				input_dims[3],input_dims[2]);
 #endif
 
-    if(!strcmp(object_model->post_process_type, "PIXEL")){
+    	if(!strcmp(object_model->post_process_type, "PIXEL")){
             pixel_draw(object_model->model, (vbx_cnn_io_ptr_t*)object_model->pipelined_output_buffers[object_model->buf_idx],the_vbx_cnn);
-    }
+    	}
 #if VBX_SOC_DRIVER
 		gettimeofday(&m_run2, NULL);
 		m_run_fps = 1000/ (gettimediff_us_2(m_run1, m_run2) / 1000);
-	if (PDMA){
-		vbx_cnn_io_ptr_t pdma_buffer[model_get_num_outputs(object_model->model)];
-		int output_offset=0;
-		for(int o =0; o<(int)model_get_num_outputs(object_model->model);o++){
-			int output_length = model_get_output_length(object_model->model, o);
-			pdma_ch_transfer(pdma_out,(void*)object_model->pipelined_output_buffers[object_model->buf_idx][o],output_offset,model_get_output_length(object_model->model, o),the_vbx_cnn,pdma_channel);
-			pdma_buffer[o] = (vbx_cnn_io_ptr_t)(pdma_mmap_t + output_offset);
-			output_offset+= output_length;
+		if (PDMA){
+			vbx_cnn_io_ptr_t pdma_buffer[model_get_num_outputs(object_model->model)];
+			int output_offset=0;
+			for(int o = 0; o < (int)model_get_num_outputs(object_model->model); o++){
+				int output_length = model_get_output_length(object_model->model, o);
+				pdma_ch_transfer(pdma_out,(void*)object_model->pipelined_output_buffers[object_model->buf_idx][o],output_offset,output_length,the_vbx_cnn,pdma_channel);
+				pdma_buffer[o] = (vbx_cnn_io_ptr_t)(pdma_mmap_t + output_offset);
+				output_offset+= output_length;
+			}
+			pprint_post_process(object_model->name, object_model->post_process_type, object_model->model, (fix16_t**)(uintptr_t)pdma_buffer,1,fps);
 		}
-		pprint_post_process(object_model->name, object_model->post_process_type, object_model->model, (fix16_t**)(uintptr_t)pdma_buffer,1,fps);
-	}
 #else
 		pprint_post_process(object_model->name, object_model->post_process_type, object_model->model, (fix16_t**)(uintptr_t)object_model->pipelined_output_buffers[object_model->buf_idx],1,fps);
-
 #endif
-	object_model->buf_idx = !object_model->buf_idx;
-		
+		object_model->buf_idx = !object_model->buf_idx;		
 	}
 	return status;
 }

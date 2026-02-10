@@ -19,17 +19,8 @@
 #include "warpAffine/warp.h"
 #include "recognitionDemo.h"
 #include "detectionDemo.h"
+#include "demo_models.h"
 
-
-struct model_descr_t models[] = {
-		{"Yolo v8n", "/home/root/samples_V1000_2.0.3/yolov8n_512x288_argmax.vnnx", 0, "ULTRALYTICS"},		
-		{"SCRFD", "/home/root/samples_V1000_2.0.3/scrfd_500m_bnkps.vnnx", 0, "SCRFD"},
-		{"mobileface-arcface", "/home/root/samples_V1000_2.0.3/mobilefacenet-arcface.vnnx", 0, "ARCFACE"},
-		{"MobileNet V2", "/home/root/samples_V1000_2.0.3/mobilenet-v2.vnnx", 0, "CLASSIFY"},	
-		{"Yolov8 Pose", "/home/root/samples_V1000_2.0.3/yolov8n-pose_512x288_split.vnnx", 0, "ULTRALYTICS_POSE"},	
-		{"FFNet 122NS", "/home/root/samples_V1000_2.0.3/FFNet-122NS-LowRes_512x288.vnnx", 0, "PIXEL"},	
-		{"Midas V2", "/home/root/samples_V1000_2.0.3/Midas-V2-Quantized.vnnx", 0, "PIXEL"},
-};
 
 #define UIO_DMA_LIMIT 512*1024*1024*2
 int total_fsize=0;
@@ -128,8 +119,56 @@ void *read_ascii_file(vbx_cnn_t *vbx_cnn, const char *filename) {
 	return dma_ascii;
 }
 
-
-
+ucomp_model_t *read_ucompmodel_file(vbx_cnn_t *vbx_cnn, const char *filename) {
+	ucomp_model_t *model_info = (ucomp_model_t*)malloc(sizeof(ucomp_model_t));
+	FILE *model_file = fopen(filename, "r");
+	if (model_file == NULL) {
+		return NULL;
+	}
+	fseek(model_file, 0, SEEK_END);
+	int file_size = ftell(model_file);
+	fseek(model_file, 0, SEEK_SET);
+	model_t *model = (model_t *)malloc(file_size);
+	int size_read = fread(model, 1, file_size, model_file);
+	if (size_read != file_size) {
+		fprintf(stderr, "Error reading full model file %s\n", filename);
+		return NULL;
+	}
+	fclose(model_file);
+	
+	// Read binary header information
+	uint32_t header_size = *((uint32_t*)model);
+	uint32_t mxp_model_size  = *((uint32_t*)model + 1);
+	uint32_t tsnp_model_size = *((uint32_t*)model + 2);
+	
+	// Copy header information
+	model_info->header_info = (uint8_t*)vbx_allocate_dma_buffer(vbx_cnn, header_size, 0);
+	if (model_info->header_info) {
+		memcpy(model_info->header_info, model, header_size);
+	} else {
+		return 0;
+	}
+	
+	// Copy mxp version of the model
+	uint32_t model_allocate_size = model_get_allocate_bytes((model_t*)((char*)model + header_size));
+	model_info->mxp_model = (model_t*)vbx_allocate_dma_buffer(vbx_cnn, model_allocate_size, 0);
+	if (model_info->mxp_model) {
+		memcpy(model_info->mxp_model, (model_t*)((char*)model + header_size), mxp_model_size);
+	} else {
+		return NULL;
+	}
+	
+	// Copy tsnp version of the model with 4096 byte alignment
+	model_info->tsnp_model = (model_t*)vbx_allocate_dma_buffer(vbx_cnn, tsnp_model_size, 12);
+	if (model_info->tsnp_model) {
+		memcpy(model_info->tsnp_model, (model_t*)((char*)model + header_size + mxp_model_size), tsnp_model_size);
+	} else {
+		return NULL;
+	}	
+	
+	free(model);
+	return model_info;
+}
 
 model_t *read_model_file(vbx_cnn_t *vbx_cnn, const char *filename) {
 	FILE *model_file = fopen(filename, "r");
@@ -364,18 +403,42 @@ int main(int argc, char **argv) {
 	pdma_out = pdma_mmap(total_size);	
 	pdma_channel = pdma_ch_open();
 #endif
+
 	//Setup Models
 	for (int i = 0; i < (int)(sizeof(models)/sizeof(*models)); i++) {
-		model_t *model = read_model_file(vbx_cnn, models[i].fname);
+		model_t *model;
+		model_t *tsnp_model = NULL;
+		uint8_t *model_header = NULL;
+		uint32_t input_offset = 0;
+		if (vbx_cnn->comp_config == 2) {
+			ucomp_model_t *ucomp_model = read_ucompmodel_file(vbx_cnn, models[i].fname);
+			model = ucomp_model->mxp_model;
+			tsnp_model = ucomp_model->tsnp_model;
+			model_header = ucomp_model->header_info;
+			input_offset = *((uint32_t*)model_header + 6);
+		} else {
+			model = read_model_file(vbx_cnn, models[i].fname);
+		}
 		if (!model) {
 			fprintf(stderr, "Unable to correctly read %s. Exiting\n", models[i].fname);
 			exit(1);
 		}
-
-		if (model_check_sanity(model) != 0) {
-			printf("Model %s is not sane\n", models[i].fname);
+		
+		int verify_model = model_check_configuration(model, vbx_cnn);
+		if (verify_model == -1) {
+			printf("Model %s version mismatch. Please generate the model with appropriate version of VBX_SDK \n", argv[1]);
+			exit(1);
+		} else if (verify_model == -2) {
+			printf("Model %s and VBX_CORE compression configuration mismatch. Make sure the compression configuration is set properly when the model is generated. \n", argv[1]);
+			exit(1);
+		} else if (verify_model == -3) {
+			printf("Model %s and VBX_CORE size configuration mismatch. Make sure the size configuration is set properly when the model is generated. \n", argv[1]);
+			exit(1);
 		}
 		models[i].model = model;
+		models[i].tsnp_model = tsnp_model;
+		models[i].model_header = model_header;
+		models[i].input_offset = input_offset;
 		models[i].modelSetup_done = 1;
 	}
 	

@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v2.0                                                   #
+# v3.0                                                   #
 #                                                        #
 ##########################################################
 
@@ -32,15 +32,15 @@ if [ -f SESR-M5-Quantized.tflite ]; then
 fi
 
 if [ -f SESR-M5-Quantized.pre.tflite ]; then
-    echo "Generating VNNX for V1000 configuration..."
-    vnnx_compile -c V1000 -t SESR-M5-Quantized.pre.tflite -o SESR-M5-Quantized.vnnx
+    echo "Generating VNNX for V1000 ncomp configuration..."
+    vnnx_compile -s V1000 -c ncomp -t SESR-M5-Quantized.pre.tflite  -o SESR-M5-Quantized_V1000_ncomp.vnnx
 fi
 
-if [ -f SESR-M5-Quantized.vnnx ]; then
+if [ -f SESR-M5-Quantized_V1000_ncomp.vnnx ]; then
     echo "Running Simulation..."
-    python $VBX_SDK/example/python/super_resolution.py SESR-M5-Quantized.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg -i 
+    python $VBX_SDK/example/python/super_resolution.py SESR-M5-Quantized_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg -i 
     echo "C Simulation Command:"
-    echo '$VBX_SDK/example/sim-c/sim-run-model SESR-M5-Quantized.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg  '
+    echo '$VBX_SDK/example/sim-c/sim-run-model SESR-M5-Quantized_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg  '
 fi
 
 deactivate

@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v2.0                                                   #
+# v3.0                                                   #
 #                                                        #
 ##########################################################
 
@@ -31,15 +31,15 @@ if [ -f efficientnet_lite2.tflite ]; then
 fi
 
 if [ -f efficientnet_lite2.pre.tflite ]; then
-    echo "Generating VNNX for V1000 configuration..."
-    vnnx_compile -c V1000 -t efficientnet_lite2.pre.tflite -o efficientnet_lite2.vnnx
+    echo "Generating VNNX for V1000 ncomp configuration..."
+    vnnx_compile -s V1000 -c ncomp -t efficientnet_lite2.pre.tflite  -o efficientnet_lite2_V1000_ncomp.vnnx
 fi
 
-if [ -f efficientnet_lite2.vnnx ]; then
+if [ -f efficientnet_lite2_V1000_ncomp.vnnx ]; then
     echo "Running Simulation..."
-    python $VBX_SDK/example/python/classifier.py efficientnet_lite2.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg 
+    python $VBX_SDK/example/python/classifier.py efficientnet_lite2_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg 
     echo "C Simulation Command:"
-    echo '$VBX_SDK/example/sim-c/sim-run-model efficientnet_lite2.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg CLASSIFY'
+    echo '$VBX_SDK/example/sim-c/sim-run-model efficientnet_lite2_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg CLASSIFY'
 fi
 
 deactivate

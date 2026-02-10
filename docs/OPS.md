@@ -1,3 +1,30 @@
+# Supported Operations (INT8 TFLite)
+
+## Overview
+
+This document lists all TensorFlow Lite operators supported by the VectorBlox VNNX compiler for INT8 quantized inference. These operators are optimized for deployment on VectorBlox hardware accelerators.
+
+---
+
+## Quick Summary
+
+| Category | Count | Details |
+|----------|-------|---------|
+| Fully Supported | 38 | No constraints or limitations |
+| Supported (with constraints) | 36 | Check parameter restrictions below |
+| **Total Operators** | **74** | Ready for INT8/UINT8 inference |
+
+---
+
+## Key Points
+
+- **Operator parameters matter** - operators marked with only work with specific parameter values (e.g., axis values, padding modes)
+- **Troubleshooting**: If an operator is unsupported, Please contact the VectorBlox team at vectorblox@microchip.com
+
+---
+
+## Complete Operator List 
+
 
 <div class="table">
 

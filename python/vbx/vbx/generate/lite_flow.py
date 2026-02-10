@@ -5,11 +5,51 @@ import os
 import json
 import subprocess
 import numpy as np
+import sys
+import shutil
 
+from .verify_tflite import verify_graph
+from .transform_tflite import load_graph, save_graph, transform_graph
 from .split_tflite import generate_split_graphs
-from .vnnx_tflite import generate_vnnx_from_json_subgraphs, get_graph_activations
 from .infer_tflite import get_tflite_io
-from .transform_tflite import load_graph, verify_graph, save_graph, transform_graph, default_passes
+from .vnnx_tflite import generate_vnnx_from_json_subgraphs, get_graph_activations
+from .utils import existing_file, existing_dir, json_load, json_dump, get_input_details, get_output_details
+from .vnnx_types import preset_select
+
+default_ncomp_passes = ['SORT_DFS',
+                      'REMOVE_FP32_IO',
+                      'REMOVE_CONSTANTS',
+                      'CLEAN_LOGISTIC',
+                      'LUT',
+                      'PADV2',
+                      'EXPLICIT_PAD',
+                      'SHARED_PAD',
+                      'GROUP_DEPTH5x2',
+                      'STRIDED_DEPTHWISE',
+                      'TRANSPOSE_CONV',
+                      'FC_CONV_2D',
+                      'GROUP_CONV',
+                      ]
+
+default_comp_passes = ['SORT_DFS',
+                      'REMOVE_FP32_IO',
+                      'REMOVE_CONSTANTS',
+                      'CLEAN_LOGISTIC',
+                      'LUT',
+                      'PADV2',
+                      'EXPLICIT_PAD',
+                      'SHARED_PAD',
+                      'GROUP_DEPTH',
+                      'STRIDED_DEPTHWISE',
+                      'TRANSPOSE_CONV',
+                      'FC_CONV_2D',
+                      'GROUP_CONV',
+                      ]
+
+default_ucomp_passes = ['LUT',
+                       'AVERAGE_POOL_2D',
+                       'FULL_DEPTH',
+                       ]
 
 
 def transpose_io_to_vnnx(x):
@@ -25,26 +65,18 @@ def transpose_io_to_vnnx(x):
 
 
 def tflite_to_vnnx(tflite, size_config, output_filename=None, start_layer=0, end_layer=None, inputs=None, mean=0., scale=1., rgb=False, debug=False,\
-    vbx_version=2):
+    compression_vbx=None, tmp_dir=None, tmp_dir_obj=None):
     include_io_data = 1
     if inputs is None:
         include_io_data = 0
 
 
-    if debug:
-        tmp_dir ='temp'
-        try:
-            os.mkdir(tmp_dir)
-        except FileExistsError:
-            pass
-
-    else:
-        tmp_dir_obj = tempfile.TemporaryDirectory()
-        tmp_dir = tmp_dir_obj.name
-
     output_name = os.path.splitext(output_filename)[0]
-    json_subgraphs, engine_graphs_nx = generate_split_graphs(tflite, tmp_dir, split_every_op=False, vbx_version=vbx_version,\
-        output_name=output_name)
+    json_subgraphs, engine_graphs_nx = generate_split_graphs(tflite, tmp_dir,
+                                                             split_every_op=False,
+                                                             compression_vbx=compression_vbx,
+                                                             size_config=size_config,
+                                                             output_name=output_name)
     if end_layer is None:
         end_layer = len(json_subgraphs)-1
 
@@ -52,8 +84,7 @@ def tflite_to_vnnx(tflite, size_config, output_filename=None, start_layer=0, end
     for layer_idx, j in enumerate(json_subgraphs):
         if layer_idx < start_layer:
             continue
-        with open(j) as f:
-            json_graph.append(json.load(f))
+        json_graph.append(json_load(j))
         if layer_idx == end_layer:
             break
 
@@ -65,7 +96,7 @@ def tflite_to_vnnx(tflite, size_config, output_filename=None, start_layer=0, end
             data = {'inputs': [], 'outputs': []}
             import tensorflow as tf
             interpreter= tf.lite.Interpreter(model_path=tflite)
-            input_details, output_details = interpreter.get_input_details(), interpreter.get_output_details()
+            input_details, output_details = get_input_details(tflite), get_output_details(tflite)
 
         for i,input in enumerate(inputs):
             if debug:
@@ -82,10 +113,10 @@ def tflite_to_vnnx(tflite, size_config, output_filename=None, start_layer=0, end
                 data['outputs'].append({'data': outputs[output].tolist(), 'shape': outputs[output].shape, 'zero': zero, 'scale': scale, 'dtype': outputs[output].dtype.name.upper()})
             outputs[output] = transpose_io_to_vnnx(outputs[output])
         if debug:
-            with open(os.path.join(tmp_dir, 'tflite.io.json'), 'w') as f:
-                json.dump(data, f)
+            json_dump(data, os.path.join(tmp_dir, 'tflite.io.json'))
 
-        vnnx_graph_binary = generate_vnnx_from_json_subgraphs(json_graph, size_config, inputs, outputs, include_io_data, tmp_dir, engine_graphs_nx)
+        vnnx_graph_binary = generate_vnnx_from_json_subgraphs(json_graph, size_config, inputs, outputs, include_io_data, tmp_dir, engine_graphs_nx, debug, \
+                                                              compression_vbx=compression_vbx, tmp_dir_obj=tmp_dir_obj if not debug else None)
     else:
         graph_inputs, graph_outputs, _ = get_graph_activations(json_graph)
 
@@ -117,10 +148,7 @@ def tflite_to_vnnx(tflite, size_config, output_filename=None, start_layer=0, end
         for o in outputs:
             outputs[o] = transpose_io_to_vnnx(outputs[o])
         vnnx_graph_binary = generate_vnnx_from_json_subgraphs(json_graph, size_config, curr_inputs, outputs, include_io_data, tmp_dir,\
-            engine_graphs_nx)
-
-    if not debug:
-        tmp_dir_obj.cleanup()
+            engine_graphs_nx, debug, compression_vbx=compression_vbx, tmp_dir_obj=tmp_dir_obj if not debug else None)
 
     with open(output_filename, "wb") as output_file:
         output_file.write(vnnx_graph_binary)
@@ -131,41 +159,158 @@ def tflite_to_vnnx(tflite, size_config, output_filename=None, start_layer=0, end
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-t', '--tflite', help='tflite I8 model description (.tflite)', required=True, type=existing_file)
-    parser.add_argument('-c', '--size-conf', help='size configuration to build model for',
+    parser.add_argument('-s', '--size_conf', help='size configuration to build model for',
                         choices = ['V250','V500','V1000'], required=True)
-    parser.add_argument('-o','--output', help="Name of vnnx output file",required=True)
-    parser.add_argument('-s', '--start_layer', type=int, default=0)
+    parser.add_argument('-c', '--compression-vbx', help='compression setting for VNNX model generation',
+                        choices = ['ncomp', 'comp', 'ucomp'], required=True)
+    parser.add_argument('-o','--output', help="Name of vnnx output file")
+    parser.add_argument('--start_layer', type=int, default=0)
     parser.add_argument('-e', '--end_layer', type=int)
     parser.add_argument('-i', '--inputs', nargs='*', help='provide test inputs for model', type=existing_file)
     parser.add_argument('-m', '--mean', type=float, nargs='+', default=0.)
     parser.add_argument('-sc', '--scale', type=float, nargs='+', default=1.)
     parser.add_argument('-b', '--bgr', action='store_true')
+    parser.add_argument('-u', '--uint8', action='store_true')
     #undocumented arguments
     parser.add_argument('-d', '--debug', help=argparse.SUPPRESS,action='store_true')
-    parser.add_argument('-v', '--vbx_version', choices=[2, 3], type=int, default=2, help=argparse.SUPPRESS)
+    
     args = parser.parse_args()
+    
+    env = os.environ.copy()
+    VBX_SDK = env["VBX_SDK"]
+    NX_SDK = env["NX_SDK"]
 
+    if args.debug:
+        tmp_dir ='temp'
+        try:
+            os.mkdir(tmp_dir)
+        except FileExistsError:
+            pass
+    else:
+        tmp_dir_obj = tempfile.TemporaryDirectory()
+        tmp_dir = tmp_dir_obj.name
+
+    if args.compression_vbx == 'ucomp':
+        # Also update presets
+        for preset in preset_select["SCRATCHPAD_KB"]:
+            preset_select["SCRATCHPAD_KB"][preset] = 32
+        for preset in preset_select["VECTOR_LANES"]:
+            preset_select["VECTOR_LANES"][preset] = 2    
+        model_jname = (os.path.basename(args.tflite)).replace('.tflite', '.json')
+        
     graph, dir_obj = load_graph(args.tflite)
 
-    if verify_graph(graph, 'MXP', 'FIA', False, optimized=False):
-        graph_ = transform_graph(graph, default_passes, False)
-        optimized_tflite = save_graph(args.tflite.replace('.tflite', '.tr.tflite'), dir_obj, graph_, copy=args.debug)
+    default_passes = []
+    if args.compression_vbx == 'ucomp':
+        default_passes = default_ucomp_passes
+        core = 'MXP'
+        accel = 'TSNP'
+    elif args.compression_vbx == 'comp':
+        default_passes = default_comp_passes
+        core = 'MXP'
+        accel = 'FIA'
+    else:
+        default_passes = default_ncomp_passes
+        core = 'MXP'
+        accel = 'FIA'
+    
+    output_filename = args.output
+    if not args.output:
+        base_name = args.tflite.rsplit('.',1)[0]
+        if args.compression_vbx == 'ucomp':
+            output_filename = os.path.join(tmp_dir, base_name + ".vnnx")
+        else:
+            output_filename = base_name + "_" + args.size_conf + "_" + args.compression_vbx + ".vnnx"
+    elif args.compression_vbx == 'ucomp':
+        output_filename=os.path.join(tmp_dir,args.output.replace(".ucomp",".vnnx"))
+    
 
-        if verify_graph(graph, 'MXP', 'FIA', False, optimized=True):
+    if verify_graph(graph, core, accel, False, transformed=False):  #Catch very high level errors
+        optimized_graph = transform_graph(graph, default_passes, False)
+        optimized_tflite = save_graph(args.tflite.replace('.tflite', '.tr.tflite'), dir_obj, optimized_graph, copy=args.debug)
+
+        if verify_graph(optimized_graph, core, accel, False, transformed=True): #Catch detailed errors after optimization
             tflite_to_vnnx(optimized_tflite, #args.tflite
-                           args.size_conf,
-                           output_filename=args.output,
-                           start_layer=args.start_layer,
-                           end_layer=args.end_layer,
-                           inputs=args.inputs,
-                           mean=args.mean,
-                           scale=args.scale,
-                           rgb=(not args.bgr),
-                           debug=args.debug,
-                           vbx_version=args.vbx_version)
+                        args.size_conf,
+                        output_filename=output_filename,
+                        start_layer=args.start_layer,
+                        end_layer=args.end_layer,
+                        inputs=args.inputs,
+                        mean=args.mean,
+                        scale=args.scale,
+                        rgb=(not args.bgr),
+                        debug=args.debug,
+                        compression_vbx=args.compression_vbx,
+                        tmp_dir=tmp_dir,
+                        tmp_dir_obj=tmp_dir_obj if not args.debug else None)
+            
+            if args.compression_vbx == 'ucomp':
+                model_jname = model_jname.replace('.json','.tr.json')
 
     if not dir_obj is None:
         dir_obj.cleanup()
+    
+    if args.compression_vbx == 'ucomp':
+        prev_dir = os.getcwd()
+
+        debug_flag = False
+        if args.debug:
+            tmp_dir = os.path.join(prev_dir, tmp_dir)
+            debug_flag = True
+        uint8_flag = False
+        if args.uint8:
+            uint8_flag = True
+
+        # Running Neuronix compiler and generating combine binary file for VBX3.0
+        os.chdir(NX_SDK)
+        
+        if isinstance(args.mean, float):
+            mean = str(args.mean)
+        else:
+            mean = ", ".join(str(item) for item in args.mean)
+        
+        if isinstance(args.scale, float):
+            scale = str(args.scale)
+        else:
+            scale = ", ".join(str(item) for item in args.scale)
+        
+        nx_compiler_cmd = [
+            "python", "compiler/tflite_compiler.py",
+            f"-m={os.path.join(tmp_dir, 'nx_engine', model_jname)}",
+            f"-o={tmp_dir}",
+            f"-u={uint8_flag}",
+            f"-d={debug_flag}",
+            f"--mean={mean}",
+            f"--scale={scale}",
+        ]
+        result = subprocess.Popen(nx_compiler_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        for line in result.stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+        result.wait()
+        assert result.returncode == 0
+        
+        os.chdir(prev_dir)
+        shutil.copy2(output_filename, prev_dir)
+        ucomp_sim_file = output_filename.replace('.vnnx', '_numsim.nxir')
+        shutil.copy2(ucomp_sim_file, prev_dir)
+        ddr_info_txt_file = output_filename.replace('.vnnx', '_ddr_info.txt')
+        shutil.copy2(ddr_info_txt_file, prev_dir)
+        nx_bin_filename = output_filename.replace('.vnnx', '_ddr_content.bin')
+        ucomp_filename = os.path.basename(output_filename.replace('.vnnx', '.ucomp'))
+        generate_model_cmd = [
+            "python", f"{VBX_SDK}/python/vbx/vbx/generate/generate_vbx3_model.py",
+            "-v", output_filename, "-n", nx_bin_filename, "-o", ucomp_filename
+        ]
+        result = subprocess.Popen(generate_model_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        for line in result.stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+        result.wait()
+        assert result.returncode == 0
+
+    if not args.debug:
+        tmp_dir_obj.cleanup() 
 
 if __name__ == "__main__":
     main()

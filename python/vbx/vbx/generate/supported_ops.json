@@ -84,6 +84,13 @@
       ],
     "allocation": [""]
   },
+  "BATCH_MATMUL": {
+    "type": [
+      "INT8",
+      "UINT8"
+    ],
+    "vectorized": [0]
+  },
   "BATCH_TO_SPACE_ND": {
     "type": [
       "INT8",
@@ -785,7 +792,8 @@
   },
   "RESIZE_BILINEAR": {
     "type": [
-      "INT8"
+      "INT8",
+      "UINT8"
     ],
     "vectorized": [2],
     "tensor": [
@@ -880,7 +888,8 @@
   "SPLIT": {
     "type": [
       "INT8",
-      "UINT8"
+      "UINT8",
+      "INT32"
     ],
     "axis": [
       -4,

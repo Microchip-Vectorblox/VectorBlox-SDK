@@ -143,19 +143,20 @@ def tflite_infer(model, input_array):
 def model_infer(model, input_array):
     if '.vnnx' in model:
         outputs = vnnx_infer(model, input_array)
-        outputs = [outputs[2], outputs[3], outputs[1], outputs[0]]
-    elif '.xml' in model:
-        outputs = openvino_infer(model, input_array)
+        outputs = [outputs[2], outputs[3], outputs[1], outputs[0]]  
+    elif '.pre.tflite' in model:
+        input_array = input_array.swapaxes(1, 2).swapaxes(2, 3).astype(np.float32) # nchw -> nhwc
+        outputs = tflite_infer(model, input_array)
         outputs = [outputs[2], outputs[3], outputs[1], outputs[0]]
     elif '.tflite' in model:
         input_array = input_array.swapaxes(1, 2).swapaxes(2, 3).astype(np.float32) # nchw -> nhwc
         outputs = tflite_infer(model, input_array)
-        outputs = [outputs[2], outputs[3], outputs[1], outputs[0]]
+        outputs = [outputs[1], outputs[0], outputs[2], outputs[3]]
     prediction = {
         'heatmap':outputs[0].reshape(1,17,18,31),
         'offset':outputs[1].reshape(1,34,18,31),
-        'displacement_fwd':outputs[2].reshape(1,32,18,31),
-        'displacement_bwd':outputs[3].reshape(1,32,18,31)}
+        'displacement_fwd':outputs[2].reshape(1,32,18,31),  
+        'displacement_bwd':outputs[3].reshape(1,32,18,31)}  
     return prediction
 
 

@@ -1,6 +1,7 @@
 import os
 import struct
 import argparse
+import math
 
 # This script combines a compiled vnnx model with a compiled nx model to generate
 # a unified model file for VBX 3.0. Currently it is a standalone command. In the
@@ -67,7 +68,7 @@ def get_header_section(vnnx_path, vnnx_num_bytes, nx_num_bytes):
     for size_offset_tuple in outputs:
         for value in size_offset_tuple:
             outputs_data.append(value)
-
+                        
     # Make the header
     header = struct.pack(f'{num_ints_padded}I', header_size, vnnx_num_bytes, nx_num_bytes, len(inputs),
         len(outputs), *inputs_data, *outputs_data, *padding)
@@ -79,33 +80,31 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-v', '--vnnx', type=str, required=True, help='Path to .vnnx file')
     parser.add_argument('-n', '--nx_bin', type=str, required=True, help='Path to NX .bin file')
+    parser.add_argument('-o', '--ucomp', type=str, required=True, help='Path to .ucomp .bin file')
     args = parser.parse_args()
 
     # Get the size of each file
     vnnx_num_bytes = get_file_size(args.vnnx)
+    vnnx_num_bytes_padded = math.ceil(vnnx_num_bytes/16) * 16
     nx_num_bytes = get_file_size(args.nx_bin)
 
     # Create a new header section
-    header = get_header_section(args.vnnx, vnnx_num_bytes, nx_num_bytes)
+    header = get_header_section(args.vnnx, vnnx_num_bytes_padded, nx_num_bytes)
 
     # Open the files and read their content
     with open(args.vnnx, 'rb') as f:
         vnnx_data = f.read()
+    padded_vnnx_data = vnnx_data.ljust(vnnx_num_bytes_padded, b'\0')
     with open(args.nx_bin, 'rb') as f:
         nx_data = f.read()
 
-    # The name of the output file for now will be the .vnnx file with .nx.vnnx instead
-    assert args.vnnx.endswith('.vnnx')
-    vnnx_base_name = os.path.splitext(args.vnnx)[0]
-    output_path = f"{vnnx_base_name}.nx.vnnx"
-
     # Create the new combined file
-    with open(output_path, 'wb') as out_file:
+    with open(args.ucomp, 'wb') as out_file:
         out_file.write(header)
-        out_file.write(vnnx_data)
+        out_file.write(padded_vnnx_data)
         out_file.write(nx_data)
 
-    print(f"Model file '{output_path}' has been created.")
+    print(f"Model file '{args.ucomp}' has been created.")
 
 if __name__ == '__main__':
     main()

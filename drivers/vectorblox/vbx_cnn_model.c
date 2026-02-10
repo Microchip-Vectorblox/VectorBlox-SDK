@@ -46,6 +46,30 @@ int model_check_sanity(const model_t* model){
 
 }
 
+int model_check_configuration(const model_t* model, vbx_cnn_t* vbx_cnn){
+	vnnx_graph_t* graph = (vnnx_graph_t*)model;
+	if (graph->magic != 0x1ABE11ED){
+		return -1;
+	}
+	if (graph->version != VNNX_GRAPH_VERSION){
+		return -1;
+	}
+	
+	if (vbx_cnn != NULL){
+		int comp_config = model_get_comp_conf(model); // Get the model compression configuration parameter
+		if (comp_config != vbx_cnn->comp_config){
+			return -2;
+		}
+		
+		int size_config = model_get_size_conf(model); // Get the model size configuration parameter
+		if (size_config != vbx_cnn->size_config){
+			return -3;
+		}
+	}
+	
+	return 0;
+}
+
 size_t model_get_data_bytes(const model_t* model)
 {
 	vnnx_graph_t* graph = (vnnx_graph_t*)model;
@@ -80,6 +104,11 @@ vbx_cnn_size_conf_e model_get_size_conf(const model_t* model)
 	return graph->vbx_nn_preset;
 }
 
+vbx_cnn_comp_conf_e model_get_comp_conf(const model_t* model)
+{
+	vnnx_graph_t* graph = (vnnx_graph_t*)model;
+	return graph->sparsity;
+}
 
 vbx_cnn_calc_type_e model_get_input_datatype(const model_t* model,int index){
 	vnnx_graph_t* graph = (vnnx_graph_t*)model;
@@ -125,6 +154,25 @@ size_t model_get_output_length(const model_t* model,int index){
 			if (shape[i] > 0) size *= shape[i];
 		}
 		return size;
+	}
+	return -1;
+}
+
+
+size_t model_get_input_offset(const model_t* model,int index){
+	vnnx_graph_t* graph = (vnnx_graph_t*)model;
+	const vnnx_tensor_t* tensor = get_input_tensor(graph, index);
+	if (tensor) {
+		return tensor->indirect.offset;
+	}
+	return -1;
+}
+
+size_t model_get_output_offset(const model_t* model,int index){
+	vnnx_graph_t* graph = (vnnx_graph_t*)model;
+	const vnnx_tensor_t* tensor = get_output_tensor(graph, index);
+	if (tensor) {
+		return tensor->indirect.offset;
 	}
 	return -1;
 }

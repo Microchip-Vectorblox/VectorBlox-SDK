@@ -532,12 +532,16 @@ def writeJson(cfg,jsonFile):
     # print('saved json file: '+jsonFile)
 
 
-def darknetToOnnx(cfgFile,weightsFile,onnxFile,jsonFile):
+def darknetToOnnx(cfgFile,weightsFile,onnxFile,jsonFile,verbose=False):
     cfg = loadConfig(cfgFile)
     net = setupNetwork(cfg)
-    printLayers(net)
-    loadWeights(net,weightsFile)
-    convertToOnnx(net,onnxFile)
+    if verbose:
+        printLayers(net)
+    if os.path.exists(weightsFile):
+        loadWeights(net,weightsFile)
+        convertToOnnx(net,onnxFile)
+    else:
+        print("WARNING! weights not found {}".format(weightsFile))
     writeJson(cfg,jsonFile)
     return net
 

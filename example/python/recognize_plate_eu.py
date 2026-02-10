@@ -26,10 +26,13 @@ def main():
     img = cv2.imread(args.image)
     scale=args.scale
     
-    arr, _, _, _ = mr.preprocess_img_to_input_array(img, args.model, args.bgr, scale, args.mean)
+    arr, _, _, channels_last = mr.preprocess_img_to_input_array(img, args.model, args.bgr, scale, args.mean)
     outputs, output_shapes = mr.model_run(arr, args.model)
+    if channels_last:
+        outputs=mr.transpose_outputs(outputs)
     output=outputs[0].squeeze()
-    
+
+
     plateID,conf = lpr.PlateDecodeCStyle(output)
     print("Plate ID: ", plateID,"    Recognition Score: {:3.4f}".format(conf))
 

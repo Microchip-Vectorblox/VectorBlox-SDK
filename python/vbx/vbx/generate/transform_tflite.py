@@ -1,13 +1,12 @@
 import argparse
-from .utils import existing_file, existing_dir, generate_inputs_outputs
-import json
+from .utils import json_load, json_dump, generate_inputs_outputs
 import copy
 import subprocess
 import shlex
 import os.path
-from contextlib import contextmanager
-import sys, shutil, glob, tempfile
+import shutil, glob, tempfile
 from tqdm import tqdm 
+import tensorflow as tf
 import numpy as np
 import cv2
 import vbx.postprocess.dataset as rgb_color
@@ -16,146 +15,101 @@ from math import floor, ceil, log2, frexp, copysign, exp, tanh, pow, log, sqrt
 
 MAX_LUTS = 4
 
-@contextmanager
-def exception_catcher(unsupported_ops):
-    try:
-        yield
-    except AssertionError as e:
-        sys.stderr.write("\n\033[31m######################## VECTORBLOX ERROR! #############################\033[0m\n")
-        sys.stderr.write("\033[31mSome layers have parameters/arguments that we do not currently support.\033[0m")
-        sys.stderr.write("\nFor futher assistance, please send the layer(s) to the vectorblox team at:\n\033[31mvectorblox@microchip.com\033[0m\n")
-
-        sys.stderr.write("\nError unsupported ops:")
-        for i,op,opcode, error_param, param_value, input_param in unsupported_ops:
-            if len(param_value) == 0:
-                print("\t {} at location {} is not currently supported.\n".format(opcode, i))   
-            else:
-                print("\t {} at location {}, \033[31m {}={} \033[0m is not currently supported.".format(opcode, i, param_value[0], input_param[0]))     
-                print("\t\t-->Supported values are = {}\n".format(error_param[0]))
-     
-        print()
-        sys.exit(1)
-
-default_passes = [
+passes = [
         'REMOVE_FP32_IO',
         'CLEAN_LOGISTIC',
         'LUT',
         'REMOVE_CONSTANTS',
+        'IMPLICIT_PAD',
+        'PADV2',
+        'SHARED_PAD',
         'EXPLICIT_PAD',
+        'GROUP_DEPTH',
+        'GROUP_DEPTH5x2',
         'GROUP_CONV',
-        'STRIDED_DEPTHWISE',
         'TRANSPOSE_CONV',
-        ]
-
-all_passes = default_passes + [
+        'FC_CONV_2D',
+        'STRIDED_DEPTHWISE',
         'YOLO_ARG_MAX',
+        'AVERAGE_POOL_2D',
+        'FULL_DEPTH',
+        'STRIDED_CONV',
+        'NCHW_RESHAPE',
+        'REDUCE_MAX_POOL',
+        'REDUCE_RESIZE',
+        'SUB_AS_ADD',
+        'DIV_AS_MUL',
+        'MUL_AS_CONV',
+        'CHANNEL_SPLIT',
+        'FUSE_CONV',
+        'REWRITE_NORM',
+        'REWRITE_ATTN',
+        'REMOVE_NOPS',
         ]
 
-def get_unique_values(values):
-    uniq_values = []
 
-    for v in values:
-        if type(v) == str:
-            uniq_values.append(v.upper())
-        else:
-            uniq_values.append(v)
+def create_tensor_data(dtype, shape, min_value=-100, max_value=100, int8_range=False):
+  """Build tensor data spreading the range [min_value, max_value)."""
 
-    return list(set(uniq_values))
+  # print(dtype.numpy())
+  # if dtype in MAP_TF_TO_NUMPY_TYPE:
+  #   dtype = MAP_TF_TO_NUMPY_TYPE[dtype]
+  # print(dtype)
+
+  if dtype in (tf.float32, tf.float16, tf.float64):
+    value = (max_value - min_value) * np.random.random_sample(shape) + min_value
+  elif dtype in (tf.complex64, tf.complex128):
+    real = (max_value - min_value) * np.random.random_sample(shape) + min_value
+    imag = (max_value - min_value) * np.random.random_sample(shape) + min_value
+    value = real + imag * 1j
+  elif dtype in (tf.uint32, tf.int32, tf.uint8, tf.int8, tf.int64, tf.uint16,tf.int16):
+    value = np.random.randint(min_value, max_value + 1, shape)
+    if int8_range: #Generate consecutive values uint8
+        arr = np.zeros(np.prod(shape))
+        channels = shape[-1]
+        map_size = np.prod(shape) // channels
+        arr_inc = [arr[0]+ (i%256) for i in range(map_size) for c in range(channels)]
+        value = np.array(arr_inc).reshape(shape)
+  elif dtype == tf.bool:
+    value = np.random.choice([True, False], size=shape)
+  elif dtype == np.string_:
+    # Not the best strings, but they will do for some basic testing.
+    letters = list(string.ascii_uppercase)
+    return np.random.choice(letters, size=shape).astype(dtype)
+  return np.dtype(dtype).type(value) if np.isscalar(value) else value.astype(dtype)
 
 
-def get_negative_axis(axis, dims=4):
-    if(axis>=0):
-        return axis-dims
-
-    return axis
-
-def check_valid(valid, op_code, op, tensors):
-    input_param = []
-    error_param = []
-    param_value = []
-
-    if not op_code in valid:
-        return False, error_param, param_value, input_param 
-
-    if op_code == "SPLIT":
-        i_tensor = tensors[op['inputs'][1]]
-    elif op_code =="TRANSPOSE_CONV":
-        i_tensor = tensors[op['inputs'][2]]
+def get_tensor_details(tflite_model):
+    if isinstance(tflite_model, bytes):
+        interpreter = tf.lite.Interpreter(model_content=tflite_model)
+    elif isinstance(tflite_model, str):
+        interpreter = tf.lite.Interpreter(model_path=tflite_model, experimental_preserve_all_tensors=True)
     else:
-        i_tensor = tensors[op['inputs'][0]]
-    idims = len(i_tensor['shape'])
-    opts = None
-    if 'builtin_options' in op:
-        opts = op['builtin_options']
-    
-    if i_tensor is not None: 
-        if "type" in i_tensor:
-            values = valid[op_code]["type"] 
-            dtype = i_tensor["type"]  
-            if dtype.upper() not in values:
-                error_param.append(get_unique_values(values))
-                param_value.append("Input data type")
-                input_param.append(dtype)
-                return False, error_param, param_value, input_param
-        
-    if opts is not None:    
-        if "axis" in opts:
-            values = valid[op_code]["axis"]
-            axis = get_negative_axis(opts["axis"], idims)
-            if axis not in values:
-                error_param.append(get_unique_values(values))
-                param_value.append("axis")
-                input_param.append(axis)
-                return False, error_param, param_value, input_param
-                
-        if "fused_activation_function" in opts: 
-            values = valid[op_code]["fused_activation_function"]
-            faf = opts["fused_activation_function"]
-            if type(faf) == str:
-                faf = faf.upper()
-            if faf not in values:
-                error_param.append(get_unique_values(values))
-                param_value.append("fused_activation_function")
-                input_param.append(faf)
-                return False, error_param, param_value, input_param
-                
-        if "mode" in opts:  
-            values = valid[op_code]["mode"]
-            mode = opts["mode"]
+        print('WARNING: invalid tflite model', type(tflite_model))
+        return None
 
-            if type(mode) == str:
-                mode = mode.upper()
+    interpreter.allocate_tensors()
+    return interpreter.get_tensor_details()
 
-            if mode not in values:
-                error_param.append(get_unique_values(values))
-                param_value.append("mode")
-                input_param.append(mode)
-                return False, error_param, param_value, input_param
-                
-        if "dim" in opts: 
-            dims = valid[op_code]
-            values = dims["dim"]
-            dim = get_negative_axis(opts["mode"], idims)
-            if dim not in values:
-                error_param.append(get_unique_values(values))
-                param_value.append("dim")
-                input_param.append(dim)
-                return False, error_param, param_value, input_param
-        
-        if "padding" in opts: 
-            values = valid[op_code]["padding"]
-            pad = opts["padding"]
 
-            if type(pad) == str:
-                pad = pad.upper()
-                
-            if pad not in values:
-                error_param.append(get_unique_values(values))
-                param_value.append("padding")
-                input_param.append(pad)
-                return False, error_param, param_value, input_param
+def update_shapes(tflite_path, graph):
 
-    return True, error_param, param_value, input_param
+    subgraph_tensors = graph['subgraphs'][0]['tensors']
+    old_shapes = {_['name']: {'shape': tuple(_['shape']), 'index': i} for i,_ in enumerate(subgraph_tensors) if ('shape' in _ and _['shape'])}
+
+    need_updated_shapes = False
+    details = get_tensor_details(tflite_path)
+    new_shapes = {_['name']: tuple(_['shape'].tolist()) for _ in details if 'shape' in _}
+    for key in new_shapes:
+        if key in old_shapes:
+            if old_shapes[key]['shape'] != new_shapes[key]:
+                subgraph_tensors[old_shapes[key]['index']]['shape'] = new_shapes[key]
+                need_updated_shapes = True
+
+    if need_updated_shapes:
+        tmp_json = tflite_path.replace('.tflite', '.json')
+        json_dump(graph, tmp_json)
+        json2tflite(tmp_json)
 
 
 def get_scale_factor(operators, tensors, idx):
@@ -175,151 +129,8 @@ def channels_first_shape(shape):
 
 
 def is_multi_input(op, tensors, buffers):
-    op_inputs = [_ for _ in op['inputs'] if _ != -1]
-    input_buffers = [buffers[tensors[_]['buffer']] for _ in op_inputs]
-    multi_input = len(input_buffers) > 1 and not any(['data' in _ for _ in input_buffers]) 
-    return multi_input
-
-
-def is_singleton(op, tensors):
-    shapes=[]
-    op_inputs = [_ for _ in op['inputs'] if _ != -1]
-    for op_input in op_inputs:
-        if 'shape' in tensors[op_input]:
-            shapes.append(tensors[op_input]['shape'])
-
-    for shape in shapes:
-        _shape, dims = channels_first_shape(shape)
-        if len(_shape) > 1 and _shape[-1] == 1 and _shape[-2] == 1:
-            return True
-    return False
-
-
-def get_splits2(jname, split_every_op=False, engine_op_types=None):
-    if type(jname) is str:
-        with open(jname) as f:
-            graph = json.load(f)
-        assert(len(graph['subgraphs']) == 1)
-    else:
-        graph = jname
-
-    buffers = graph['buffers']
-    subgraph = graph['subgraphs'][0]
-    outputs = subgraph['outputs']
-    operators = subgraph['operators'] # ops = subgraph['operators']
-    tensors = subgraph['tensors']
-    codes = [_['builtin_code'] for _ in graph['operator_codes']]
-    splits = []
-    errors = []
-    specials = []
-    current = []
-    current_lut_count = 0
-    prev_op = None
-    prev_opcode = None
-    prev_inputs = None
-    prev_outputs = None
-
-    i = 0
-    while i < len(operators):
-        op = operators[i]
-        if 'builtin_options' in op:
-            opts = op['builtin_options']
-        opcode = codes[op['opcode_index']]
-
-        op_inputs = [_ for _ in op['inputs'] if _ != -1]
-        op_outputs = [_ for _ in op['outputs'] if _ != -1]
-      
-        multi_input = is_multi_input(op, tensors, buffers)
-        singleton = is_singleton(op, tensors)
-
-        connected, forked = True, False
-        if prev_op != None:
-            connected = any([_ in prev_outputs for _ in op_inputs])
-            forked, next_ops = is_forked(prev_op, operators, tensors)
-
-        output = any([_ for _ in op_inputs if _ in outputs])
-
-        pattern_type, pattern = graph_pattern(operators[i:], codes, tensors, buffers)
-        pattern = [i+_ for _ in pattern]
-        partial_pattern = False
-        if len(pattern) and forked:
-            partial_pattern = not all([_ in pattern for _ in next_ops]) and forked
-
-        if prev_opcode in ['CONV_2D', 'DEPTHWISE_CONV_2D'] and 'stride_w' in opts and opts['stride_w'] > 1: #TODO
-            if len(current):
-                splits.append(current)
-            current = []
-            current_lut_count = 0
-
-        if len(pattern):
-            if pattern_type == "LUT" and (current_lut_count or partial_pattern):
-                if len(current):
-                    splits.append(current)
-                current = []         
-                current_lut_count = 0
-
-            current += pattern
-            if pattern_type == "LUT":
-                current_lut_count += 1
-            i += len(pattern) - 1
-            # update outputs to be from last op in pattern
-            op = operators[i]
-            op_outputs = [_ for _ in op['outputs'] if _ != -1]
-
-        elif prev_opcode in ['UNPACK', 'RESHAPE','TRANSPOSE']: #TODO start a new graph after OP
-            if len(current):
-                splits.append(current)
-            current = []
-            current.append(i)
-
-        elif forked or output or not connected or split_every_op:
-            if len(current):
-                splits.append(current)
-            current = []
-            current_lut_count = 0
-            current.append(i)
-
-        elif opcode in ['CONCATENATION', 'DEPTHWISE_CONV_2D', 'CONV_2D', 'TRANSPOSE_CONV', 'FULLY_CONNECTED', 'UNIDIRECTIONAL_SEQUENCE_LSTM', 'SOFTMAX', 'ARG_MAX', 'CAST', 'TILE', 'SPLIT', 'SPLIT_V', 'PACK', 'UNPACK', 'RESHAPE','TRANSPOSE', 'AVERAGE_POOL_2D', 'MEAN']: # start a new graph before key subgraph OP
-            if len(current):
-                splits.append(current)
-            current = []
-            current_lut_count = 0
-            current.append(i)
-
-        elif opcode in ['RESIZE_NEAREST_NEIGHBOR']:
-            sf_h, sf_w = get_scale_factor(operators, tensors, i)
-            if sf_h > 2 or sf_w > 2 or prev_opcode in ['RESIZE_NEAREST_NEIGHBOR']:
-                if len(current):
-                    splits.append(current)
-                current = []
-                current_lut_count = 0
-            current.append(i)
-        elif opcode in ['RESIZE_BILINEAR']:
-            if len(current):
-                splits.append(current)
-            current = []
-            current_lut_count = 0
-            current.append(i)
-
-        elif opcode in ['ADD', 'SUB', 'MUL', 'DIV', 'SQUARED_DIFFERENCE', "GREATER", "GREATER_EQUAL", "LESS", "LESS_EQUAL", "EQUAL", "NOT_EQUAL"] and multi_input and singleton: #split if singleton channelwise input
-            if len(current):
-                splits.append(current)
-            current = []
-            current_lut_count = 0
-            current.append(i)
-
-        else:
-            current.append(i)
-
-        prev_op = op
-        prev_opcode = opcode
-
-        prev_inputs = op_inputs
-        prev_outputs = op_outputs
-        i = i + 1
-
-    splits.append(current)
-    return splits, errors, specials
+    input_buffers = [buffers[tensors[_]['buffer']] for _ in op['inputs'] if _ != -1]
+    return len(input_buffers) > 1 and not any(['data' in _ for _ in input_buffers]) 
 
 
 def is_forked(op0, operators, tensors):
@@ -395,20 +206,78 @@ def graph_pattern(operators, codes, tensors, buffers):
     return None, []
 
 
-def num_lut_tensor(filter, tensors, buffers):
+def num_lut_tensor(filter, tensors, buffers, max_luts=MAX_LUTS):
     weight_tensor = tensors[filter]
     data = get_numpy_data(weight_tensor, buffers)
     single_value = np.all(data.flatten() == data.flatten()[0])
-    if 'shape' not in weight_tensor or np.prod(weight_tensor['shape']) <= MAX_LUTS or single_value:
+    if 'shape' not in weight_tensor or np.prod(weight_tensor['shape']) <= max_luts or single_value:
         if single_value:
             return 1
         elif 'shape' in weight_tensor and len(weight_tensor['shape']) > 0 :
-            if weight_tensor['shape'][-1] > MAX_LUTS:
+            if weight_tensor['shape'][-1] > max_luts:
                 return -1
             return weight_tensor['shape'][-1]
         else:
             return 1
     return -1
+
+
+def nop_pattern(operators, codes, tensors, buffers, idx):
+    patterns = []
+    max_idx = len(operators)
+    start_idx = idx
+    ishape = tensors[operators[idx]['inputs'][0]]['shape']
+
+    prev_op = None
+    prev_inputs = None
+    prev_outputs = None
+    
+    is_pattern = False
+
+    while True:
+        if not idx < max_idx:
+            break
+        op = operators[idx]
+        opcode = codes[op['opcode_index']]
+        if not opcode in ['TRANSPOSE', 'RESHAPE']:
+            break
+        op_inputs = [_ for _ in op['inputs'] if _ != -1]
+        op_outputs = [_ for _ in op['outputs'] if _ != -1]
+        connected, forked = True, False
+        if prev_op != None:
+            connected = any([_ in prev_outputs for _ in op_inputs])
+            forked, _ = is_forked(prev_op, operators, tensors)
+
+        if not connected:
+            break
+
+        if forked:
+            break
+
+        if opcode in 'RESHAPE':
+            filters = [_ for _ in op_inputs if 'data' in buffers[tensors[_]['buffer']]]
+            if not len(filters) == 1:
+                break
+            filter_data = get_numpy_data(tensors[filters[0]], buffers).copy()
+            filter_data = [_ for _ in filter_data if _ not in [-1,1]]
+            if len(filter_data) != 1:
+                break
+
+        oshape = tensors[operators[idx]['outputs'][0]]['shape']
+
+        if oshape == ishape:
+            is_pattern = True
+            break
+
+        idx += 1
+        prev_op = op
+        prev_outputs = op_outputs
+
+
+    if is_pattern:
+        for i in range(start_idx, idx+1):
+            patterns.append(i)
+    return patterns
 
 
 def lut_pattern(operators, codes, tensors, buffers, idx):
@@ -418,6 +287,10 @@ def lut_pattern(operators, codes, tensors, buffers, idx):
     prev_op = None
     prev_inputs = None
     prev_outputs = None
+
+    weighted_opcodes = ["MUL", "DIV", "ADD", "SUB", "SQUARED_DIFFERENCE", "MAXIMUM", "MINIMUM", "PRELU"]
+    activation_opcodes = ["HARD_SWISH", "LOGISTIC", "TANH", 'LEAKY_RELU', 'RELU', 'RELU6', 'RELU_N1_TO_1', 'RELU_0_TO_1']
+    activation_opcodes += ["RSQRT", "EXP", "LOG", "ELU", "GELU", "POW", "COS", "SIN", "NEG"]
 
     max_idx = len(operators)
     while idx < max_idx:
@@ -456,14 +329,27 @@ def lut_pattern(operators, codes, tensors, buffers, idx):
         if not connected:
             break
 
-        elif opcode == "DEQUANTIZE" and (next_opcode in ["RSQRT", "EXP", "LOG", "ELU", "POW", "COS", "SIN"] or (next_opcode in ["MUL", "DIV", "ADD", "SUB", "SQUARED_DIFFERENCE", "MAXIMUM", "MINIMUM"] and len(next_filters) == 1)) and (next_next_opcode in ["RSQRT", "EXP", "LOG", "ELU", "POW", "COS", "SIN"] or (next_next_opcode in ["MUL", "DIV", "ADD", "SUB", "SQUARED_DIFFERENCE", "MAXIMUM", "MINIMUM"] and len(next_next_filters) == 1)) and next_next_next_opcode == "QUANTIZE": 
-            if next_opcode in ["MUL", "DIV", "ADD", "SUB", "SQUARED_DIFFERENCE", "MAXIMUM", "MINIMUM"]:
+        elif is_pattern(operators[idx:], codes, tensors, buffers, valid_lut_patterns):
+            lp = is_pattern(operators[idx:], codes, tensors, buffers, valid_lut_patterns)
+            if len(lp) > 3:
+                required = len(lp) - 4 
+                if required > MAX_LUTS:
+                    break
+                elif required > lut_count:
+                    lut_count = required
+
+            for i in range(len(lp)):
+                patterns.append(idx+i)
+            idx += len(lp) - 1
+
+        elif opcode == "DEQUANTIZE" and (next_opcode in activation_opcodes or (next_opcode in weighted_opcodes and len(next_filters) == 1)) and (next_next_opcode in activation_opcodes or (next_next_opcode in weighted_opcodes and len(next_next_filters) == 1)) and next_next_next_opcode == "QUANTIZE": 
+            if next_opcode in weighted_opcodes:
                 required = num_lut_tensor(next_filters[0], tensors, buffers)
                 if required < 0:
                     break
                 if required > lut_count:
                     lut_count = required
-            if next_next_opcode in ["MUL", "DIV", "ADD", "SUB", "SQUARED_DIFFERENCE", "MAXIMUM", "MINIMUM"]:
+            if next_next_opcode in weighted_opcodes:
                 required = num_lut_tensor(next_next_filters[0], tensors, buffers)
                 if required < 0:
                     break
@@ -475,8 +361,8 @@ def lut_pattern(operators, codes, tensors, buffers, idx):
             patterns.append(idx+3)
             idx += 3
         
-        elif opcode == "DEQUANTIZE" and (next_opcode in ["RSQRT", "EXP", "LOG", "ELU", "POW", "COS", "SIN"] or (next_opcode in ["MUL", "DIV", "ADD", "SUB", "SQUARED_DIFFERENCE", "MAXIMUM", "MINIMUM"] and len(next_filters) == 1)) and next_next_opcode == "QUANTIZE": 
-            if next_opcode in ["MUL", "DIV", "ADD", "SUB", "SQUARED_DIFFERENCE", "MAXIMUM", "MINIMUM"]:
+        elif opcode == "DEQUANTIZE" and (next_opcode in activation_opcodes or (next_opcode in weighted_opcodes and len(next_filters) == 1)) and next_next_opcode == "QUANTIZE": 
+            if next_opcode in weighted_opcodes:
                 required = num_lut_tensor(next_filters[0], tensors, buffers)
                 if required < 0:
                     break
@@ -514,19 +400,10 @@ def lut_pattern(operators, codes, tensors, buffers, idx):
         elif opcode in ["DEQUANTIZE"] and tensors[op_outputs[0]]['type'] in ['INT8', 'UINT8']:
             patterns.append(idx)
 
-        elif opcode in ["HARD_SWISH"]:
+        elif opcode in activation_opcodes:
             patterns.append(idx)
 
-        elif opcode in ["LOGISTIC"]:
-            patterns.append(idx)
-
-        elif opcode in ["TANH"]:
-            patterns.append(idx)
-
-        elif opcode in ['LEAKY_RELU', 'RELU', 'RELU6', 'RELU_N1_TO_1', 'RELU_0_TO_1']:
-            patterns.append(idx)
-
-        elif opcode in ["MUL", "ADD", "SUB", "SQUARED_DIFFERENCE", "MAXIMUM", "MINIMUM"] and len(filters) == 1 and tensors[op_outputs[0]]['type'] in ['INT8', 'UINT8']:
+        elif opcode in weighted_opcodes and len(filters) == 1 and tensors[op_outputs[0]]['type'] in ['INT8', 'UINT8']:
             required = num_lut_tensor(filters[0], tensors, buffers)
             if required < 0:
                 break
@@ -536,11 +413,12 @@ def lut_pattern(operators, codes, tensors, buffers, idx):
         else:
             break
 
+        prev_op = operators[idx]
         idx += 1
 
-        prev_op = op
-        prev_inputs = op_inputs
-        prev_outputs = op_outputs
+        # prev_op = op
+        prev_inputs = [_ for _ in prev_op['inputs'] if _ != -1]
+        prev_outputs = [_ for _ in prev_op['outputs'] if _ != -1]
         
     return patterns, lut_count
 
@@ -578,6 +456,52 @@ def op_mul(tensors, buffers, opcode_idx, tensor_idx, inject_before, scale, zero_
                 'large_custom_options_size': 0,
                 'inputs': [input_tensor, len(tensors)-2],
                 'outputs': [output_tensor]}
+
+    return inject_op, tensors, buffers
+
+def op_div(tensors, buffers, opcode_idx, tensor_idx, inject_before, swap_inputs, quantization, data, data_shape, data_dtype, data_quantization):
+    t = tensors[tensor_idx]
+
+    buffers.append({'data': data, 'offset': 0, 'size': 0})
+    tensors.append({'shape': data_shape,
+        'type': data_dtype.upper(),
+        'buffer': len(buffers)-1,
+        'name': 'div_data:{}'.format(tensor_idx),
+        'quantization': data_quantization,
+        'is_variable': False,
+        'has_rank': True})
+
+    buffers.append({'offset': 0, 'size': 0})
+    tensors.append({'shape': t['shape'].copy(),
+        'type': t['type'],
+        'buffer': len(buffers)-1,
+        'name': 'div_{}'.format(tensor_idx),
+        'quantization': quantization,
+        'is_variable': False,
+        'has_rank': True})
+
+    input_tensor, output_tensor = tensor_idx, len(tensors)-1
+    if inject_before:
+        input_tensor, output_tensor = len(tensors)-1, tensor_idx
+
+    if swap_inputs:
+        inject_op = {'opcode_index': opcode_idx,
+                    'builtin_options_type': 'DivOptions',
+                    'builtin_options': {'fused_activation_function': 'NONE'},
+                    'custom_options_format': 'FLEXBUFFERS',
+                    'large_custom_options_offset': 0,
+                    'large_custom_options_size': 0,
+                    'inputs': [len(tensors)-2, input_tensor],
+                    'outputs': [output_tensor]}
+    else:
+        inject_op = {'opcode_index': opcode_idx,
+                    'builtin_options_type': 'DivOptions',
+                    'builtin_options': {'fused_activation_function': 'NONE'},
+                    'custom_options_format': 'FLEXBUFFERS',
+                    'large_custom_options_offset': 0,
+                    'large_custom_options_size': 0,
+                    'inputs': [input_tensor, len(tensors)-2],
+                    'outputs': [output_tensor]}
 
     return inject_op, tensors, buffers
 
@@ -620,6 +544,75 @@ def op_add(tensors, buffers, opcode_idx, tensor_idx, inject_before, scale, zero_
     return inject_op, tensors, buffers
 
 
+def op_sub(tensors, buffers, opcode_idx, tensor_idx, inject_before, swap_inputs, scale, zero_point, data, data_shape, data_dtype, data_scale, data_zero_point):
+    t = tensors[tensor_idx]
+
+    buffers.append({'data': data, 'offset': 0, 'size': 0})
+    tensors.append({'shape': data_shape,
+        'type': data_dtype.upper(),
+        'buffer': len(buffers)-1,
+        'name': 'sub_data:{}'.format(tensor_idx),
+        'quantization': {'scale': data_scale, 'zero_point': data_zero_point, 'details_type': 'NONE', 'quantized_dimension': 0},
+        'is_variable': False,
+        'has_rank': True})
+
+    buffers.append({'offset': 0, 'size': 0})
+    tensors.append({'shape': t['shape'].copy(),
+        'type': t['type'],
+        'buffer': len(buffers)-1,
+        'name': 'sub_{}'.format(tensor_idx),
+        'quantization': {'scale': scale, 'zero_point': zero_point, 'details_type': 'NONE', 'quantized_dimension': 0},
+        'is_variable': False,
+        'has_rank': True})
+
+    input_tensor, output_tensor = tensor_idx, len(tensors)-1
+    if inject_before:
+        input_tensor, output_tensor = len(tensors)-1, tensor_idx
+
+    if swap_inputs:
+        inject_op = {'opcode_index': opcode_idx,
+                    'builtin_options_type': 'SubOptions',
+                    'builtin_options': {'fused_activation_function': 'NONE'},
+                    'custom_options_format': 'FLEXBUFFERS',
+                    'large_custom_options_offset': 0,
+                    'large_custom_options_size': 0,
+                    'inputs': [len(tensors)-2, input_tensor],
+                    'outputs': [output_tensor]}
+    else:
+        inject_op = {'opcode_index': opcode_idx,
+                    'builtin_options_type': 'SubOptions',
+                    'builtin_options': {'fused_activation_function': 'NONE'},
+                    'custom_options_format': 'FLEXBUFFERS',
+                    'large_custom_options_offset': 0,
+                    'large_custom_options_size': 0,
+                    'inputs': [input_tensor, len(tensors)-2],
+                    'outputs': [output_tensor]}
+
+
+    return inject_op, tensors, buffers
+
+
+def op_elemwise(tensors, buffers, opcode_idx, tensor_idx, tensor2_idx, shape, dtype, quant):
+
+    buffers.append({'offset': 0, 'size': 0})
+    tensors.append({'shape': shape,
+        'type': dtype,
+        'buffer': len(buffers)-1,
+        'name': 'elem_{}'.format(tensor_idx),
+        'quantization': quant,
+        'is_variable': False,
+        'has_rank': True})
+
+    input_tensor, output_tensor = tensor_idx, len(tensors)-1
+
+    inject_op = {'opcode_index': opcode_idx,
+                'inputs': [tensor_idx, tensor2_idx],
+                'outputs': [len(tensors)-1]}
+
+
+    return inject_op, tensors, buffers
+
+
 def op_argmax(tensors, buffers, opcode_idx, tensor_idx, inject_before, shape, dtype):
     t = tensors[tensor_idx]
 
@@ -654,6 +647,45 @@ def op_argmax(tensors, buffers, opcode_idx, tensor_idx, inject_before, shape, dt
     return inject_op, tensors, buffers
 
 
+def op_mean(tensors, buffers, opcode_idx, tensor_idx, inject_before, axis):
+    assert(not inject_before)
+    t = tensors[tensor_idx]
+
+    data = np.frombuffer(np.asarray(axis).astype(np.int32).tobytes(), dtype=np.uint8).tolist()
+    buffers.append({'data': data, 'offset': 0, 'size': 0})
+    tensors.append({'shape': [len(axis)],
+            'type': 'INT32',
+            'buffer': len(buffers)-1,
+            'name': 'mean_axis_{}'.format(tensor_idx),
+            'quantization': {'details_type': 'NONE', 'quantized_dimension': 0},
+            'is_variable': False,
+            'has_rank': True})
+
+    oshape = t['shape'].copy()
+    for x in axis:
+        oshape[x] = 1
+
+    buffers.append({'offset': 0, 'size': 0})
+    tensors.append({'shape': oshape,
+            'type': t['type'],
+            'buffer': len(buffers)-1,
+            'name': 'mean_{}'.format(tensor_idx),
+            'quantization': t['quantization'].copy(),
+            'is_variable': False,
+            'has_rank': True})
+
+    input_tensor, output_tensor = tensor_idx, len(tensors)-1
+    if inject_before:
+        input_tensor, output_tensor = len(tensors)-1, tensor_idx
+
+    inject_op = {'opcode_index': opcode_idx,
+                'builtin_options_type': "ReducerOptions",
+                'builtin_options': {'keep_dims': True},
+                'inputs': [input_tensor, len(tensors)-2], 
+                'outputs': [output_tensor]}
+    return inject_op, tensors, buffers
+
+
 def op_gather(tensors, buffers, opcode_idx, tensor_idx, inject_before, data, dtype):
     t = tensors[tensor_idx]
 
@@ -671,7 +703,7 @@ def op_gather(tensors, buffers, opcode_idx, tensor_idx, inject_before, data, dty
             'type': 'INT32',
             'buffer': len(buffers)-1,
             'name': 'gather_{}'.format(tensor_idx),
-            'quantization': {'scale': [0.0], 'zero_point': [0], 'details_type': 'NONE', 'quantized_dimension': 0},
+            'quantization': {'scale': [1.0], 'zero_point': [0], 'details_type': 'NONE', 'quantized_dimension': 0},
             'is_variable': False,
             'has_rank': True})
 
@@ -715,15 +747,17 @@ def op_cast(tensors, buffers, opcode_idx, tensor_idx, inject_before, dtype):
     return inject_op, tensors, buffers
 
 
-def op_resize(tensors, buffers, opcode_idx, tensor_idx, inject_before, shape):
+def op_resize(tensors, buffers, opcode_idx, tensor_idx, inject_before, shape, isPostprocessing=False):
     t = tensors[tensor_idx]
-
+    tensor_name = 'resize_shape_{}'.format(tensor_idx)
+    if isPostprocessing:
+        tensor_name = 'resize_shape_postprocessing_{}'.format(tensor_idx)
     data = np.frombuffer(np.asarray([shape[-3], shape[-2]]).astype(np.int32).tobytes(), dtype=np.uint8).tolist()
     buffers.append({'data': data, 'offset': 0, 'size': 0})
     tensors.append({'shape':[2],
             'type': 'INT32',
             'buffer': len(buffers)-1,
-            'name': 'resize_shape_{}'.format(tensor_idx),
+            'name': tensor_name,
             'quantization': {'details_type': 'NONE', 'quantized_dimension': 0},
             'is_variable': False,
             'has_rank': True})
@@ -748,12 +782,70 @@ def op_resize(tensors, buffers, opcode_idx, tensor_idx, inject_before, shape):
     return inject_op, tensors, buffers
 
 
+def op_max_pool(tensors, buffers, opcode_idx, tensor_idx, inject_before, shape, opts):
+    t = tensors[tensor_idx]
+
+    buffers.append({'offset': 0, 'size': 0})
+    tensors.append({'shape': shape,
+            'type': t['type'],
+            'buffer': len(buffers)-1,
+            'name': 'max_pool_{}'.format(tensor_idx),
+            'quantization': t['quantization'],
+            'is_variable': False,
+            'has_rank': True})
+
+    input_tensor, output_tensor = tensor_idx, len(tensors)-1
+    if inject_before:
+        input_tensor, output_tensor = len(tensors)-1, tensor_idx
+
+    inject_op = {'opcode_index': opcode_idx,
+                'builtin_options_type': 'Pool2DOptions',
+                'builtin_options':opts,
+                'inputs': [input_tensor],
+                'outputs': [output_tensor]}
+    return inject_op, tensors, buffers
+
+
+def op_transpose(tensors, buffers, opcode_idx, tensor_idx, inject_before, shape):
+    t = tensors[tensor_idx]
+
+    data = np.frombuffer(np.asarray(shape).astype(np.int32).tobytes(), dtype=np.uint8).tolist()
+    buffers.append({'data': data, 'offset': 0, 'size': 0})
+    tensors.append({'shape': [len(shape)],
+            'type': 'INT32',
+            'buffer': len(buffers)-1,
+            'name': 'shape_{}'.format(tensor_idx),
+            'quantization': {'details_type': 'NONE', 'quantized_dimension': 0},
+            'is_variable': False,
+            'has_rank': True})
+
+    buffers.append({'offset': 0, 'size': 0})
+    tensors.append({'shape': shape,
+            'type': t['type'],
+            'buffer': len(buffers)-1,
+            'name': 'reshape_{}'.format(tensor_idx),
+            'quantization': t['quantization'],
+            'is_variable': False,
+            'has_rank': True})
+
+    input_tensor, output_tensor = tensor_idx, len(tensors)-1
+    if inject_before:
+        input_tensor, output_tensor = len(tensors)-1, tensor_idx
+
+
+    inject_op = {'opcode_index': opcode_idx,
+                'inputs': [input_tensor, len(tensors)-2], 
+                'outputs': [output_tensor]}
+
+    return inject_op, tensors, buffers
+
+
 def op_reshape(tensors, buffers, opcode_idx, tensor_idx, inject_before, shape):
     t = tensors[tensor_idx]
 
     data = np.frombuffer(np.asarray(shape).astype(np.int32).tobytes(), dtype=np.uint8).tolist()
     buffers.append({'data': data, 'offset': 0, 'size': 0})
-    tensors.append({'shape': [4],
+    tensors.append({'shape': [len(shape)],
             'type': 'INT32',
             'buffer': len(buffers)-1,
             'name': 'shape_{}'.format(tensor_idx),
@@ -785,10 +877,11 @@ def op_reshape(tensors, buffers, opcode_idx, tensor_idx, inject_before, shape):
     return inject_op, tensors, buffers
 
 
-def op_pad(tensors, buffers, opcode_idx, tensor_idx, inject_before, pad_h, pad_w):
+def op_pad(tensors, buffers, opcode_idx, tensor_idx, inject_before, pad=None, constant_value=None):
     t = tensors[tensor_idx]
-    pad = [0,0,floor(pad_h/2),ceil(pad_h/2),floor(pad_w/2),ceil(pad_w/2),0,0]
 
+    if pad is None:
+        pad = [0 for _ in range(8)]
     data = np.frombuffer(np.asarray(pad).astype(np.int32).tobytes(), dtype=np.uint8).tolist()
     buffers.append({'data': data, 'offset': 0, 'size': 0})
     tensors.append({'shape': [4,2],
@@ -798,6 +891,17 @@ def op_pad(tensors, buffers, opcode_idx, tensor_idx, inject_before, pad_h, pad_w
             'quantization': {'details_type': 'NONE', 'quantized_dimension': 0},
             'is_variable': False,
             'has_rank': True})
+
+    if not constant_value is None:
+        constant_data = np.frombuffer(np.asarray(constant_value).astype(t['type'].lower()).tobytes(), dtype=np.uint8).tolist()
+        buffers.append({'data': constant_data, 'offset': 0, 'size': 0})
+        tensors.append({'shape': [],
+                'type': t['type'],
+                'buffer': len(buffers)-1,
+                'name': 'pad_consant_{}'.format(tensor_idx),
+                'quantization': t['quantization'],
+                'is_variable': False,
+                'has_rank': True})
 
     buffers.append({'offset': 0, 'size': 0})
     tensors.append({'shape': t['shape'].copy(),
@@ -812,9 +916,14 @@ def op_pad(tensors, buffers, opcode_idx, tensor_idx, inject_before, pad_h, pad_w
     if inject_before:
         input_tensor, output_tensor = len(tensors)-1, tensor_idx
 
-    inject_op = {'opcode_index': opcode_idx,
-                'inputs': [input_tensor, len(tensors)-2], 
-                'outputs': [output_tensor]}
+    if constant_value is None:
+        inject_op = {'opcode_index': opcode_idx,
+                    'inputs': [input_tensor, len(tensors)-2], 
+                    'outputs': [output_tensor]}
+    else:
+        inject_op = {'opcode_index': opcode_idx,
+                    'inputs': [input_tensor, len(tensors)-3, len(tensors)-2], 
+                    'outputs': [output_tensor]}
 
     return inject_op, tensors, buffers
 
@@ -889,8 +998,35 @@ def op_quantize(tensors, buffers, opcode_idx, tensor_idx, inject_before, dtype, 
     return inject_op, tensors, buffers
 
 
+def op_type(tensors, buffers, opcode_idx, tensor_idx, inject_before, dtype, quant):
+    t = tensors[tensor_idx]
+
+    buffers.append({'offset': 0, 'size': 0})
+    tensors.append({'shape': t['shape'].copy(),
+                    'type': dtype,
+                    'buffer': len(buffers)-1,
+                    'name': 'quantize:{}'.format(tensor_idx),
+                    'quantization': quant,
+                    'is_variable': False,
+                    'has_rank': True})
+
+    input_tensor, output_tensor = tensor_idx, len(tensors)-1
+    if inject_before:
+        input_tensor, output_tensor = len(tensors)-1, tensor_idx
+
+    inject_op = {'opcode_index': opcode_idx,
+                 'inputs': [input_tensor],
+                 'outputs': [output_tensor]}
+
+    return inject_op, tensors, buffers
+
+
 def op_split(tensors, buffers, opcode_idx, tensor_idx, inject_before, axis, num_splits):
     t = tensors[tensor_idx]
+    shape = t['shape'].copy()
+    SplitOptions = {'num_splits': num_splits}
+    assert(shape[axis] % num_splits == 0)
+    shape[axis] = shape[axis] // num_splits
 
     data = np.frombuffer(np.asarray([axis]).astype(np.int32).tobytes(), dtype=np.uint8).tolist()
     buffers.append({'data': data, 'offset': 0, 'size': 0})
@@ -901,11 +1037,6 @@ def op_split(tensors, buffers, opcode_idx, tensor_idx, inject_before, axis, num_
             'quantization': {'details_type': 'NONE', 'quantized_dimension': 0},
             'is_variable': False,
             'has_rank': True})
-
-    shape = t['shape'].copy()
-    SplitOptions = {'num_splits': num_splits}
-    assert(shape[axis] % num_splits == 0)
-    shape[axis] = shape[axis] // num_splits
 
     for n in range(num_splits):
         buffers.append({'offset': 0, 'size': 0})
@@ -931,6 +1062,63 @@ def op_split(tensors, buffers, opcode_idx, tensor_idx, inject_before, axis, num_
                     'builtin_options_type': 'SplitOptions',
                     'builtin_options': SplitOptions,
                     'inputs': [len(tensors)-1-num_splits, input_tensor], 
+                    'outputs': [len(tensors) - num_splits + _ for _ in range(num_splits)]}
+
+    return inject_op, tensors, buffers
+
+
+def op_split_v(tensors, buffers, opcode_idx, tensor_idx, inject_before, axis, splits):
+    t = tensors[tensor_idx]
+
+    num_splits = len(splits)
+    SplitOptions = {'num_splits': num_splits}
+
+    data = np.frombuffer(np.asarray(splits).astype(np.int32).tobytes(), dtype=np.uint8).tolist()
+    buffers.append({'data': data, 'offset': 0, 'size': 0})
+    tensors.append({'shape': [len(splits)],
+            'type': 'INT32',
+            'buffer': len(buffers)-1,
+            'name': 'split_shape_{}'.format(tensor_idx),
+            'quantization': {'details_type': 'NONE', 'quantized_dimension': 0},
+            'is_variable': False,
+            'has_rank': True})
+
+    data = np.frombuffer(np.asarray([axis]).astype(np.int32).tobytes(), dtype=np.uint8).tolist()
+    buffers.append({'data': data, 'offset': 0, 'size': 0})
+    tensors.append({'shape': [],
+            'type': 'INT32',
+            'buffer': len(buffers)-1,
+            'name': 'split_axis{}'.format(tensor_idx),
+            'quantization': {'details_type': 'NONE', 'quantized_dimension': 0},
+            'is_variable': False,
+            'has_rank': True})
+
+    for n,split in enumerate(splits):
+        buffers.append({'offset': 0, 'size': 0})
+        shape = t['shape'].copy()
+        shape[axis] = int(split)
+        tensors.append({'shape': shape,
+                'type': t['type'],
+                'buffer': len(buffers)-1,
+                'name': 'split_{}_{}'.format(tensor_idx, n),
+                'quantization': t['quantization'],
+                'is_variable': False,
+                'has_rank': True})
+
+    input_tensor, output_tensor = tensor_idx, len(tensors)-1
+    if inject_before:
+        assert(num_splits == 1)
+        input_tensor, output_tensor = len(tensors)-1, tensor_idx
+        inject_op = {'opcode_index': opcode_idx,
+                    'builtin_options_type': 'SplitVOptions',
+                    'builtin_options': SplitOptions,
+                    'inputs': [input_tensor, len(tensors)-3, len(tensors)-2], 
+                    'outputs': [output_tensor]}
+    else:
+        inject_op = {'opcode_index': opcode_idx,
+                    'builtin_options_type': 'SplitVOptions',
+                    'builtin_options': SplitOptions,
+                    'inputs': [input_tensor, len(tensors)-2-num_splits, len(tensors)-1-num_splits],
                     'outputs': [len(tensors) - num_splits + _ for _ in range(num_splits)]}
 
     return inject_op, tensors, buffers
@@ -1003,7 +1191,7 @@ def op_concat(tensors, buffers, opcode_idx, tensor_indices, tensor_idx, axis):
             'type': t['type'],
             'buffer': len(buffers)-1,
             'name': 'concat_{}'.format(tensor_idx),
-            'quantization': t['quantization'],
+            'quantization': t['quantization'].copy(),
             'is_variable': False,
             'has_rank': True})
 
@@ -1016,7 +1204,7 @@ def op_concat(tensors, buffers, opcode_idx, tensor_indices, tensor_idx, axis):
     return inject_op, tensors, buffers
 
 
-def op_conv(tensors, buffers, opcode_idx, tensor_idx, inject_before, opts, output_shape, output_quantization, weights, weight_quantization, biases, bias_quantization):
+def op_conv(tensors, buffers, opcode_idx, tensor_idx, inject_before, opts_name, opts, output_shape, output_quantization, weights, weight_quantization, biases, bias_quantization):
     t = tensors[tensor_idx]
 
     data = np.frombuffer(np.asarray(weights).astype(np.int8).tobytes(), dtype=np.uint8).tolist()
@@ -1055,15 +1243,14 @@ def op_conv(tensors, buffers, opcode_idx, tensor_idx, inject_before, opts, outpu
 
     if not biases is None:
         inject_op = {'opcode_index': opcode_idx,
-                    'builtin_options_type': 'Conv2DOptions',
+                    'builtin_options_type': opts_name,
                     'builtin_options': opts,
                     'inputs': [input_tensor, len(tensors)-3, len(tensors)-2], 
                     'outputs': [output_tensor]}
     else:
         inject_op = {'opcode_index': opcode_idx,
-                    'builtin_options_type': 'Conv2DOptions',
+                    'builtin_options_type': opts_name,
                     'builtin_options': opts,
-                    # 'inputs': [input_tensor, len(tensors)-3, -1], 
                     'inputs': [input_tensor, len(tensors)-2], 
                     'outputs': [output_tensor]}
 
@@ -1163,10 +1350,9 @@ def op_lut(tensors, buffers, opcode_quantize, opcode_cast, opcode_gather, opcode
     return ops, tensors, buffers
 
 
-def op_group_conv(tensors, buffers, opcode_split, opcode_conv, opcode_concat, op):
+def op_group_conv(tensors, buffers, opcode_split, opcode_split_v, opcode_conv, opcode_concat, op, splits):
     opts = op['builtin_options']
     ishape = tensors[op['inputs'][0]]['shape'].copy()
-    oshape = tensors[op['outputs'][0]]['shape'].copy()
     oquant = tensors[op['outputs'][0]]['quantization']
 
     f_tensor = tensors[op['inputs'][1]]
@@ -1177,9 +1363,14 @@ def op_group_conv(tensors, buffers, opcode_split, opcode_conv, opcode_concat, op
     filter_data = get_numpy_data(f_tensor, buffers)
     wquant = f_tensor['quantization']
     k, h, w, c = tuple(f_tensor['shape'])
+    conv_opts = opts.copy()
+
+    if op['opcode_index'] != opcode_conv: #if depthwise, adjust k and opts
+        k == c
+        conv_opts.pop('depth_multiplier', None)
 
     bias_data = np.zeros((k,), dtype=np.int64)
-    bquant = {'scale': [1. for _ in range(k)], 'zero_point': [0 for _ in range(k)], 'details_type': 'NONE', 'quantized_dimension': 0}
+    bquant = {'scale': [1. for _ in range(k)], 'zero_point': [0 for _ in range(k)], 'details_type': 'NONE', 'quantized_dimension': 3}
     # bias_data, bquant = None, None
     if not (b_tensor is None):
         bias_data = get_numpy_data(b_tensor, buffers).astype(np.int64)
@@ -1188,33 +1379,48 @@ def op_group_conv(tensors, buffers, opcode_split, opcode_conv, opcode_concat, op
     tensor_idx = op['inputs'][0]
 
     ops = []
-    num_splits = ishape[-1] // f_tensor['shape'][-1]
-    group_size = ishape[-1] // num_splits
-    oshape[-1] = oshape[-1] // num_splits
 
-    #gen split
-    split_op, tensors, buffers = op_split(tensors, buffers, opcode_split, tensor_idx, False, -1, num_splits)
-    ops.append(split_op)
+    if len(splits) > 1:
+        if all([_ == splits[0] for _ in splits]):
+            split_op, tensors, buffers = op_split(tensors, buffers, opcode_split, tensor_idx, False, -1, len(splits))
+        else:
+            split_op, tensors, buffers = op_split_v(tensors, buffers, opcode_split_v, tensor_idx, False, -1, splits)
+        ops.append(split_op)
 
     concat_inputs = []
-    for n in range(num_splits):
-        weights = filter_data[n*group_size:(n+1)*group_size].copy()
-        biases = bias_data[n*group_size:(n+1)*group_size].copy()
+    offset = 0
+    for n,split in enumerate(splits):
+        if len(splits) > 1:
+            tensor_idx = split_op['outputs'][n]
+        if op['opcode_index'] != opcode_conv: #if depthwise, adjust weights
+            weights = np.zeros((split,h,w,split), dtype=np.int64)
+            for x in range(split):
+                weights[x,:,:,x % split] = filter_data[0,:,:,offset+x].copy()
+        else:
+            weights = filter_data[offset:offset+split].copy()
+        biases = bias_data[offset:offset+split].copy()
 
         bias_quant = bquant.copy()
-        bias_quant['zero_point'] = bias_quant['zero_point'][n*group_size:(n+1)*group_size].copy()
-        bias_quant['scale'] = bias_quant['scale'][n*group_size:(n+1)*group_size].copy()
+        bias_quant['zero_point'] = bias_quant['zero_point'][offset:offset+split].copy()
+        bias_quant['scale'] = bias_quant['scale'][offset:offset+split].copy()
 
         weight_quant = wquant.copy()
-        weight_quant['zero_point'] = weight_quant['zero_point'][n*group_size:(n+1)*group_size].copy()
-        weight_quant['scale'] = weight_quant['scale'][n*group_size:(n+1)*group_size].copy()
+        weight_quant['zero_point'] = weight_quant['zero_point'][offset:offset+split].copy()
+        weight_quant['scale'] = weight_quant['scale'][offset:offset+split].copy()
 
-        conv_op, tensors, buffers = op_conv(tensors, buffers, opcode_conv, split_op['outputs'][n], False, opts, oshape, oquant, weights, weight_quant, biases, bias_quant)
+        oshape = tensors[op['outputs'][0]]['shape'].copy()
+        oshape[-1] = split
+        conv_op, tensors, buffers = op_conv(tensors, buffers, opcode_conv, tensor_idx, False, 'Conv2DOptions', conv_opts.copy(),
+                                            oshape, oquant,
+                                            weights, weight_quant,
+                                            biases, bias_quant)
         concat_inputs.append(conv_op['outputs'][0])
         ops.append(conv_op)
+        offset += split
 
-    concat_op, tensors, buffers = op_concat(tensors, buffers, opcode_concat, concat_inputs, op['outputs'][0], -1)
-    ops.append(concat_op)
+    if len(splits) > 1:
+        concat_op, tensors, buffers = op_concat(tensors, buffers, opcode_concat, concat_inputs, op['outputs'][0], -1)
+        ops.append(concat_op)
 
     return ops, tensors, buffers
 
@@ -1227,10 +1433,15 @@ def get_pad(op, tensors):
         return 0, 0
 
     stride_h, stride_w = opts['stride_h'], opts['stride_w']
-    dilation_h, dilation_w = opts['dilation_h_factor'], opts['dilation_w_factor']
-    f_tensor = tensors[op['inputs'][1]]
-    k, h, w, c = tuple(f_tensor['shape'])
-    kernel_h, kernel_w = h, w
+    dilation_h, dilation_w = 1,1
+    if 'dilation_h_factor' in opts and 'dilation_w_factor' in opts:
+        dilation_h, dilation_w = opts['dilation_h_factor'], opts['dilation_w_factor']
+    if len(op['inputs']) > 1:
+        f_tensor = tensors[op['inputs'][1]]
+        k, h, w, c = tuple(f_tensor['shape'])
+        kernel_h, kernel_w = h, w
+    else:
+        kernel_h, kernel_w = opts['filter_height'], opts['filter_width']
     i_h, i_w = tensors[op['inputs'][0]]['shape'][-3], tensors[op['inputs'][0]]['shape'][-2]
     o_h, o_w = tensors[op['outputs'][0]]['shape'][-3], tensors[op['outputs'][0]]['shape'][-2]
 
@@ -1240,25 +1451,22 @@ def get_pad(op, tensors):
     return pad_h,pad_w
 
 
+def channel_order(i, operators, tensors, buffers):
+    return "NHWC"
+
+
 def apply_transformation(transform, operators, tensors, buffers, opcodes, builtin_codes, debug):
 
-    if transform == "IDENTITY_INJECTION":
-        splits,_,_ = get_splits2(create_graph(operators, tensors, buffers, opcodes))
+    if transform in ['SORT_DFS', 'SORT_KHAN']:
+        sort = transform.lower().split('_')[-1]
 
-        prev_op = None
-        for i in range(len(operators)):
-            op = operators[i]
-            for split in splits:
-                if i == split[0]:
-                    connected, forked = True, False
-                    if prev_op != None:
-                        connected = any([_ in prev_op['outputs'] for _ in op['inputs']])
-                        forked, _ = is_forked(prev_op, operators, tensors)
-                    opcode = builtin_codes[op['opcode_index']]
-            prev_op = op
+        operators, tensors, buffers = [_.copy() for _ in operators], [_.copy() for _ in tensors], buffers.copy()
+
+        return clean_operators(operators, tensors, buffers, sort=sort)
 
     id_count = 0
     pattern_count = 0
+    pool_count = 0
     i = 0
     while i < len(operators): 
         op = operators[i]
@@ -1315,6 +1523,7 @@ def apply_transformation(transform, operators, tensors, buffers, opcodes, builti
                     else:
                         pattern = []
                         break
+
                 if len(pattern):
                     tmp_dir_obj = tempfile.TemporaryDirectory()
                     graph = create_graph([operators[_] for _ in pattern], tensors, buffers, opcodes)
@@ -1330,8 +1539,19 @@ def apply_transformation(transform, operators, tensors, buffers, opcodes, builti
                     for _ in reversed(pattern):
                         operators = operators[:_] + operators[_+1:]
 
+        elif transform == 'REMOVE_NOPS':
+            pattern = nop_pattern(operators, builtin_codes, tensors, buffers, i)
+            if len(pattern):
+                for n,next_op in enumerate(operators):
+                    pattern_input = operators[pattern[0]]['inputs'][0]
+                    pattern_output = operators[pattern[-1]]['outputs'][0]
+                    if pattern_output in next_op['inputs']:
+                        next_op['inputs'] = [pattern_input if _ == pattern_output else _ for _ in next_op['inputs']]
+                operators = operators[:i] + operators[i+len(pattern):]
+
+
         elif transform == 'CLEAN_LOGISTIC':
-            if opcode in ['LOGISTIC']:
+            if opcode in ['LOGISTIC']: #TODO and 'FLOAT32' in [tensors[_]['type'] for _ in op['inputs']]:
                 tensors[op['outputs'][0]]['quantization']['scale'][0] =  1. / 256
 
         elif transform == 'REMOVE_FP32_IO':
@@ -1344,6 +1564,138 @@ def apply_transformation(transform, operators, tensors, buffers, opcodes, builti
                     if 'FLOAT32' in [tensors[_]['type'] for _ in op['outputs']]:
                         operators = operators[:i] + operators[i+1:]
                         i -= 1 #rerun 
+
+        elif transform == 'REDUCE_RESIZE':
+            # if opcode in ['RESIZE_NEAREST_NEIGHBOR', 'RESIZE_BILINEAR']:
+            if opcode in ['RESIZE_NEAREST_NEIGHBOR']:
+                ishape = tensors[op['inputs'][0]]['shape']
+                oshape = tensors[op['outputs'][0]]['shape']
+                shape = get_numpy_data(tensors[op['inputs'][1]], buffers)
+                ih,iw = ishape[-3], ishape[-2]
+                oh,ow = oshape[-3], oshape[-2]
+
+                if ((oh/ih), (ow/iw)) in [(4.0,4.0), (8.0,8.0)]:
+                    resize = opcode
+                    inject_ops = []
+
+                    current_shape = ishape.copy()
+                    tensor_idx = op['inputs'][0]
+                    current_shape[-3] = current_shape[-3] * 2
+                    current_shape[-2] = current_shape[-2] * 2
+
+                    resize_op0, tensors, buffers = op_resize(tensors, buffers, builtin_codes.index(resize), tensor_idx, False, current_shape)
+                    inject_ops.append(resize_op0)
+
+                    current_shape = current_shape.copy()
+                    tensor_idx = len(tensors)-1
+                    current_shape[-3] = current_shape[-3] * 2
+                    current_shape[-2] = current_shape[-2] * 2
+
+                    resize_op1, tensors, buffers = op_resize(tensors, buffers, builtin_codes.index(resize), tensor_idx, False, current_shape)
+                    inject_ops.append(resize_op1)
+
+                    if ((oh/ih), (ow/iw)) in [(8.0,8.0)]:
+                        current_shape = current_shape.copy()
+                        tensor_idx = len(tensors)-1
+                        current_shape[-3] = current_shape[-3] * 2
+                        current_shape[-2] = current_shape[-2] * 2
+
+                        resize_op2, tensors, buffers = op_resize(tensors, buffers, builtin_codes.index(resize), tensor_idx, False, current_shape)
+                        inject_ops.append(resize_op2)
+
+                    for n,next_op in enumerate(operators):
+                        if op['outputs'][0] in next_op['inputs']:
+                            next_op['inputs'] = [inject_ops[-1]['outputs'][0] if _ == op['outputs'][0] else _ for _ in next_op['inputs']]
+
+                    operators = operators[:i] + inject_ops + operators[i+1:]
+
+                    i += len(inject_ops)-1
+
+        elif transform == 'REDUCE_MAX_POOL':
+            if opcode in ['MAX_POOL_2D']:
+                fh, fw = opts['filter_height'], opts['filter_width'] 
+                if (fh,fw) in [(5,5), (7,7)]:
+                    tensor_idx = op['inputs'][0]
+                    oshape = tensors[op['outputs'][0]]['shape']
+                    inject_ops = []
+                    opts3 = opts.copy()
+                    opts3['filter_height'], opts3['filter_width'] = 3,3
+
+                    # first 3x3
+                    oshape = oshape.copy()
+                    if opts3['padding'] == 'VALID':
+                        oshape[-3] -= 2
+                        oshape[-2] -= 2
+
+                    max_pool_op0, tensors, buffers = op_max_pool(tensors, buffers, builtin_codes.index('MAX_POOL_2D'), tensor_idx, False, oshape, opts3.copy())
+                    inject_ops.append(max_pool_op0)
+
+                    # second 3x3
+                    tensor_idx = len(tensors)-1
+                    oshape = oshape.copy()
+                    if opts3['padding'] == 'VALID':
+                        oshape[-3] -= 2
+                        oshape[-2] -= 2
+                    max_pool_op1, tensors, buffers = op_max_pool(tensors, buffers, builtin_codes.index('MAX_POOL_2D'), tensor_idx, False, oshape, opts3.copy())
+                    inject_ops.append(max_pool_op1)
+
+                    if (fw,fh) == (7,7): # potential third 3x3
+                        tensor_idx = len(tensors)-1
+                        oshape = oshape.copy()
+                        if opts3['padding'] == 'VALID':
+                            oshape[-3] -= 2
+                            oshape[-2] -= 2
+                        max_pool_op2, tensors, buffers = op_max_pool(tensors, buffers, builtin_codes.index('MAX_POOL_2D'), tensor_idx, False, oshape, opts3.copy())
+                        inject_ops.append(max_pool_op2)
+
+
+                    for n,next_op in enumerate(operators):
+                        if op['outputs'][0] in next_op['inputs']:
+                            next_op['inputs'] = [inject_ops[-1]['outputs'][0] if _ == op['outputs'][0] else _ for _ in next_op['inputs']]
+
+                    operators = operators[:i] + inject_ops + operators[i+1:]
+
+                    i += len(inject_ops)-1
+
+        elif transform == 'NCHW_RESHAPE':
+            if opcode in ['RESHAPE'] and channel_order(i, operators, tensors, buffers) == "NHWC":
+                ishape = tensors[op['inputs'][0]]['shape']
+                shape = get_numpy_data(tensors[op['inputs'][1]], buffers)
+
+                iarr = np.random.randint(0, 10, ishape)
+                oarr = np.reshape(iarr, shape)
+                print(iarr.shape, shape, oarr.shape)
+
+                _shape = np.random.randint(0, 10, shape).transpose([0,2,3,1]).shape
+
+                _iarr = np.transpose(iarr, [0,2,3,1])
+                _t = np.reshape(_iarr, _shape)
+                _oarr = np.transpose(_t, [0,2,3,1])
+                assert((_oarr == oarr).all())
+
+                
+                # c_oarr = channels_first_array(oarr)
+                # cishape = c_iarr.shape
+                # coshape = c_oarr.shape
+
+                transpose_nchw_op, tensors, buffers = op_transpose(tensors, buffers, builtin_codes.index('TRANSPOSE'), tensor_idx, False, [0,3,1,2])
+                inject_op.append(transpose_nchw_op)
+                tensor_idx = len(tensors)-1
+
+                reshape_nchw, tensors, buffers = op_reshape(tensors, buffers, builtin_codes.index('RESHAPE'), tensor_idx, False, _shape)
+                inject_op.append(reshape_nchw_op)
+                tensor_idx = len(tensors)-1
+
+                transpose_nhwc_op, tensors, buffers = op_transpose(tensors, buffers, builtin_codes.index('TRANSPOSE'), tensor_idx, False, [0,2,3,1])
+                inject_op.append(transpose_nhwc_op)
+                tensor_idx = len(tensors)-1
+
+                for n,next_op in enumerate(operators):
+                    if op['outputs'][0] in next_op['inputs']:
+                        next_op['inputs'] = [inject_ops[-1]['outputs'][0] if _ == op['outputs'][0] else _ for _ in next_op['inputs']]
+
+                # inject TRANSPOSE-RESHAPE-TRANSPOSE ops and skip ahead n
+                operators = operators[:i] + inject_ops + operators[i+1:]
 
         elif transform == 'LUT':
             pattern, lut_count = lut_pattern(operators, builtin_codes, tensors, buffers, i)
@@ -1373,8 +1725,6 @@ def apply_transformation(transform, operators, tensors, buffers, opcodes, builti
 
                 pattern_count += 1
                 i += len(lut_ops) - 1
-            elif debug:
-                print("No LUT transformation applied within the graph")
 
         elif transform == 'TRANSPOSE_CONV': 
             if opcode in ['TRANSPOSE_CONV']:
@@ -1417,7 +1767,7 @@ def apply_transformation(transform, operators, tensors, buffers, opcodes, builti
                         pad_h = ((i_h * stride_h) + (kernel_h-stride_h)) - o_h
                         pad_w = ((i_w * stride_w) + (kernel_w-stride_w)) - o_w
 
-                        if (pad_w > 0 or pad_h > 0):
+                        if pad_w > 0 or pad_h > 0:
                             pl = (kernel_w - (pad_w//2) - 1)
                             pr = (kernel_w - ((pad_w//2) + (pad_w%2)) - 1)
                             pu = (kernel_h - (pad_h//2) - 1)
@@ -1432,24 +1782,32 @@ def apply_transformation(transform, operators, tensors, buffers, opcodes, builti
                     if opts['stride_h'] > 1 or opts['stride_w'] > 1:
                         dilate_op, tensors, buffers = op_dilate(tensors, buffers, builtin_codes.index('DILATE'), tensor_idx, False, opts['stride_h'], opts['stride_w'])
                         ops.append(dilate_op)
+                        tensor_idx = len(tensors)-1
 
                         conv_opts['stride_h'] = 1
                         conv_opts['stride_w'] = 1
 
+
                     if pad_h > 0 or pad_w > 0:
-                        pad_op, tensors, buffers = op_pad(tensors, buffers, builtin_codes.index('PAD'), len(tensors)-1, False, pad_h, pad_w)
+                        pad = [0,0,floor(pad_h/2),ceil(pad_h/2),floor(pad_w/2),ceil(pad_w/2),0,0]
+                        pad_op, tensors, buffers = op_pad(tensors, buffers, builtin_codes.index('PAD'), tensor_idx, False, pad)
                         pshape = tensors[len(tensors)-1]['shape']
                         pshape[-3] += pad_h
                         pshape[-2] += pad_w
 
                         ops.append(pad_op)
+                        tensor_idx = len(tensors)-1
 
                     oquant = o_tensor['quantization']
-                    oshape = tensors[len(tensors)-1]['shape'].copy()
+                    oshape = tensors[tensor_idx]['shape'].copy()
                     oshape[-3] -= kernel_h-1
                     oshape[-2] -= kernel_w-1
+                    conv_opts['padding'] = 'VALID'
 
-                    conv_op, tensors, buffers = op_conv(tensors, buffers, builtin_codes.index('CONV_2D'), len(tensors)-1, False, conv_opts, oshape, oquant, weights, weight_quant, biases, bias_quant)
+                    conv_op, tensors, buffers = op_conv(tensors, buffers, builtin_codes.index('CONV_2D'), tensor_idx, False, 'Conv2DOptions', conv_opts,
+                                                        oshape, oquant,
+                                                        weights, weight_quant,
+                                                        biases, bias_quant)
                     ops.append(conv_op)
 
                     # adjust
@@ -1464,12 +1822,42 @@ def apply_transformation(transform, operators, tensors, buffers, opcodes, builti
                 else:
                     print("TRANSPOSE_CONV with stride_h != stride_w or stride > 2 is not supported")
 
+        elif transform in ['GROUP_DEPTH', 'FULL_DEPTH', 'GROUP_DEPTH5x2']:
+            if opcode in ['DEPTHWISE_CONV_2D']:
+                ishape = tensors[op['inputs'][0]]['shape']
+                fshape = tensors[op['inputs'][1]]['shape']
+                if not transform == 'GROUP_DEPTH5x2' or (fshape[-2] == 5 and opts['stride_w'] > 1):
+                    group_size = ishape[-1]
+                    if transform in ['GROUP_DEPTH', 'GROUP_DEPTH5x2']:
+                        group_size = 8
+
+                    num_splits = ishape[-1] // group_size
+                    splits = [group_size for _ in range(num_splits)]
+                    if ishape[-1] % group_size:
+                        splits.append(ishape[-1] % group_size)
+
+                    inject_ops, tensors, buffers = op_group_conv(tensors, buffers, builtin_codes.index('SPLIT'), builtin_codes.index('SPLIT_V'), builtin_codes.index('CONV_2D'), builtin_codes.index('CONCATENATION'), op, splits)
+                    # adjust next op inputs, to go from CONCATENATION instead of CONV
+                    for n,next_op in enumerate(operators):
+                        if op['outputs'][0] in next_op['inputs']:
+                            next_op['inputs'] = [inject_ops[-1]['outputs'][0] if _ == op['outputs'][0] else _ for _ in next_op['inputs']]
+
+                    # inject SPLIT-CONV-CONCAT and skip ahead n
+                    operators = operators[:i] + inject_ops + operators[i+1:]
+
         elif transform == 'GROUP_CONV': 
             if opcode in ['CONV_2D']:
                 ishape = tensors[op['inputs'][0]]['shape']
                 fshape = tensors[op['inputs'][1]]['shape']
+                f_tensor = tensors[op['inputs'][1]]
                 if fshape[-1] < ishape[-1]:
-                    inject_ops, tensors, buffers = op_group_conv(tensors, buffers, builtin_codes.index('SPLIT'), builtin_codes.index('CONV_2D'), builtin_codes.index('CONCATENATION'), op)
+
+                    num_splits = ishape[-1] // f_tensor['shape'][-1]
+                    group_size = ishape[-1] // num_splits
+                    assert(ishape[-1] % f_tensor['shape'][-1] == 0)
+
+                    splits = [group_size for _ in range(num_splits)]
+                    inject_ops, tensors, buffers = op_group_conv(tensors, buffers, builtin_codes.index('SPLIT'), builtin_codes.index('SPLIT_V'), builtin_codes.index('CONV_2D'), builtin_codes.index('CONCATENATION'), op, splits)
 
                     # adjust next op inputs, to go from CONCATENATION instead of CONV
                     for n,next_op in enumerate(operators):
@@ -1481,14 +1869,103 @@ def apply_transformation(transform, operators, tensors, buffers, opcodes, builti
 
                     i += len(inject_ops)-1
 
+        elif transform == 'AVERAGE_POOL_2D': 
+            inject_ops = []
 
-        elif transform == 'STRIDED_DEPTHWISE': 
-            if opcode in ['DEPTHWISE_CONV_2D']:
+            # if opcode in ['MEAN']:
+            #     tensor_idx = op['inputs'][0]
+            #     ishape = tensors[tensor_idx]['shape']
+            #     axis = get_numpy_data(tensors[op['inputs'][1]], buffers)
+            #     axis = [_ - len(ishape) for _ in axis]
+            #     kh,kw,k = ishape[-3], ishape[-2],ishape[-1]
+            #     if tuple(axis) == (-3,-2) and (kh,kw) in [(7,7)]:
+            #         w_val = 127
+            #         if (kh,kw) == (7,7):
+            #             w_scale = 0.0001607 #1/127/(kh*kw)
+
+            #         dconv_opts = {'depth_multiplier': 1, 'stride_h': 1, 'stride_w': 1, 'dilation_h_factor': 1, 'dilation_w_factor': 1, 'padding': 'VALID'}
+            #         weights = np.zeros((1,kh,kw,k), dtype=np.int64)
+            #         weights[0,:,:,:] += w_val
+            #         weight_quant = {'scale': [w_scale for _ in range(k)], 'zero_point': [0 for _ in range(k)], 'details_type': 'NONE', 'quantized_dimension': 3}
+
+            #         bias_data = np.zeros((k,), dtype=np.int64)
+            #         bquant = {'scale': [1. for _ in range(k)], 'zero_point': [0 for _ in range(k)], 'details_type': 'NONE', 'quantized_dimension': 0}
+
+            #         oshape = tensors[op['outputs'][0]]['shape']
+            #         oquant = tensors[op['outputs'][0]]['quantization'].copy()
+            #         conv_op, tensors, buffers = op_conv(tensors, buffers, builtin_codes.index('DEPTHWISE_CONV_2D'), tensor_idx, False, 'DepthwiseConv2DOptions', dconv_opts,
+            #                                             oshape, oquant,
+            #                                             weights, weight_quant,
+            #                                             bias_data, bquant)
+            #         inject_ops.append(conv_op)
+
+            if opcode in ['AVERAGE_POOL_2D']:
+                if opts['filter_height'] == 2 and opts['filter_width'] == 2 and opts['stride_h'] == 1 and opts['stride_w'] == 1:
+                    pad_row, pad_col = 1, 1
+                    w_val = 127
+
+                    if pool_count % 2: # swap between w_scale that rounds down vs rounds up int8 values
+                        w_scale = 0.001969 #1/127/(kh*kw)
+                    else:
+                        w_scale = 0.001968
+                    pool_count += 1
+
+                    inject_ops = []
+                    tensor_idx = op['inputs'][0]
+                    # pad = [0,0,0,pad_row,0,pad_col,0,0]
+                    pad = [0,0,pad_row,0,pad_col,0,0,0]
+                    pad_op, tensors, buffers = op_pad(tensors, buffers, builtin_codes.index('PAD'), op['inputs'][0], False, pad)
+                    pshape = tensors[len(tensors)-1]['shape']
+                    pshape[-3] += pad_row
+                    pshape[-2] += pad_col
+                    inject_ops.append(pad_op)
+                    tensor_idx = len(tensors)-1
+
+                    ishape = tensors[tensor_idx]['shape']
+                    k = ishape[-1]
+                    kh, kw = 3, 3
+
+                    oshape = ishape.copy()
+                    oshape[-3] = oshape[-3] - (kh - 1)
+                    oshape[-2] = oshape[-2] - (kw - 1)
+                    oquant = tensors[op['inputs'][0]]['quantization'].copy()
+
+                    dconv_opts = {'depth_multiplier': 1, 'stride_h': 1, 'stride_w': 1, 'dilation_h_factor': 1, 'dilation_w_factor': 1, 'padding': 'VALID'}
+                    weights = np.zeros((1,kh,kw,k), dtype=np.int64)
+                    # weights[0,0:2,0:2,:] += w_val
+                    weights[0,1:3,1:3,:] += w_val
+
+                    weight_quant = {'scale': [w_scale for _ in range(k)], 'zero_point': [0 for _ in range(k)], 'details_type': 'NONE', 'quantized_dimension': 3}
+
+                    bias_data = np.zeros((k,), dtype=np.int64)
+                    bquant = {'scale': [1. for _ in range(k)], 'zero_point': [0 for _ in range(k)], 'details_type': 'NONE', 'quantized_dimension': 0}
+
+                    conv_op, tensors, buffers = op_conv(tensors, buffers, builtin_codes.index('DEPTHWISE_CONV_2D'), tensor_idx, False, 'DepthwiseConv2DOptions', dconv_opts,
+                                                        oshape, oquant,
+                                                        weights, weight_quant,
+                                                        bias_data, bquant)
+                    inject_ops.append(conv_op)
+
+            if len(inject_ops):
+                for n,next_op in enumerate(operators):
+                    if op['outputs'][0] in next_op['inputs']:
+                        next_op['inputs'] = [inject_ops[-1]['outputs'][0] if _ == op['outputs'][0] else _ for _ in next_op['inputs']]
+
+                operators = operators[:i] + inject_ops + operators[i+1:]
+
+                i += len(inject_ops)-1
+
+        elif transform in ['STRIDED_DEPTHWISE','STRIDED_CONV']:
+            if (transform == 'STRIDED_DEPTHWISE' and opcode == 'DEPTHWISE_CONV_2D') or (transform == 'STRIDED_CONV' and opcode == 'CONV_2D'):
                 if opts['stride_w'] > 1:
-                    _, pad_w = get_pad(op, tensors)
+                    pad_h, pad_w = get_pad(op, tensors)
                     stride_w, dilation_w = opts['stride_w'], opts['dilation_w_factor']
                     filter_w, input_w = tensors[op['inputs'][1]]['shape'][-2], tensors[op['inputs'][0]]['shape'][-2]
                     adjusted_conv_width = input_w + pad_w - (((filter_w-1)*dilation_w)+1) + 1 
+
+                    stride_h, dilation_h = opts['stride_h'], opts['dilation_h_factor']
+                    filter_h, input_h = tensors[op['inputs'][1]]['shape'][-3], tensors[op['inputs'][0]]['shape'][-3]
+                    adjusted_conv_height = input_h + pad_h - (((filter_h-1)*dilation_h)+1) + 1 
 
                     #create strided slice
                     t = tensors[op['outputs'][0]]
@@ -1497,13 +1974,19 @@ def apply_transformation(transform, operators, tensors, buffers, opcodes, builti
                     end[-2] = adjusted_conv_width
                     stride = [1, 1, opts['stride_w'], 1]
 
+                    # end[-3] = adjusted_conv_height
+                    # stride = [1, opts['stride_h'], opts['stride_w'], 1]
+
                     tensor_idx = op['outputs'][0]
                     inject_op, tensors, buffers = op_strided_slice(tensors, buffers, builtin_codes.index('STRIDED_SLICE'), tensor_idx, False, begin, end, stride)
 
-                    #adjust DEPTHWISE_CONV_2D
+                    #adjust CONV
                     t = tensors[op['outputs'][0]]
                     t['shape'][-2] = adjusted_conv_width
-                    opts['stride_w'] = 1
+
+                    op['builtin_options'] = opts.copy()
+                    op['builtin_options']['stride_w'] = 1
+                    # op['builtin_options']['stride_h'] = 1
 
                     #adjust inputs to use STRIDED_SLICE not CONV
                     for n,next_op in enumerate(operators):
@@ -1513,16 +1996,109 @@ def apply_transformation(transform, operators, tensors, buffers, opcodes, builti
                     # inject STRIDED_SLICE and skip ahead 1
                     operators = operators[:i+1] + [inject_op] + operators[i+1:]
                     i += 1
-                elif debug:
-                    print("STRIDED_DEPTHWISE with stride_w <= 1 or not supported configuration")
+
+        elif transform == 'CHANNEL_SPLIT': 
+            if opcode in ['STRIDED_SLICE']:
+                ishape = tensors[op['inputs'][0]]['shape']
+                oshape = tensors[op['outputs'][0]]['shape']
+                begin = get_numpy_data(tensors[op['inputs'][1]], buffers)
+                end = get_numpy_data(tensors[op['inputs'][2]], buffers)
+
+                axis = None 
+                same_dim = [i == o for i,o in zip(tuple(ishape),tuple(oshape))]
+                if len(tuple(ishape)) == len(tuple(oshape)):
+                    if len(same_dim) > 1 and all(same_dim[:-1]):
+                        axis = -1
+                    elif len(same_dim) > 2 and all(same_dim[:-2]) and all(same_dim[-1:]):
+                        axis = -2
+                    elif len(same_dim) > 3 and all(same_dim[:-3]) and all(same_dim[-2:]):
+                        axis = -3
+                    elif len(same_dim) > 4 and all(same_dim[:-4]) and all(same_dim[-3:]):
+                        axis = -4
+                
+                if axis in [-1]:
+                    split_idx = 0
+                    splits = []
+                    if begin[axis] != 0:
+                        splits.append(begin[axis])
+                        split_idx += 1
+                    splits.append(end[axis]-begin[axis])
+                    if ishape[axis] > end[axis]:
+                        splits.append(ishape[axis] - end[axis])
+
+                    tensor_idx = op['inputs'][0]
+                    split_op, tensors, buffers = op_split_v(tensors, buffers, builtin_codes.index('SPLIT_V'), tensor_idx, False, axis, splits)
+                    operators = operators[:i] + [split_op] + operators[i+1:]
+
+                    # adjust
+                    for n,next_op in enumerate(operators):
+                        if op['outputs'][0] in next_op['inputs']:
+                            next_op['inputs'] = [split_op['outputs'][split_idx] if _ == op['outputs'][0] else _ for _ in next_op['inputs']]
+
+        elif transform == 'IMPLICIT_PAD': 
+            if opcode in ['CONV_2D', 'DEPTHWISE_CONV_2D'] and opts['padding'] == 'VALID':
+                tensor_idx = op['inputs'][0]
+                prev_ops = [] 
+                for p,prev_op in enumerate(operators):
+                    if tensor_idx in prev_op['outputs']:
+                        prev_ops.append(p)
+                if len(prev_ops) == 1 and builtin_codes[operators[prev_ops[0]]['opcode_index']] in ['PAD', 'PADV2']:
+                    pad_idx = prev_ops[0]
+                    pad_op = operators[pad_idx]
+
+                    opts['padding'] = 'SAME'
+                    op['inputs'][0] = pad_op['inputs'][0]
+
+                    operators = operators[:pad_idx] + operators[pad_idx+1:]
+
+        elif transform == 'PADV2':
+            if opcode in ['PAD']:
+                tensor_idx = op['inputs'][0]
+                if tensors[tensor_idx]['quantization']['zero_point']:
+                    constant_value = tensors[tensor_idx]['quantization']['zero_point'][-1]
+                    pad = get_numpy_data(tensors[op['inputs'][1]], buffers).flatten().tolist()
+                    inject_op, tensors, buffers = op_pad(tensors, buffers, builtin_codes.index('PADV2'), tensor_idx, False, pad, constant_value)
+
+                    inject_op['outputs'][0] = op['outputs'][0]
+                    operators = operators[:i] + [inject_op] + operators[i+1:]
+
+        elif transform == 'SHARED_PAD':
+            output_ops = []
+            output_idx = []
+            for n,next_op in enumerate(operators):
+                if next_op['inputs'][0] == op['outputs'][0]:
+                    output_ops.append(next_op)
+                    output_idx.append(n)
+            if len(output_ops) > 1:
+                if all([builtin_codes[_['opcode_index']] in ['PADV2'] for _ in output_ops]):
+                    pads = [get_numpy_data(tensors[_['inputs'][1]], buffers).flatten().tolist() for _ in output_ops]
+                    vals = [get_numpy_data(tensors[_['inputs'][2]], buffers).flatten().tolist() for _ in output_ops]
+                    if all([pads[0] == _ for _ in pads[1:]]) and all([vals[0] == _ for _ in vals[1:]]):
+                        for idx in reversed(sorted(output_idx[1:])):
+                            for n,next_op in enumerate(operators):
+                                if next_op['inputs'][0] == operators[idx]['outputs'][0]:
+                                    next_op['inputs'][0] = operators[output_idx[0]]['outputs'][0]
+                        for idx in reversed(sorted(output_idx[1:])):
+                            operators = operators[:idx] + operators[idx+1:]
+                        i -= len(output_idx) - 1
 
         elif transform == 'EXPLICIT_PAD': 
-            if opcode in ['CONV_2D', 'DEPTHWISE_CONV_2D']:
+            if opcode in ['CONV_2D', 'DEPTHWISE_CONV_2D', 'MAX_POOL_2D']:
                 pad_h, pad_w = get_pad(op, tensors)
+                pad = [0,0,floor(pad_h/2),ceil(pad_h/2),floor(pad_w/2),ceil(pad_w/2),0,0]
                 if pad_h == 0 and pad_w == 0:
                     opts['padding'] = 'VALID'
                 else:
                     tensor_idx = op['inputs'][0]
+                    constant_value = 0
+                    if tensors[tensor_idx]['quantization']['zero_point']:
+                        constant_value = tensors[tensor_idx]['quantization']['zero_point'][-1]
+                    if opcode in ['MAX_POOL_2D']:
+                        constant_value = -9999
+                        if tensors[tensor_idx]['type'] == 'INT8':
+                            constant_value = -128
+                        elif tensors[tensor_idx]['type'] == 'UINT8':
+                            constant_value = 0 
                     shared_ops = []
                     shared_indices = []
                     for s,op_ in enumerate(operators):
@@ -1539,19 +2115,24 @@ def apply_transformation(transform, operators, tensors, buffers, opcodes, builti
 
                     if inject_shared:
                         # create PAD
-                        inject_op, tensors, buffers = op_pad(tensors, buffers, builtin_codes.index('PAD'), tensor_idx, True, pad_h, pad_w)
+                        # inject_op, tensors, buffers = op_pad(tensors, buffers, builtin_codes.index('PAD'), tensor_idx, True, pad)
+                        inject_op, tensors, buffers = op_pad(tensors, buffers, builtin_codes.index('PADV2'), tensor_idx, True, pad, constant_value)
 
                         # adjust previous op outputs, to go to PAD instead of CONV
                         for p,prev_op in enumerate(operators):
                             if tensor_idx in prev_op['outputs']:
                                 prev_op['outputs'] = [inject_op['inputs'][0] if _ == tensor_idx else _ for _ in prev_op['outputs']]
 
-                        # set CONVs who share padding to VALID
+                        # set NEXT who share padding to VALID
                         for s in shared_indices:
                             operators[s]['builtin_options']['padding'] = 'VALID'
                     else:
                         # create PAD
-                        inject_op, tensors, buffers = op_pad(tensors, buffers, builtin_codes.index('PAD'), tensor_idx, False, pad_h, pad_w)
+                        inject_op, tensors, buffers = op_pad(tensors, buffers, builtin_codes.index('PADV2'), tensor_idx, False, pad, constant_value)
+                        # if opcode in ['MAX_POOL_2D']:
+                        #     inject_op, tensors, buffers = op_pad(tensors, buffers, builtin_codes.index('PADV2'), tensor_idx, False, pad, constant_value)
+                        # else:
+                        #     inject_op, tensors, buffers = op_pad(tensors, buffers, builtin_codes.index('PAD'), tensor_idx, False, pad)
                         injected_tensor_idx = inject_op['outputs'][0]
                         operators[i]['inputs'] = [injected_tensor_idx if _ == tensor_idx else _ for _ in operators[i]['inputs']]
                         tensor_idx = injected_tensor_idx
@@ -1566,11 +2147,348 @@ def apply_transformation(transform, operators, tensors, buffers, opcodes, builti
                     # inject PAD and skip ahead 1
                     operators = operators[:i] + [inject_op] + operators[i:]
                     i += 1
+        elif transform == 'MUL_AS_CONV':
+            if opcode in ['MUL']:
+                t0 = tensors[op['inputs'][0]]
+                t1 = tensors[op['inputs'][1]]
+                if 'data' in buffers[t0['buffer']] or 'data' in buffers[t1['buffer']]:
+                    if 'data' in buffers[t0['buffer']]:
+                        f_tensor = t0
+                        itensor = t1
+                        tensor_idx = op['inputs'][1]
+                    else:
+                        f_tensor = t1
+                        itensor = t0
+                        tensor_idx = op['inputs'][0]
+
+                    filter_data = get_numpy_data(f_tensor, buffers)
+                    if all([filter_data.shape[s] == 1 for s in range(len(filter_data.shape)-1)]):
+                        ishape = itensor['shape'].copy()
+                        k = ishape[-1]
+                        oshape = tensors[op['outputs'][0]]['shape'].copy()
+                        oquant = tensors[op['outputs'][0]]['quantization']
+                        f_quant = f_tensor['quantization'].copy()
+
+                        w_scale = f_quant['scale'][0]
+                        w_zero = f_quant['zero_point'][0]
+                        weight_quant = {'scale': [w_scale for _ in range(k)], 'zero_point': [0 for _ in range(k)], 'details_type': 'NONE', 'quantized_dimension': 3}
+                        weights = filter_data.copy()
+
+                        dconv_opts = {'depth_multiplier': 1, 'stride_h': 1, 'stride_w': 1, 'dilation_h_factor': 1, 'dilation_w_factor': 1, 'padding': 'VALID'}
+
+                        bias_data = np.zeros((k,), dtype=np.int64)
+                        bquant = {'scale': [1. for _ in range(k)], 'zero_point': [0 for _ in range(k)], 'details_type': 'NONE', 'quantized_dimension': 0}
+
+
+                        weights = np.zeros((1,1,1,k), dtype=np.int64)
+                        for k_ in range(k):
+                            if filter_data.shape[-1] == 1:
+                                w_val = filter_data[0,0,0,0]
+                            else:
+                                w_val = filter_data[0,0,0,k_]
+
+                            if w_val - w_zero < 0:
+                                w_val_next = -127
+                            else:
+                                w_val_next = 127
+
+                            w_scale_next = w_scale / (w_val_next / (w_val - w_zero))
+
+                            weights[0,0,0,k_] += w_val_next
+                            weight_quant['scale'][k_] = float(w_scale_next)
+
+                        conv_op, tensors, buffers = op_conv(tensors, buffers, builtin_codes.index('DEPTHWISE_CONV_2D'), tensor_idx, False, 'DepthwiseConv2DOptions', dconv_opts,
+                                                        oshape, oquant,
+                                                        weights, weight_quant,
+                                                        bias_data, bquant)
+                        # adjust
+                        for n,next_op in enumerate(operators):
+                            if op['outputs'][0] in next_op['inputs']:
+                                next_op['inputs'] = [conv_op['outputs'][0] if _ == op['outputs'][0] else _ for _ in next_op['inputs']]
+                        operators = operators[:i] + [conv_op] + operators[i+1:]
+
+        elif transform == 'SUB_AS_ADD':
+            if opcode in ['SUB']:
+                t0 = tensors[op['inputs'][0]]
+                t1 = tensors[op['inputs'][1]]
+                if 'data' in buffers[t0['buffer']] or 'data' in buffers[t1['buffer']]:
+                    if 'data' in buffers[t0['buffer']]:
+                        f_tensor = tensors[op['inputs'][0]]
+                        tensor_idx = op['inputs'][1]
+                    else:
+                        f_tensor = tensors[op['inputs'][1]]
+                        tensor_idx = op['inputs'][0]
+                    o_tensor = tensors[op['outputs'][0]]
+                    o_quant = o_tensor['quantization']
+                    f_quant = f_tensor['quantization'].copy()
+                    filter_data = get_numpy_data(f_tensor, buffers)
+
+                    filter_data *= -1
+                    f_quant['zero_point'][0] *= -1
+                    data = np.frombuffer(filter_data.tobytes(), dtype=np.uint8).tolist()
+
+                    add_op, tensors, buffers = op_add(tensors, buffers, builtin_codes.index('ADD'), tensor_idx, False,
+                           o_quant['scale'], o_quant['zero_point'],
+                           data, filter_data.shape, f_tensor['type'], f_quant['scale'], f_quant['zero_point'])
+                    # adjust
+                    for n,next_op in enumerate(operators):
+                        if op['outputs'][0] in next_op['inputs']:
+                            next_op['inputs'] = [add_op['outputs'][0] if _ == op['outputs'][0] else _ for _ in next_op['inputs']]
+                    operators = operators[:i] + [add_op] + operators[i+1:]
+
+        elif transform == 'DIV_AS_MUL':
+            if opcode in ['DIV']:
+                t1 = tensors[op['inputs'][1]]
+                if 'data' in buffers[t1['buffer']]:
+                    # inject_op, tensors, buffers = op_mul(tensors, buffers, opcodes.index('MUL'), o0, True,
+                    #        [1.0], [mul_zp],
+                    #        scale_q_value, [1,1,1,channel], dtype.upper(), [scale], [scale_zero_point])
+                    # operators = operators[:i] + [inject_op] + operators[i+1:]
+                    pass
+
+        elif transform == 'FUSE_CONV':
+
+            if opcode in ['CONV_2D']:
+                _next_ops = [_ for _ in range(len(operators)) if _op['outputs'][0] in operators[_]['inputs']]
+                if len(_next_ops) == 1:
+                    next_opcode = builtin_codes[_next_ops[0]['opcode_index']]
+                    if next_opcode in ['CONV_2D']:
+                        pass
+
+
+        elif transform == 'FC_CONV_2D':
+            if opcode in ['FULLY_CONNECTED']:
+                ops = []
+                ishape = tensors[op['inputs'][0]]['shape'].copy()
+                oshape = tensors[op['outputs'][0]]['shape'].copy()
+                oquant = tensors[op['outputs'][0]]['quantization']
+                tensor_idx = op['inputs'][0]
+
+                f_tensor = tensors[op['inputs'][1]]
+                filter_data = get_numpy_data(f_tensor, buffers)
+                weight_quant = f_tensor['quantization'].copy()
+                k,c = filter_data.shape[0], filter_data.shape[1]
+
+                b_tensor = None
+                bias_data = np.zeros((k,), dtype=np.int64)
+                bquant = {'scale': [1. for _ in range(k)], 'zero_point': [0 for _ in range(k)], 'details_type': 'NONE', 'quantized_dimension': 3}
+                if len(op['inputs']) > 2 and op['inputs'][2] != -1:
+                    b_tensor = tensors[op['inputs'][2]]
+                    bias_data = get_numpy_data(b_tensor, buffers)
+                    bias_quant = b_tensor['quantization'].copy()
+
+
+                weight_data = np.zeros((k,1,1,c), dtype=np.int64)
+                for k_ in range(k):
+                    for c_ in range(c):
+                        weight_data[k_,0,0,c_] = filter_data[k_,c_]
+
+                _reshape = [ishape[-2],1,1,c]
+                reshape_op, tensors, buffers = op_reshape(tensors, buffers, builtin_codes.index('RESHAPE'), tensor_idx, False, _reshape)
+
+                ops.append(reshape_op)
+                tensor_idx = len(tensors)-1
+
+                conv_opts = {'stride_h': 1, 'stride_w': 1, 'dilation_h_factor': 1, 'dilation_w_factor': 1, 'padding': 'VALID'}
+                conv_op, tensors, buffers = op_conv(tensors, buffers, builtin_codes.index('CONV_2D'), tensor_idx, False, 'Conv2DOptions', conv_opts,
+                                                    oshape, oquant,
+                                                    weight_data, weight_quant,
+                                                    bias_data, bias_quant)
+                ops.append(conv_op)
+                tensor_idx = len(tensors)-1
+
+                # adjust
+                for n,next_op in enumerate(operators):
+                    if op['outputs'][0] in next_op['inputs']:
+                        next_op['inputs'] = [ops[-1]['outputs'][0] if _ == op['outputs'][0] else _ for _ in next_op['inputs']]
+
+                operators = operators[:i] + ops + operators[i+1:]
+                i += len(ops) - 1
+
+        elif transform == 'REWRITE_NORM':
+            if find_pattern(operators[i:], tensors, buffers, builtin_codes, 'NORM'):
+                ops = []
+                tensor_idx = op['inputs'][0]
+                ishape = tensors[op['inputs'][0]]['shape']
+                itype = tensors[op['inputs'][0]]['type']
+                oshape = tensors[op['outputs'][0]]['shape']
+                otype = tensors[op['outputs'][0]]['type']
+                num_splits = ishape[-1] // oshape[-1]
+                i_quant = tensors[op['inputs'][0]]['quantization']
+
+                grab_op = lambda x : (operators[x].copy(), tensors[operators[x]['outputs'][0]]['quantization'].copy(), tensors[operators[x]['outputs'][0]]['type'])
+                wvals = lambda x : (get_numpy_data(tensors[x], buffers), tensors[x]['quantization'].copy(), tensors[x]['type'])
+
+                mean0_op, mean0_quant, mean0_type = grab_op(i+1)
+                sub0_op, sub0_quant, sub0_type = grab_op(i+2)
+                mul0_op, mul0_quant, mul0_type = grab_op(i+3)
+                mean1_op, mean1_quant, mean1_type = grab_op(i+4)
+                add0_op, add0_quant, add0_type = grab_op(i+5)
+                dequant_op, dequant_quant, dequant_type = grab_op(i+6)
+                sqrt_op, sqrt_quant, sqrt_type = grab_op(i+7)
+                div_op, div_quant, div_type = grab_op(i+8)
+                quant_op, quant_quant, quant_type = grab_op(i+9)
+                mul1_op, mul1_quant, mul1_type = grab_op(i+10)
+                mul2_op, mul2_quant, mul2_type = grab_op(i+11)
+                mul3_op, mul3_quant, mul3_type = grab_op(i+12)
+                sub1_op, sub1_quant, sub1_type = grab_op(i+13)
+                add1_op, add1_quant, add1_type = grab_op(i+14)
+                final_op, final_quant, final_type = grab_op(i+15)
+
+                add0_val, add0_fquant, add0_ftype = wvals(add0_op['inputs'][1])
+                div_val, div_fquant, div_ftype = wvals(div_op['inputs'][0])
+                mul1_val, mul1_fquant, mul1_ftype = wvals(mul1_op['inputs'][1])
+                sub1_val, sub1_fquant, sub1_ftype = wvals(sub1_op['inputs'][0])
+
+                split_op, tensors, buffers = op_split(tensors, buffers, builtin_codes.index('SPLIT'), tensor_idx, False, -1, num_splits)
+                ops.append(split_op)
+
             
+                mean_outputs = []
+                for n in range(num_splits):
+                    mean_op, tensors, buffers = op_mean(tensors, buffers, builtin_codes.index('MEAN'), split_op['outputs'][n], False, [1,2,3])
+                    tensors[mean_op['outputs'][0]]['quantization'] = mean0_quant.copy()
+
+                    mean_outputs.append(mean_op['outputs'][0])
+                    ops.append(mean_op)
+
+                sub_outputs = []
+                for n in range(num_splits):
+                    tensor_idx = split_op['outputs'][n]
+                    tensor2_idx = mean_outputs[n]
+
+                    sub_op, tensors, buffers = op_elemwise(tensors, buffers, builtin_codes.index('SUB'), tensor_idx, tensor2_idx, tensors[tensor_idx]['shape'].copy(), tensors[tensor_idx]['type'], sub0_quant.copy())
+                    sub_outputs.append(sub_op['outputs'][0])
+                    ops.append(sub_op)
+
+                mul_outputs = []
+                for n in range(num_splits):
+                    tensor_idx = sub_outputs[n]
+                    tensor2_idx = sub_outputs[n]
+
+                    mul_op, tensors, buffers = op_elemwise(tensors, buffers, builtin_codes.index('MUL'), tensor_idx, tensor2_idx, tensors[tensor_idx]['shape'].copy(), tensors[tensor_idx]['type'], mul0_quant.copy())
+                    mul_outputs.append(mul_op['outputs'][0])
+                    ops.append(mul_op)
+
+                mean1_outputs = []
+                for n in range(num_splits):
+                    mean_op, tensors, buffers = op_mean(tensors, buffers, builtin_codes.index('MEAN'), mul_outputs[n], False, [1,2,3])
+                    tensors[mean_op['outputs'][0]]['quantization'] = mean1_quant.copy()
+
+                    mean1_outputs.append(mean_op['outputs'][0])
+                    ops.append(mean_op)
+
+                add0_val = add0_val.reshape((1,1,1,1))
+                add0_outputs = []
+                for n in range(num_splits):
+
+                    data = np.frombuffer(add0_val.tobytes(), dtype=np.uint8).tolist()
+
+                    add0_op, tensors, buffers = op_add(tensors, buffers, builtin_codes.index('ADD'), mean1_outputs[n], False,
+                           add0_quant['scale'], add0_quant['zero_point'],
+                           data, add0_val.shape, add0_ftype, add0_fquant['scale'], add0_fquant['zero_point'])
+                    add0_outputs.append(add0_op['outputs'][0])
+                    ops.append(add0_op)
+
+                dequant_outputs = []
+                for n in range(num_splits):
+
+                    d_op, tensors, buffers = op_type(tensors, buffers, builtin_codes.index('DEQUANTIZE'), add0_outputs[n], False, dequant_type, dequant_quant.copy())
+
+                    dequant_outputs.append(d_op['outputs'][0])
+                    ops.append(d_op)
+
+                sqrt_outputs = []
+                for n in range(num_splits):
+
+                    sqrt_op, tensors, buffers = op_type(tensors, buffers, builtin_codes.index('SQRT'), dequant_outputs[n], False, sqrt_type, sqrt_quant.copy())
+
+                    sqrt_outputs.append(sqrt_op['outputs'][0])
+                    ops.append(sqrt_op)
+
+                div_outputs = []
+                for n in range(num_splits):
+                    data = np.frombuffer(div_val.tobytes(), dtype=np.uint8).tolist()
+                    div_op, tensors, buffers = op_div(tensors, buffers, builtin_codes.index('DIV'), sqrt_outputs[n], False, True, div_quant.copy(), data, div_val.shape, div_ftype, div_fquant.copy())
+
+                    div_outputs.append(div_op['outputs'][0])
+                    ops.append(div_op)
+
+                quant_outputs = []
+                for n in range(num_splits):
+
+                    q_op, tensors, buffers = op_type(tensors, buffers, builtin_codes.index('QUANTIZE'), div_outputs[n], False, quant_type, quant_quant.copy())
+
+                    quant_outputs.append(q_op['outputs'][0])
+                    ops.append(q_op)
+
+                mul1_outputs = []
+                for n in range(num_splits):
+                    val = mul1_val[:,:,:,n,:].reshape([1,1,1,-1])
+                    data = np.frombuffer(val.tobytes(), dtype=np.uint8).tolist()
+
+                    mul1_op, tensors, buffers = op_mul(tensors, buffers, builtin_codes.index('MUL'), quant_outputs[n], False,
+                           mul1_quant['scale'], mul1_quant['zero_point'],
+                           data, val.shape, mul1_ftype, mul1_fquant['scale'], mul1_fquant['zero_point'])
+                    mul1_outputs.append(mul1_op['outputs'][0])
+                    ops.append(mul1_op)
+
+                mul2_outputs = []
+                for n in range(num_splits):
+                    tensor_idx = split_op['outputs'][n]
+                    tensor2_idx = mul1_outputs[n]
+
+                    mul_op, tensors, buffers = op_elemwise(tensors, buffers, builtin_codes.index('MUL'), tensor_idx, tensor2_idx, tensors[tensor_idx]['shape'].copy(), tensors[tensor_idx]['type'], mul2_quant.copy())
+                    mul2_outputs.append(mul_op['outputs'][0])
+                    ops.append(mul_op)
+
+                mul3_outputs = []
+                for n in range(num_splits):
+                    tensor_idx = mul1_outputs[n]
+                    tensor2_idx = mean_outputs[n]
+
+                    mul_op, tensors, buffers = op_elemwise(tensors, buffers, builtin_codes.index('MUL'), tensor_idx, tensor2_idx, tensors[tensor_idx]['shape'].copy(), tensors[tensor_idx]['type'], mul3_quant.copy())
+                    mul3_outputs.append(mul_op['outputs'][0])
+                    ops.append(mul_op)
+
+                sub1_outputs = []
+                for n in range(num_splits):
+                    val = sub1_val[:,:,:,n,:].reshape([1,1,1,-1])
+                    data = np.frombuffer(val.tobytes(), dtype=np.uint8).tolist()
+
+                    sub1_op, tensors, buffers = op_sub(tensors, buffers, builtin_codes.index('SUB'), mul3_outputs[n], False, True,
+                           sub1_quant['scale'], sub1_quant['zero_point'],
+                           data, val.shape, sub1_ftype, sub1_fquant['scale'], sub1_fquant['zero_point'])
+                    sub1_outputs.append(sub1_op['outputs'][0])
+                    ops.append(sub1_op)
+
+                add1_outputs = []
+                for n in range(num_splits):
+                    tensor_idx = mul2_outputs[n]
+                    tensor2_idx = sub1_outputs[n]
+
+                    add_op, tensors, buffers = op_elemwise(tensors, buffers, builtin_codes.index('ADD'), tensor_idx, tensor2_idx, tensors[tensor_idx]['shape'].copy(), tensors[tensor_idx]['type'], add1_quant.copy())
+                    add1_outputs.append(add_op['outputs'][0])
+                    ops.append(add_op)
+
+                concat_op, tensors, buffers = op_concat(tensors, buffers, builtin_codes.index('CONCATENATION'), add1_outputs, tensor_idx, -1)
+                ops.append(concat_op)
+
+                concat_inputs = []
+                for n,next_op in enumerate(operators):
+                    if final_op['outputs'][0] in next_op['inputs']:
+                        next_op['inputs'] = [ops[-1]['outputs'][0] if _ == final_op['outputs'][0] else _ for _ in next_op['inputs']]
+
+                tensors[ops[-1]['outputs'][0]]['quantization'] = tensors[ops[-2]['outputs'][0]]['quantization'].copy()
+                # tensors[ops[-1]['outputs'][0]]['shape'] = [1,1,1,num_splits]
+
+                operators = operators[:i] + ops + operators[i+15+1:]
+                i += len(ops) - 1
+
         elif transform == 'YOLO_ARG_MAX':
             if is_graph_output(op, operators, tensors, buffers):
                 if tensors[op['outputs'][0]]['shape'][-1] in [80]:
-                    id_op, tensors, buffers = op_pad(tensors, buffers, builtin_codes.index('PAD'), op['outputs'][0], False, 0, 0)
+                    id_op, tensors, buffers = op_pad(tensors, buffers, builtin_codes.index('PAD'), op['outputs'][0], False)
 
                     _shape = tensors[op['outputs'][0]]['shape'].copy()[:-1]
                     arg_max_op, tensors, buffers = op_argmax(tensors, buffers, builtin_codes.index('ARG_MAX'), op['outputs'][0], False, _shape, 'INT32')
@@ -1609,6 +2527,16 @@ def apply_transformation(transform, operators, tensors, buffers, opcodes, builti
     return operators, tensors, buffers
 
 
+def find_pattern(operators, tensors, buffers, opcodes, pattern):
+    if pattern == 'NORM':
+        codes = [opcodes[op['opcode_index']] for i,op in zip(range(16), operators)]
+        target = ['RESHAPE', 'MEAN', 'SUB', 'MUL', 'MEAN', 'ADD', 'DEQUANTIZE', 'SQRT',
+                  'DIV', 'QUANTIZE', 'MUL', 'MUL', 'MUL', 'SUB', 'ADD', 'RESHAPE']
+        if len(codes) == 16 and codes == target:
+            return True
+    return False
+
+
 def load_graph(src_tflite, copy=False):
     tmp_dir_obj = tempfile.TemporaryDirectory()
     tmp_dir = tmp_dir_obj.name
@@ -1620,8 +2548,7 @@ def load_graph(src_tflite, copy=False):
     jname = tflite2json(tmp_tflite)
     if copy:
         shutil.copyfile(jname, src_tflite.replace('.tflite', '.json'))
-    with open(jname) as f:
-        graph = json.load(f)
+    graph = json_load(jname)
 
     subgraph = graph['subgraphs'][0]
     operators, tensors = subgraph['operators'], subgraph['tensors']
@@ -1643,9 +2570,11 @@ def save_graph(dst_tflite, tmp_dir_obj, graph, copy=False, debug=False):
     tmp_tflite = os.path.join(tmp_dir, os.path.basename(dst_tflite))
     tmp_json = tmp_tflite.replace('.tflite', '.json')
 
-    with open(tmp_json, 'w') as f:
-        json.dump(graph, f)
+    json_dump(graph, tmp_json)
     tname = json2tflite(tmp_json)
+
+    update_shapes(tname, graph)
+
     if copy:
         if debug:
             shutil.copyfile(tmp_json, dst_tflite.replace('.tflite', '.json'))
@@ -1655,12 +2584,11 @@ def save_graph(dst_tflite, tmp_dir_obj, graph, copy=False, debug=False):
 
 def clean_operator_codes(operator_codes):
     schema_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),'schema.fbs') 
-    with open(schema_path.replace('.fbs', '.json')) as f:
-        schema = json.load(f)
-        operators = schema["definitions"]["tflite_BuiltinOperator"]["enum"]
-        for i,g in enumerate(operator_codes):
-            if 'deprecated_builtin_code' in g and not g['deprecated_builtin_code'] >= 127:
-                operator_codes[i]['builtin_code'] = operators[g['deprecated_builtin_code']]
+    schema = json_load(schema_path.replace('.fbs', '.json'))
+    operators = schema["definitions"]["tflite_BuiltinOperator"]["enum"]
+    for i,g in enumerate(operator_codes):
+        if 'deprecated_builtin_code' in g and not g['deprecated_builtin_code'] >= 127:
+            operator_codes[i]['builtin_code'] = operators[g['deprecated_builtin_code']]
     return operator_codes
 
 
@@ -1800,7 +2728,7 @@ def topological_sort_kahn(operators, tensors, buffers):
 
 
 
-def clean_operators(operators, tensors, buffers, rename=False, force_shape=None):
+def clean_operators(operators, tensors, buffers, rename=False, force_shape=None, sort=None):
     used_buffers = []
     used_tensors = []
 
@@ -1822,15 +2750,14 @@ def clean_operators(operators, tensors, buffers, rename=False, force_shape=None)
         soperators.append(op)
 
     s = None
-    # try:
-    #     import time
-    #     start = time.time()
-    #     # s = topological_sort_dfs(soperators, tensors, buffers)
-    #     s = topological_sort_kahn(soperators, tensors, buffers)
-    #     end = time.time()
-    #     print(end - start)
-    # except:
-    #     pass
+    if not sort is None:
+        try:
+            if sort == 'dfs':
+                s = topological_sort_dfs(soperators, tensors, buffers)
+            elif sort == 'kahn':
+                s = topological_sort_kahn(soperators, tensors, buffers)
+        except:
+            print("WARNING: sort {} failed".format(sort))
     if not s is None:
         soperators = [soperators[_] for _ in s]
         
@@ -1896,19 +2823,31 @@ def clean_operators(operators, tensors, buffers, rename=False, force_shape=None)
     return soperators, stensors, sbuffers
 
 
-def get_io_tensors(operators, tensors, buffers, opcodes):
-    ignored_output_codes = []
-    builtin_codes = [_['builtin_code'] for _ in opcodes]
-    for opcode in ['SPLIT']:
-        if opcode in builtin_codes:
-            ignored_output_codes.append(builtin_codes.index(opcode))
+def unused_partial_outputs(output_tensors, all_input_tensors, operators):
+    unused_tensors = []
 
-    all_input_tensors, all_output_tensors, ignored_output_tensors = [], [], []
+    for idx in output_tensors:
+        source_op = None
+        for op in operators:
+            if idx in op['outputs']:
+                source_op = op
+                break
+        assert(source_op)
+        if len(source_op['outputs']) > 1:
+            for output in [_ for _ in source_op['outputs'] if _ != idx]:
+                if output in all_input_tensors:
+                    unused_tensors.append(idx)
+                    break
+
+    return unused_tensors
+
+
+def get_io_tensors(operators, tensors, buffers, opcodes):
+
+    all_input_tensors, all_output_tensors = [], []
     for op in operators:
         all_input_tensors += op['inputs']
         all_output_tensors += op['outputs']
-        if op['opcode_index'] in ignored_output_codes:
-            ignored_output_tensors += op['outputs']
 
     input_tensors = []
     for i in all_input_tensors:
@@ -1918,22 +2857,25 @@ def get_io_tensors(operators, tensors, buffers, opcodes):
     output_tensors = []
     for o in all_output_tensors:
         if not o in output_tensors and not o in all_input_tensors:
-            if not o in ignored_output_tensors:
-                output_tensors.append(o)
+            output_tensors.append(o)
+
+    ignored_tensors = unused_partial_outputs(output_tensors, all_input_tensors, operators)
 
     valid_input_tensors = []
     for idx in input_tensors:
-        t = tensors[idx]
-        buf = buffers[t['buffer']]
-        if 'data' not in buf:
-            valid_input_tensors.append(idx)
+        buf = buffers[tensors[idx]['buffer']]
+        if 'data' in buf:
+            continue
+        valid_input_tensors.append(idx)
 
     valid_output_tensors = []
     for idx in output_tensors:
-        t = tensors[idx]
-        buf = buffers[t['buffer']]
-        if 'data' not in buf:
-            valid_output_tensors.append(idx)
+        if idx in ignored_tensors:
+            continue
+        buf = buffers[tensors[idx]['buffer']]
+        if 'data' in buf:
+            continue
+        valid_output_tensors.append(idx)
 
     return valid_input_tensors, valid_output_tensors
 
@@ -1946,10 +2888,7 @@ def create_signature_defs(graph, tensors, input_tensors, output_tensors):
 
 
 def create_graph(operators, tensors, buffers, opcodes, force_shape=None):
-    operators = [_.copy() for _ in operators]
-    tensors = [_.copy() for _ in tensors]
-    # buffers = [_.copy() for _ in buffers]
-    buffers = buffers.copy()
+    operators, tensors, buffers = [_.copy() for _ in operators], [_.copy() for _ in tensors], buffers.copy()
 
     operators, tensors, buffers = clean_operators(operators, tensors, buffers, force_shape=force_shape)
     input_tensors, output_tensors = get_io_tensors(operators, tensors, buffers, opcodes)
@@ -1962,70 +2901,36 @@ def create_graph(operators, tensors, buffers, opcodes, force_shape=None):
     g = create_signature_defs(g, tensors, input_tensors, output_tensors)
     if g['signature_defs'][0]['inputs'] == []:
         print('WARNING: NO INPUTS')
+    if g['signature_defs'][0]['outputs'] == []:
+        print('WARNING: NO OUTPUTS')
 
     return g
 
 
-def verify_graph(graph, core, accel, debug, optimized=False):
-    subgraph = graph['subgraphs'][0]
-    operators, tensors = subgraph['operators'], subgraph['tensors']
-    buffers, opcodes = graph['buffers'], graph['operator_codes']
-    builtin_codes = [_['builtin_code'] for _ in opcodes]
+def all_close_graphs(t0, t1):
+    with open(t0, 'rb') as f:
+        i0, o0 = generate_inputs_outputs(f.read(), int8_range=True)
+    with open(t1, 'rb') as f:
+        i1, o1 = generate_inputs_outputs(f.read(), int8_range=True)
 
-    if not optimized:
-        id_count = 0
-        pattern_count = 0
-        i = 0
-        while i < len(operators): 
-            op = operators[i]
-            opts = None
-            if 'builtin_options' in op:
-                opts = op['builtin_options']
-            opcode = builtin_codes[op['opcode_index']]
+    close = [np.allclose(o0[_],o1[_]) for _ in o0.keys()]
+    max_diff = 0
 
-            if opcode in ['CONV_2D']:
-                if 'FLOAT32' in [tensors[_]['type'] for _ in op['inputs']]:
-                    print('FLOAT32 inputs not supported (for operator {} {})'.format(i, opcode))
-                    return False
+    if not all(close):
+        try:
+            for _ in o0.keys():
+                a,b = o0[_], o1[_]
+                heat = a-b
+                if np.max(np.abs(heat)) > 1:
+                    while len(heat.shape) < 3:
+                        heat = np.expand_dims(heat, axis=0)
+                    np.save("heatmap.{}.npy".format(_), heat)
+                max_diff = max(max_diff, np.max(np.abs(heat)))
+        except:
+            pass
 
-            if opcode in ['CONV_2D','SUM']:
-                if 'FLOAT32' in [tensors[_]['type'] for _ in op['outputs']]:
-                    print('FLOAT32 outputs not supported (operator {} {})'.format(i, opcode))
-                    return False
-
-            if opcode in ['DIV']:
-                if is_multi_input(op, tensors, buffers):
-                    if 'FLOAT32' in [tensors[_]['type'] for _ in op['outputs']]:
-                        print('FLOAT32 DIV w/ multiple inputs is not supported (operator {} {})'.format(i, opcode))
-                        return False
-
-            i += 1
-    else:
-        errors = []
-        
-        codes = [_['builtin_code'] for _ in graph['operator_codes']]
-        valid_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),'supported_ops.json') 
-        with open(valid_path) as f:
-            valid = json.load(f)
-
-        i = 0
-        while i < len(operators): 
-            op = operators[i]
-            if 'builtin_options' in op:
-                opts = op['builtin_options']
-            opcode = codes[op['opcode_index']]
-
-            valid_op, error_param, param_value, input_param = check_valid(valid, opcode, op, tensors)
-            if not valid_op:
-                errors.append([i,op,opcode, error_param, param_value, input_param])
-
-            i += 1
-
-        if len(errors) >0:
-            with exception_catcher(errors):
-                assert(0)
-    return True
-
+    return all(close), max_diff
+    
 
 def transform_graph(graph, passes, debug):
     subgraph = graph['subgraphs'][0]
@@ -2051,19 +2956,53 @@ def transform_graph(graph, passes, debug):
         elif transform == 'EXPLICIT_PAD':
             if not 'PAD' in builtin_codes:
                 opcodes.append({'deprecated_builtin_code': 34, 'version': 1, 'builtin_code': 'PAD'})
-        elif transform == 'GROUP_CONV':
+            if not 'PADV2' in builtin_codes:
+                opcodes.append({'deprecated_builtin_code': 60, 'version': 1, 'builtin_code': 'PADV2'})
+        elif transform == 'PADV2':
+            if not 'PADV2' in builtin_codes:
+                opcodes.append({'deprecated_builtin_code': 60, 'version': 1, 'builtin_code': 'PADV2'})
+        elif transform == 'CHANNEL_SPLIT':
+            if not 'SPLIT_V' in builtin_codes:
+                opcodes.append({'deprecated_builtin_code': 102, 'version': 2, 'builtin_code': 'SPLIT_V'})
+        elif transform in ['GROUP_CONV', 'GROUP_DEPTH', 'GROUP_DEPTH5x2', 'FULL_DEPTH']:
+            if not 'CONV_2D' in builtin_codes:
+                opcodes.append({'deprecated_builtin_code': 3, 'version': 3, 'builtin_code': 'CONV_2D'})
             if not 'SPLIT' in builtin_codes:
                 opcodes.append({'deprecated_builtin_code': 49, 'version': 2, 'builtin_code': 'SPLIT'})
+            if not 'SPLIT_V' in builtin_codes:
+                opcodes.append({'deprecated_builtin_code': 102, 'version': 2, 'builtin_code': 'SPLIT_V'})
             if not 'CONCATENATION' in builtin_codes:
                 opcodes.append({'deprecated_builtin_code': 2, 'version': 1, 'builtin_code': 'CONCATENATION'})
-        elif transform == 'STRIDED_DEPTHWISE': 
+        elif transform in ['STRIDED_DEPTHWISE', 'STRIDED_CONV']: 
             if not 'STRIDED_SLICE' in builtin_codes:
                 opcodes.append({'deprecated_builtin_code': 45, 'version': 1, 'builtin_code': 'STRIDED_SLICE'})
+        elif transform == 'NCHW_RESHAPE':
+            if not 'TRANSPOSE' in builtin_codes:
+                opcodes.append({'deprecated_builtin_code': 39, 'version': 1, 'builtin_code': 'TRANSPOSE'})
+        elif transform == 'MUL_AS_CONV':
+            if not 'DEPTHWISE_CONV_2D' in builtin_codes:
+                opcodes.append({'deprecated_builtin_code': 4, 'version': 3, 'builtin_code': 'DEPTHWISE_CONV_2D'})
+        elif transform == 'SUB_AS_ADD':
+            if not 'ADD' in opcodes:
+                opcodes.append({'deprecated_builtin_code': 0, 'version': 2, 'builtin_code': 'ADD'})
+        elif transform == 'DIV_AS_MUL':
+            if not 'MUL' in opcodes:
+                opcodes.append({'deprecated_builtin_code': 18, 'version': 2, 'builtin_code': 'MUL'})
+        elif transform == 'FC_CONV_2D':
+            if not 'CONV_2D' in builtin_codes:
+                opcodes.append({'deprecated_builtin_code': 3, 'version': 3, 'builtin_code': 'CONV_2D'})
+            if not 'RESHAPE' in builtin_codes:
+                opcodes.append({'deprecated_builtin_code': 22, 'version': 1, 'builtin_code': 'RESHAPE'})
         elif transform == 'TRANSPOSE_CONV': 
             if not 'CONV_2D' in builtin_codes:
-                opcodes.append({'deprecated_builtin_code': 3, 'version': 1, 'builtin_code': 'CONV_2D'})
+                opcodes.append({'deprecated_builtin_code': 3, 'version': 3, 'builtin_code': 'CONV_2D'})
             if not 'DILATE' in builtin_codes:
                 opcodes.append({'deprecated_builtin_code': 127, 'version': 1, 'builtin_code': 'DILATE'})
+            if not 'PAD' in builtin_codes:
+                opcodes.append({'deprecated_builtin_code': 34, 'version': 1, 'builtin_code': 'PAD'})
+        elif transform == 'AVERAGE_POOL_2D':
+            if not 'DEPTHWISE_CONV_2D' in builtin_codes:
+                opcodes.append({'deprecated_builtin_code': 4, 'version': 3, 'builtin_code': 'DEPTHWISE_CONV_2D'})
             if not 'PAD' in builtin_codes:
                 opcodes.append({'deprecated_builtin_code': 34, 'version': 1, 'builtin_code': 'PAD'})
         elif transform == 'YOLO_ARG_MAX': 
@@ -2078,7 +3017,11 @@ def transform_graph(graph, passes, debug):
         elif transform == 'IDENTITY_INJECTION': 
             if not 'SPLIT' in builtin_codes:
                 opcodes.append({'deprecated_builtin_code': 49, 'version': 2, 'builtin_code': 'SPLIT'})
-
+        elif transform in ['REWRITE_NORM', 'REWRITE_ATTN']:
+            if not 'SPLIT' in builtin_codes:
+                opcodes.append({'deprecated_builtin_code': 49, 'version': 2, 'builtin_code': 'SPLIT'})
+            if not 'CONCATENATION' in builtin_codes:
+                opcodes.append({'deprecated_builtin_code': 2, 'version': 1, 'builtin_code': 'CONCATENATION'})
         builtin_codes = [_['builtin_code'] for _ in opcodes]
 
     for transform in passes:
@@ -2200,7 +3143,7 @@ def postprocess_inject(tensor_idx, operators, tensors, buffers, opcodes, dataset
     resize = 'RESIZE_NEAREST_NEIGHBOR'
     if dataset in ['DEPTH']:
         resize = 'RESIZE_BILINEAR'
-
+                
     if current_shape[-3] != height or current_shape[-2] != width:
         heights, widths = get_optimal_resize_shape(current_shape[-3], current_shape[-2], height, width)
         if current_type in ['UINT8'] and not inject_dequantize and resize in ['RESIZE_BILINEAR']: #inject QUANTIZE
@@ -2214,8 +3157,8 @@ def postprocess_inject(tensor_idx, operators, tensors, buffers, opcodes, dataset
 
         for(_, (h, w)) in enumerate(zip(heights, widths)):    
             current_shape = [current_shape[-4], h, w, current_shape[-1]]
-
-            inject_op, tensors, buffers = op_resize(tensors, buffers, opcodes.index(resize), current_output, False, current_shape)
+            isPostprocessing = dataset in ['DEPTH']
+            inject_op, tensors, buffers = op_resize(tensors, buffers, opcodes.index(resize), current_output, False, current_shape, isPostprocessing=isPostprocessing)
 
             operators = operators + [inject_op]
             current_output = len(tensors)-1
@@ -2550,7 +3493,7 @@ def preprocess_inject(tensor_idx, operators, tensors, buffers, opcodes, scale, m
 
 def preprocess():
     parser = argparse.ArgumentParser()
-    parser.add_argument("tflite", type=existing_file)
+    parser.add_argument("tflite")
     parser.add_argument("-s", "--scale", type=float, nargs='+', default=1.0)
     parser.add_argument("-m", "--mean", type=float, nargs='+', default=0.)
     parser.add_argument("-v", "--verbose", action='store_true')
@@ -2573,7 +3516,7 @@ def preprocess():
 
 def postprocess():
     parser = argparse.ArgumentParser()
-    parser.add_argument("tflite", type=existing_file)
+    parser.add_argument("tflite")
     parser.add_argument("-p", "--post-process-layer", choices=['YOLO_ARG_MAX', 'PIXEL_VOC', 'PIXEL_COCO', 'PIXEL_CITYSCAPES', 'PIXEL_DEPTH'], default='PIXEL_DEPTH')
     parser.add_argument("-o", "--opacity", type=float, default=0.8)
     parser.add_argument("--height", type=int, default=1080)
@@ -2595,29 +3538,23 @@ def postprocess():
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("tflite", type=existing_file)
-    parser.add_argument("-c", "--core", choices=['MXP', 'RISCV'], default='MXP')
-    parser.add_argument("-a", "--accel", choices=['FIA', 'NEU'], default='FIA')
+    parser.add_argument("tflite")
+    parser.add_argument("-p", "--passes", nargs='+', choices=passes)
     parser.add_argument("-v", "--verbose", action='store_true')
-    parser.add_argument("-p", "--passes", nargs='+', choices=['ALL', 'DEFAULT']+all_passes, default=['DEFAULT'])
     args = parser.parse_args()
 
     graph, dir_obj = load_graph(args.tflite)
 
-    passes = args.passes
-    if 'ALL' in args.passes:
-        if args.core == 'MXP' and args.accel == 'FIA':
-            passes = all_passes
-    elif 'DEFAULT' in args.passes:
-        if args.core == 'MXP' and args.accel == 'FIA':
-            passes = default_passes
-
-    if verify_graph(graph, args.core, args.accel, args.verbose):
-        graph_ = transform_graph(graph, passes, args.verbose)
-        save_graph(args.tflite.replace('.tflite', '.tr.tflite'), dir_obj, graph_, copy=True)
+    transformed_graph = transform_graph(graph, args.passes, args.verbose)
+    save_graph(args.tflite.replace('.tflite', '.tr.tflite'), dir_obj, transformed_graph, copy=True)
 
     if not dir_obj is None:
         dir_obj.cleanup()
+
+    if args.verbose:
+        all_close, max_diff = all_close_graphs(args.tflite, args.tflite.replace('.tflite', '.tr.tflite'))
+        if not all_close and max_diff > 1:
+            print("WARNING: transformed graph doesn't match. Max diff == {}".format(max_diff))
 
 
 if __name__ == "__main__":

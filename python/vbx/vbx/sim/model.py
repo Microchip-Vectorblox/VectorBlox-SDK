@@ -4,12 +4,13 @@ from enum import  IntEnum
 import time
 import os
 import json
+import pprint
 
 
 def Fletcher32(data):
     data_bytes = data.tobytes()
     if len(data_bytes) % 2:
-        data_bytes = data_bytes[:-1]
+        data_bytes += b'\x00'
     data = np.frombuffer(data_bytes,dtype=np.uint16)
     datalen = len(data)
     c0 = 0
@@ -37,7 +38,7 @@ class Model:
             Model.vbx_cnn = c_shim.vbx_cnn_init()
             Model.cnn_pid = os.getpid()
         if type(model_bytes) is not bytes:
-            raise TypeError("Model parameter must by bytes")
+            raise TypeError("Model parameter must be bytes")
 
         if c_shim.model_check_sanity(model_bytes) != 0:
             raise ValueError("Does not appear to be a valid model")
@@ -94,6 +95,14 @@ class Model:
             c_shim.model_get_input_datatype(self.model_bytes,i)
             for i in range(self.num_inputs)]
 
+        self.input_offsets = [
+            c_shim.model_get_input_offset(self.model_bytes,i)
+            for i in range(self.num_inputs)]
+
+        self.output_offsets = [
+            c_shim.model_get_output_offset(self.model_bytes,i)
+            for i in range(self.num_outputs)]
+
         self.test_input = [
             c_shim.model_get_test_input(self.model_bytes,i)
             for i in range(self.num_inputs)]
@@ -134,17 +143,24 @@ class Model:
             return cycles
 def main(model_file,expected_checksum,debug=False,verbose=True):
 
+    try:
+        model_bytes = open(model_file, 'rb').read()
+        m = Model(model_bytes)
+    except Exception as e:
+        print(e)
+        return 0
 
-    model_bytes = open(model_file, 'rb').read()
-    m = Model(model_bytes)
     if verbose:
         print("DATA_BYTES = {:3.2f} MB".format(len(model_bytes)/(2**20)))
         print("ALLOCATE_BYTES = {:3.2f} MB".format(len(m.model_bytes)/(2**20)))
     # c.vbxsim_reset_stats()
     odata = m.run(m.test_input)
-    checksum = Fletcher32(odata[0])
-    for od in odata[1:]:
-        checksum = checksum ^ Fletcher32(od)
+    checksum = 0
+    for o, od in enumerate(odata):
+        if o == 0:
+            checksum = Fletcher32(odata[0])
+        else:
+            checksum = checksum ^ Fletcher32(od)
     if verbose:
         print("DMA_BYTES = {}".format(m.get_bandwidth_per_run()))
         print("INSTR_CYCLES = {}".format(m.get_estimated_runtime()))
@@ -152,12 +168,12 @@ def main(model_file,expected_checksum,debug=False,verbose=True):
 
     if debug:
         data = {'inputs': [], 'outputs': [], 'test_outputs': []}
-        for i,(arr,shape,zero,scale,dtype) in enumerate(zip(m.test_input,m.input_shape,m.input_zeropoint,m.input_scale_factor,m.input_dtypes)):
+        for i,(arr,shape,zero,scale,dtype,offset) in enumerate(zip(m.test_input,m.input_shape,m.input_zeropoint,m.input_scale_factor,m.input_dtypes,m.input_offsets)):
             np.save(os.path.join(os.path.dirname(model_file),'vnnx.input.{}.npy'.format(i)), arr.reshape(shape))
-            data['inputs'].append({'data': arr.tolist(), 'shape': shape, 'zero': zero, 'scale': scale, 'dtype': dtype.name.upper()})
-        for o,(arr,test_arr,shape,zero,scale,dtype) in enumerate(zip(odata,m.test_output,m.output_shape,m.output_zeropoint,m.output_scale_factor,m.output_dtypes)):
+            data['inputs'].append({'data': arr.tolist(), 'shape': shape, 'zero': zero, 'scale': scale, 'dtype': dtype.name.upper(), 'offset': offset})
+        for o,(arr,test_arr,shape,zero,scale,dtype,offset) in enumerate(zip(odata,m.test_output,m.output_shape,m.output_zeropoint,m.output_scale_factor,m.output_dtypes,m.output_offsets)):
             np.save(os.path.join(os.path.dirname(model_file),'vnnx.output.{}.npy'.format(o)), arr.reshape(shape))
-            data['outputs'].append({'data': arr.tolist(), 'shape': shape, 'zero': zero, 'scale': scale, 'dtype': dtype.name.upper()})
+            data['outputs'].append({'data': arr.tolist(), 'shape': shape, 'zero': zero, 'scale': scale, 'dtype': dtype.name.upper(), 'offset': offset})
             np.save(os.path.join(os.path.dirname(model_file),'test.output.{}.npy'.format(o)), test_arr.reshape(shape))
             data['test_outputs'].append({'data': test_arr.tolist(), 'shape': shape, 'zero': zero, 'scale': scale, 'dtype': dtype.name.upper()})
             try:
@@ -175,7 +191,8 @@ def main(model_file,expected_checksum,debug=False,verbose=True):
                 pass
 
         with open('io.json', 'w') as f:
-            json.dump(data, f)
+            f.write(pprint.pformat(data,compact=True).replace("'",'"'))
+            f.write('\n')
 
     if expected_checksum is not None:
         if checksum != expected_checksum:

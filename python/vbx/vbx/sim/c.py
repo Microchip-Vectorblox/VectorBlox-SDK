@@ -196,6 +196,14 @@ _so.model_get_input_zeropoint.restype = c_int
 def model_get_input_zeropoint(model,input_index):
     return _so.model_get_input_zeropoint(model,input_index)
 
+_so.model_get_input_offset.restype = c_int
+def model_get_input_offset(model,input_index):
+    return _so.model_get_input_offset(model,input_index)
+
+_so.model_get_output_offset.restype = c_int
+def model_get_output_offset(model,output_index):
+    return _so.model_get_output_offset(model,output_index)
+
 def model_check_sanity(model):
     return _so.model_check_sanity(model)
 

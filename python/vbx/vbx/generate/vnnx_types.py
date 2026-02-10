@@ -2,7 +2,7 @@ import enum
 import itertools
 import struct
 import sys
-import os.path
+import os
 import numpy as np
 import hashlib
 import numpy as np
@@ -12,7 +12,6 @@ Q32 = 27
 Q16 = 7
 Q8 = 7
 U8 = 7
-ACCUMULATORS = 64
 COEFFICIENT_BITS = 8
 INPUT_SIZE_BYTES = 1
 OUTPUT_SIZE_BYTES = 1
@@ -24,31 +23,31 @@ CORES = 1
 SHAPE_DIMS = 6
 DESCRIPTION_CHARS = 48
 
-preset_select= {"VECTOR_LANES": { "V250" : 2,
-                                  "V500"       : 4,
-                                  "V1000"      : 8,
-                                  "V2000"       : 8,
-                                  "V4000" : 8},
-                "FILTER_COPIES": { "V250" : 16,
-                                   "V500"       : 16,
-                                   "V1000"      :  32,
-                                   "V2000"       : 32,
-                                   "V4000" : 32},
-                "PARALLEL_OUTPUT_MAPS": { "V250" : 8,
-                                          "V500"       : 16,
-                                          "V1000"      : 16,
-                                          "V2000"       : 16,
-                                          "V4000" : 32},
-                "SCRATCHPAD_KB": { "V250" : 64,
-                                   "V500"       : 128,
-                                   "V1000"      : 256,
-                                   "V2000"       : 256,
-                                   "V4000" : 256},
-                "PRESET" : { "V250" : 0 ,
-                             "V500"       : 1,
-                             "V1000"      : 2,
-                             "V2000"       : 3,
-                             "V4000" : 4},
+preset_select= {"VECTOR_LANES": { "V250"    : 2,
+                                  "V500"    : 4,
+                                  "V1000"   : 8,
+                                  "V2000"   : 16,
+                                  "V4000"   : 16},
+                "FILTER_COPIES": { "V250"   : 8,
+                                   "V500"   : 8,
+                                   "V1000"  : 16,
+                                   "V2000"  : 32,
+                                   "V4000"  : 32},
+                "PARALLEL_OUTPUT_MAPS": { "V250"    : 8,
+                                          "V500"    : 16,
+                                          "V1000"   : 16,
+                                          "V2000"   : 32,
+                                          "V4000"   : 32},
+                "SCRATCHPAD_KB": { "V250"   : 32,
+                                   "V500"   : 64,
+                                   "V1000"  : 128,
+                                   "V2000"  : 256,
+                                   "V4000"  : 256},
+                "PRESET" : { "V250"     : 0 ,
+                             "V500"     : 1,
+                             "V1000"    : 2,
+                             "V2000"    : 3,
+                             "V4000"    : 4},
 }
 
 Graph_struct = [('uint32_t', 'version'),
@@ -68,6 +67,7 @@ Graph_struct = [('uint32_t', 'version'),
                 ('offset', 'replay_buffer'),
                 ('int32_t', 'replay_buffer_size'),
                 ('int32_t', 'magic'),
+                ('int32_t', 'sparsity'),
                 ]
 
 Tensor_struct = [('int32_t', 'type'),
@@ -104,12 +104,14 @@ Node_struct = [('int32_t', 'type'),
                ('int32_t', 'num_sublayers'),
                ('int32_t', 'row_start'),
                ('int32_t', 'row_last'),
+               ('int32_t', 'orow_last'),
                ('int32_t', 'row_inc'),
                ('int32_t', 'row_inc0'),
                ('int32_t', 'rows_0'),
                ('int32_t', 'rows_final'),
                ('int32_t', 'col_start'),
                ('int32_t', 'col_last'),
+               ('int32_t', 'ocol_last'),
                ('int32_t', 'col_inc'),
                ('int32_t', 'col_inc0'),
                ('int32_t', 'cols_0'),
@@ -155,9 +157,18 @@ Node_struct = [('int32_t', 'type'),
                                     ('int32_t', 'first_fia'),
                                     ('int32_t', 'last_fia'),
                                     ('int32_t', 'fia_collision'),
+                                    ('int32_t', 'repeat'),
+                                    ('int32_t', 'in_used'),
+                                    ('int32_t', 'w_used'),
+                                    ('int32_t', 'qt_used'),
+                                    ('int32_t', 'out_used'),
+                                    ('int32_t', 'sp_used'),
+                                    ('int32_t', 'fia_preloaded'),
+                                    ('int32_t', 'next_fia_preload'),
                                     ('offset', 'filter_data'),
                                     ('offset', 'bias_data'),
-                                    ('offset', 'quantization_records')],
+                                    ('offset', 'quantization_records'),
+                                    ('offset', 'nlf_data')],
                              "eltwise8": [('offset', 'input2_multiplier'),
                                           ('offset', 'input2_shift'),
                                           ('int32_t', 'input2_offset'),
@@ -176,7 +187,11 @@ Node_struct = [('int32_t', 'type'),
                                     ('int32_t', 'mxp_double_buffer'),
                                     ('offset', 'filter_data'),
                                     ('offset', 'bias_data'),
-                                    ('offset', 'quantization_records'),],
+                                    ('offset', 'quantization_records'),
+                                    ('offset', 'nlf_data')],
+                            'BatchMatMulOptions': [('int32_t', 'adj_x'),
+                                          ('int32_t', 'adj_y'),
+                                          ('int32_t', 'asym')],
                           'ConcatOptions':[('int32_t', 'axis')],
                           "PackOptions":[('int32_t', 'axis'),
                                        ('int32_t', 'count'),
@@ -193,11 +208,13 @@ Node_struct = [('int32_t', 'type'),
                           'ResizeOptions':[('float[2]', 'scale'),
                                     ('int32_t', 'mode'),
                                     ('int32_t', 'num_c_inc'),
-                                    ('offset', 'c_inc')],
+                                    ('offset', 'c_inc'),
+                                    ('int32_t', 'b_postproc_tiling')], #for bilinear only
                           'TransposeOptions':[('int32_t[3]', 'permutation'),
                                        ('int32_t','out_maps_at_once'),
                                        ('int32_t','out_rows_at_once')],
                           'SplitOptions':[('int32_t', 'axis'),
+                                     ('int32_t', 'max_split'),
                                      ('offset', 'splits')]
                          })]
 
@@ -242,9 +259,18 @@ Subnode_struct = [('int32_t', 'type'),
                                     ('int32_t', 'split_weight_shaper_buffers'),
                                     ('int32_t', 'direct_dma'),
                                     ('int32_t', 'mxp_double_buffer'),
+                                    ('int32_t', 'repeat'),
+                                    ('int32_t', 'in_used'),
+                                    ('int32_t', 'w_used'),
+                                    ('int32_t', 'qt_used'),
+                                    ('int32_t', 'out_used'),
+                                    ('int32_t', 'sp_used'),                                    
+                                    ('int32_t', 'fia_preloaded'),
+                                    ('int32_t', 'next_fia_preload'),
                                     ('offset', 'filter_data'),
                                     ('offset', 'bias_data'),
-                                    ('offset', 'quantization_records')],
+                                    ('offset', 'quantization_records'),
+                                    ('offset', 'nlf_data')],
                              'ConcatOptions':[('int32_t', 'axis')],
                              "eltwise8": [('offset', 'input2_multiplier'),
                                           ('offset', 'input2_shift'),
@@ -340,11 +366,13 @@ Subnode_struct = [('int32_t', 'type'),
                           'ResizeOptions':[('float[2]', 'scale'),
                                     ('int32_t', 'mode'),
                                     ('int32_t', 'num_c_inc'),
-                                    ('offset', 'c_inc')], #for bilinear only
+                                    ('offset', 'c_inc'),
+                                    ('int32_t', 'b_postproc_tiling')], #for bilinear only
                           'TransposeOptions':[('int32_t[3]', 'permutation'),
                                        ('int32_t','out_maps_at_once'),
                                        ('int32_t','out_rows_at_once')],
                           'SplitOptions':[('int32_t', 'axis'),
+                                     ('int32_t', 'max_split'),
                                      ('offset', 'splits')],
                             'embedding':[('int32_t[2]', 'colar_map_dims'),
                                           ('offset', 'colar_map_data')],
@@ -353,7 +381,15 @@ Subnode_struct = [('int32_t', 'type'),
                                             ('offset', 'filter_multiplier'),
                                             ('offset', 'filter_shift'),
                                             ('int32_t', 'filter_offset'),
-                                            ('offset', 'filter_data')]
+                                            ('offset', 'filter_data')],
+                          'ShaperOptions':[('int32_t', 'height'),
+                                     ('int32_t', 'height_final'),
+                                     ('int32_t', 'width'),
+                                     ('int32_t', 'shaper_height'),
+                                     ('int32_t', 'shaper_height_final'),
+                                     ('int32_t', 'shaper_width'),
+                                     ('int32_t', 'stride_height'),
+                                     ('int32_t', 'use_strided')]
                                        }
                    )]
 
@@ -453,7 +489,9 @@ class Struct:
 
         data = []
 
-        for d in ordered_data + ordered_union_data:
+        for i,d in enumerate(ordered_data + ordered_union_data):
+            if isinstance(d, np.ndarray):
+                d = d.tolist()
             if hasattr(d,'__iter__'):
                 data += d
             else:
@@ -477,6 +515,33 @@ class Struct:
     def get_structure_size(self):
         union_struct_formats = [self.fmt+ufmt for ufmt in self.union_fmt.values()]
         return max([struct.calcsize(f) for f in union_struct_formats])
+
+
+    def print_structure(self):
+        print("{} ({} bytes)".format(self.__class__.__name__, self.get_structure_size()))
+        fmt = []
+        union_fmt = {'':[]}
+
+        for typ, name in self.description:
+            if typ == "union":
+                union = name
+                for union_name in union.keys():
+                    union_names[union_name] = []
+                    for ty,nm in union[union_name]:
+                        union_fmt[union_name].append((nm, type_string_to_fmt(ty)))
+            else:
+                fmt.append((name, type_string_to_fmt(typ)))
+
+        union_struct_formats = [fmt+ufmt for ufmt in union_fmt.values()]
+
+        get_format = lambda l: '<' + ''.join([fmt for nm,fmt in l])
+        sizes = [struct.calcsize(get_format(f)) for f in union_struct_formats]
+        max_idx = sizes.index(max(sizes))
+
+        offset = 0
+        for name, fmt in union_struct_formats[max_idx]:
+            print("\t{} ({})".format(name, offset))
+            offset += struct.calcsize(fmt)
 
 
 class Graph(Struct):
@@ -656,7 +721,8 @@ class VNNXOperator(enum.IntEnum):
     PREFETCH = 302
     LUT = 303
     PIXEL_SHUFFLE = 304
-    UNKNOWN = 305
+    OUTPUT_SHAPER = 305
+    UNKNOWN = 306
 
     def from_str(e):
         e = e.upper()
@@ -670,6 +736,8 @@ class VNNXOperator(enum.IntEnum):
             return VNNXOperator.LUT
         if e == "PIXEL_SHUFFLE":
             return VNNXOperator.PIXEL_SHUFFLE
+        if e == "OUTPUT_SHAPER":
+            return VNNXOperator.OUTPUT_SHAPER
         return VNNXOperator.UNKNOWN
 
 
@@ -885,6 +953,7 @@ class BuiltinOperator(enum.IntEnum):
 def enum_to_union_name(e):
     union_names = [(BuiltinOperator.CONV_2D, "Conv2DOptions"),
                    (BuiltinOperator.FULLY_CONNECTED, "FullyConnectedOptions"),
+                   (BuiltinOperator.BATCH_MATMUL, "BatchMatMulOptions"),
                    (BuiltinOperator.CONCATENATION, "ConcatOptions"), 
                    (VNNXOperator.ELTWISE, "eltwise8"),
                    (VNNXOperator.PIXEL_SHUFFLE, "PixelShuffleOptions"),
@@ -915,6 +984,7 @@ def enum_to_union_name(e):
                    (BuiltinOperator.LOG, "ActivationOptions"),
                    (BuiltinOperator.GELU, "ActivationOptions"),
                    (VNNXOperator.LUT, "ActivationOptions"),
+                   (VNNXOperator.OUTPUT_SHAPER, "ShaperOptions"),
                    (BuiltinOperator.LOGISTIC, "ActivationOptions"),
                    (BuiltinOperator.HARD_SWISH, "ActivationOptions"),
                    (BuiltinOperator.RSQRT, "ActivationOptions"),

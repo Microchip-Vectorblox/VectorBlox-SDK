@@ -11,7 +11,7 @@ import pprint
 import shutil
 import json
 
-from .utils import match_shape, calc_diff, generate_inputs_outputs
+from .utils import match_shape, calc_diff, generate_inputs_outputs, get_input_details, get_output_details
 from .split_tflite import generate_split_graphs
 
 import subprocess
@@ -20,16 +20,6 @@ import natsort
 
 DEBUG=0
 
-def get_input_details(model):
-    interpreter= tf.lite.Interpreter(
-             model_path=model)
-    return interpreter.get_input_details()
-
-
-def get_output_details(model):
-    interpreter= tf.lite.Interpreter(
-             model_path=model)
-    return interpreter.get_output_details()
 
 def get_input_data(input_file, width, height, channels, mean, scale, rgb):
     img = cv2.imread(input_file)
@@ -57,8 +47,9 @@ def get_tflite_io(tflite_model, input_files, subdir, mean=0., scale=1., rgb=Fals
     interpreter= tf.lite.Interpreter(
              model_path=tflite_model)
     interpreter.allocate_tensors()
-    input_details = interpreter.get_input_details()
-    output_details = interpreter.get_output_details()
+
+    input_details = get_input_details(tflite_model)
+    output_details = get_output_details(tflite_model)
 
     inputs = {}
     for i,input_detail in enumerate(input_details):
@@ -204,9 +195,9 @@ def print_diff(src_name, dst_name, src, dst, info, verbose):
         print()
 
 
-def compare_tflite(tflite_graph_name, size_conf='V1000', error_rate_threshold=0, error_threshold=1, verbose=False):
+def compare_tflite(tflite_graph_name, size_conf='V1000', compression_vbx='ncomp', error_rate_threshold=0, error_threshold=1, verbose=False):
     if verbose:
-        print(tflite_graph_name)
+        print(os.path.basename(tflite_graph_name))
     with open(tflite_graph_name, 'rb') as f:
         tflite_model_binary = f.read()
         # run tflite with tf inputs to get tflite outputs
@@ -225,7 +216,7 @@ def compare_tflite(tflite_graph_name, size_conf='V1000', error_rate_threshold=0,
                 npy_output_name = tflite_graph_name.replace('.tflite', '.' + outp_name + '.npy')
                 np.save(npy_output_name, outp)
         vnnx_graph_name = tflite_graph_name.replace('.tflite', '.vnnx')
-        cmd = 'vnnx_compile -c {} -t {} -i {} -o {}'.format(size_conf, tflite_graph_name, tfl_in_files, vnnx_graph_name)
+        cmd = 'vnnx_compile -s {} -c {} -t {} -i {} -o {}'.format(size_conf, compression_vbx, tflite_graph_name, tfl_in_files, vnnx_graph_name)
         log = []
         try:
             res = subprocess.run(cmd, shell=True, capture_output=True)
@@ -237,9 +228,16 @@ def compare_tflite(tflite_graph_name, size_conf='V1000', error_rate_threshold=0,
             return
         cmd = 'python -m vbx.sim {} -d'.format(vnnx_graph_name)
         log = []
+        checksum = ''
         try:
             res = subprocess.run(cmd, shell=True, capture_output=True)
             log.append(res.stderr)
+            for line in res.stdout.decode('utf-8').split('\n'):
+                if 'CHECKSUM' in line:
+                    checksum = line
+                    if verbose:
+                        print(checksum)
+     
         except:
             print(log)
             return
@@ -272,7 +270,9 @@ def compare_tflite(tflite_graph_name, size_conf='V1000', error_rate_threshold=0,
             all_within_threshold, abs_diff, total_vals_diff, counter = calc_diff(output, tfl_out, error_threshold)
             error_rate = total_vals_diff / np.prod(output.shape) * 100
             if not all_within_threshold and error_rate > error_rate_threshold:
-                print('\n{} #diff > {}: {} ({:3.2f}%), max_diff: {}'.format(os.path.basename(tflite_graph_name), error_threshold, total_vals_diff, error_rate, np.max(abs_diff)))
+                print('\n{} #diff > {}: {} ({:3.2f}%), max_diff: {} {}'.format(os.path.basename(tflite_graph_name), error_threshold, total_vals_diff, error_rate, np.max(abs_diff), checksum))
+                if len(vnnx_model.output_shape[0]) != 4 or vnnx_model.output_dtypes[0] != np.dtype('int8'):
+                    print('WARNING dims != 4 or dtype != INT8. False - ?')
                 if verbose:
                     pprint.pprint([("Diff", "Count"), sorted(counter.items())], width=20, sort_dicts=True)
 
@@ -296,11 +296,13 @@ def compare_tflite(tflite_graph_name, size_conf='V1000', error_rate_threshold=0,
 def compare():
     parser = argparse.ArgumentParser()
     parser.add_argument('tflite', type=existing_file)
-    parser.add_argument('-c', '--size-conf', help='size configuration to build model for',
+    parser.add_argument('-s', '--size-conf', help='size configuration to build model for',
                         choices = ['V250','V500','V1000'], default='V1000')
+    parser.add_argument('-c', '--compression-vbx', help='compression config to build model for',
+                        choices = ['ncomp','comp','ucomp'], default='V1000')                        
     parser.add_argument('-e', '--error-rate', type=int, default=0)
     parser.add_argument('-t', '--error-threshold',  type=int, default=1)
-    parser.add_argument('-s', '--split-every-op', action='store_true')
+    parser.add_argument('--split-every-op', action='store_true')
     parser.add_argument("-v", "--verbose", action='store_true', help='Prints all activations, even those with less than 1% off-by-one')
     args = parser.parse_args()
 
@@ -308,7 +310,7 @@ def compare():
         shutil.rmtree('./subgraphs', ignore_errors=True)
     generate_split_graphs(args.tflite, './', split_every_op=args.split_every_op)
     for t in natsort.natsorted(glob.glob(os.path.join('./subgraphs', '*.tflite'))):
-        compare_tflite(t, args.size_conf, args.error_rate, args.error_threshold, args.verbose)
+        compare_tflite(t, args.size_conf, args.compression_vbx, args.error_rate, args.error_threshold, args.verbose)
 
 
 def main():

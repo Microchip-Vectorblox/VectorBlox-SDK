@@ -4,7 +4,7 @@ function install_venv() {
     $PYTHON_EXE -m venv  $SCRIPTDIR/vbx_env
     source $SCRIPTDIR/vbx_env/bin/activate
 
-    python -m pip install --upgrade pip
+    python -m pip install "pip<23.1"
     python -m pip install --upgrade setuptools
     python -m pip install wheel 
     python -m pip install psutil==5.9.5
@@ -47,6 +47,7 @@ function install_venv() {
     python -m pip install onnxslim==0.1.32
     python -m pip install XlsxWriter
     python -m pip install prtpy==0.8.1
+    python -m pip install orjson
     python -m pip install -e $SCRIPTDIR/python/vbx
 	
 	python -m pip install posix-ipc
@@ -94,9 +95,11 @@ if has_python && has_installed; then
 	echo ""
 	echo "export VBX_SDK="$VBX_SDK
 	echo ""
-	export NX_SDK=$SCRIPTDIR/../../../../../tsnp_software/
+	export NX_SDK=$SCRIPTDIR/snp_compiler/
+	echo ""
+	echo "export NX_SDK="$NX_SDK
+	echo ""
 	export TF_CPP_MIN_LOG_LEVEL=3
-
 
 	echo "VBX Python Environment ready. Activating..."
 	source $VBX_SDK/vbx_env/bin/activate

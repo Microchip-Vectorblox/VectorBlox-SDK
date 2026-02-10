@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v2.0                                                   #
+# v3.0                                                   #
 #                                                        #
 ##########################################################
 
@@ -71,15 +71,15 @@ if [ -f deeplabv3.cut.pre.tflite ]; then
 fi
 
 if [ -f deeplabv3.cut.pre.post.tflite ]; then
-    echo "Generating VNNX for V1000 configuration..."
-    vnnx_compile -c V1000 -t deeplabv3.cut.pre.post.tflite -o deeplabv3.vnnx
+    echo "Generating VNNX for V1000 ncomp configuration..."
+    vnnx_compile -s V1000 -c ncomp -t deeplabv3.cut.pre.post.tflite  -o deeplabv3_V1000_ncomp.vnnx
 fi
 
-if [ -f deeplabv3.vnnx ]; then
+if [ -f deeplabv3_V1000_ncomp.vnnx ]; then
     echo "Running Simulation..."
-    python $VBX_SDK/example/python/segmentation.py deeplabv3.vnnx $VBX_SDK/tutorials/test_images/A0PQ76.jpg --dataset VOC --inj 
+    python $VBX_SDK/example/python/segmentation.py deeplabv3_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/A0PQ76.jpg --dataset VOC --inj 
     echo "C Simulation Command:"
-    echo '$VBX_SDK/example/sim-c/sim-run-model deeplabv3.vnnx $VBX_SDK/tutorials/test_images/A0PQ76.jpg  '
+    echo '$VBX_SDK/example/sim-c/sim-run-model deeplabv3_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/A0PQ76.jpg  '
 fi
 
 deactivate

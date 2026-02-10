@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v2.0                                                   #
+# v3.0                                                   #
 #                                                        #
 ##########################################################
 
@@ -32,15 +32,15 @@ if [ -f XLSR-Quantized.tflite ]; then
 fi
 
 if [ -f XLSR-Quantized.pre.tflite ]; then
-    echo "Generating VNNX for V1000 configuration..."
-    vnnx_compile -c V1000 -t XLSR-Quantized.pre.tflite -o XLSR-Quantized.vnnx
+    echo "Generating VNNX for V1000 ncomp configuration..."
+    vnnx_compile -s V1000 -c ncomp -t XLSR-Quantized.pre.tflite  -o XLSR-Quantized_V1000_ncomp.vnnx
 fi
 
-if [ -f XLSR-Quantized.vnnx ]; then
+if [ -f XLSR-Quantized_V1000_ncomp.vnnx ]; then
     echo "Running Simulation..."
-    python $VBX_SDK/example/python/super_resolution.py XLSR-Quantized.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg 
+    python $VBX_SDK/example/python/super_resolution.py XLSR-Quantized_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg 
     echo "C Simulation Command:"
-    echo '$VBX_SDK/example/sim-c/sim-run-model XLSR-Quantized.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg  '
+    echo '$VBX_SDK/example/sim-c/sim-run-model XLSR-Quantized_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg  '
 fi
 
 deactivate

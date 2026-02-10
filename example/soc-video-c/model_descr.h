@@ -12,7 +12,10 @@ struct model_descr_t{
     const char *fname;
     int spi_offset;
     const char* post_process_type;
-    model_t* model;
+    uint8_t* model_header;
+	model_t* model;
+	model_t* tsnp_model;
+	uint32_t input_offset;
     short modelSetup_done;
     int time_ms;
     vbx_cnn_io_ptr_t* model_io_buffers;

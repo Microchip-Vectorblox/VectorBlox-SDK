@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v2.0                                                   #
+# v3.0                                                   #
 #                                                        #
 ##########################################################
 
@@ -40,15 +40,15 @@ if [ -f yolov8n-pose.cut.tflite ]; then
 fi
 
 if [ -f yolov8n-pose.cut.pre.tflite ]; then
-    echo "Generating VNNX for V1000 configuration..."
-    vnnx_compile -c V1000 -t yolov8n-pose.cut.pre.tflite -o yolov8n-pose.vnnx
+    echo "Generating VNNX for V1000 ncomp configuration..."
+    vnnx_compile -s V1000 -c ncomp -t yolov8n-pose.cut.pre.tflite  -o yolov8n-pose_V1000_ncomp.vnnx
 fi
 
-if [ -f yolov8n-pose.vnnx ]; then
+if [ -f yolov8n-pose_V1000_ncomp.vnnx ]; then
     echo "Running Simulation..."
-    python $VBX_SDK/example/python/ultralytics.py yolov8n-pose.vnnx $VBX_SDK/tutorials/test_images/ski.273.481.jpg --task pose -nc 1 
+    python $VBX_SDK/example/python/ultralyticsInfer.py yolov8n-pose_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/ski.273.481.jpg --task pose -nc 1 
     echo "C Simulation Command:"
-    echo '$VBX_SDK/example/sim-c/sim-run-model yolov8n-pose.vnnx $VBX_SDK/tutorials/test_images/ski.273.481.jpg  '
+    echo '$VBX_SDK/example/sim-c/sim-run-model yolov8n-pose_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/ski.273.481.jpg  '
 fi
 
 deactivate

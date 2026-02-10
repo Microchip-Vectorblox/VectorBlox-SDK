@@ -1,6 +1,7 @@
 #include "postprocess.h"
 #include "vbx_cnn_api.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <string>
 #include <sys/time.h>
@@ -22,7 +23,10 @@ extern "C" int resize_image(uint8_t *image_in, int in_w, int in_h,
 #endif
 #define TEST_OUT 0
 #define INT8FLAG 1
-#define WRITE_OUT 0
+
+#ifndef NUM_LOOPS
+#define NUM_LOOPS 1
+#endif
 
 static inline void* virt_to_phys(vbx_cnn_t* vbx_cnn,void* virt){
 	return (char*)(virt) + vbx_cnn->dma_phys_trans_offset;
@@ -87,8 +91,56 @@ void* read_image(const char* filename, const int channels, const int height, con
 	return resized_planar_img;
 }
 
-
-
+ucomp_model_t *read_ucompmodel_file(vbx_cnn_t *vbx_cnn, const char *filename) {
+	ucomp_model_t *model_info = (ucomp_model_t*)malloc(sizeof(ucomp_model_t));
+	FILE *model_file = fopen(filename, "r");
+	if (model_file == NULL) {
+		return NULL;
+	}
+	fseek(model_file, 0, SEEK_END);
+	int file_size = ftell(model_file);
+	fseek(model_file, 0, SEEK_SET);
+	model_t *model = (model_t *)malloc(file_size);
+	int size_read = fread(model, 1, file_size, model_file);
+	if (size_read != file_size) {
+		fprintf(stderr, "Error reading full model file %s\n", filename);
+		return NULL;
+	}
+	fclose(model_file);
+	
+	// Read binary header information
+	uint32_t header_size = *((uint32_t*)model);
+	uint32_t mxp_model_size  = *((uint32_t*)model + 1);
+	uint32_t tsnp_model_size = *((uint32_t*)model + 2);
+	
+	// Copy header information
+	model_info->header_info = (uint8_t*)vbx_allocate_dma_buffer(vbx_cnn, header_size, 0);
+	if (model_info->header_info) {
+		memcpy(model_info->header_info, model, header_size);
+	} else {
+		return 0;
+	}
+	
+	// Copy mxp version of the model
+	uint32_t model_allocate_size = model_get_allocate_bytes((model_t*)((char*)model + header_size));
+	model_info->mxp_model = (model_t*)vbx_allocate_dma_buffer(vbx_cnn, model_allocate_size, 0);
+	if (model_info->mxp_model) {
+		memcpy(model_info->mxp_model, (model_t*)((char*)model + header_size), mxp_model_size);
+	} else {
+		return NULL;
+	}
+	
+	// Copy tsnp version of the model with 4096 byte alignment
+	model_info->tsnp_model = (model_t*)vbx_allocate_dma_buffer(vbx_cnn, tsnp_model_size, 12);
+	if (model_info->tsnp_model) {
+		memcpy(model_info->tsnp_model, (model_t*)((char*)model + header_size + mxp_model_size), tsnp_model_size);
+	} else {
+		return NULL;
+	}	
+	
+	free(model);
+	return model_info;
+}
 
 model_t *read_model_file(vbx_cnn_t *vbx_cnn, const char *filename) {
 	FILE *model_file = fopen(filename, "r");
@@ -148,16 +200,36 @@ int main(int argc, char **argv) {
 		fprintf(stderr, "Unable to initialize vbx_cnn. Exiting\n");
 		exit(1);
 	}
-	model_t *model = read_model_file(vbx_cnn, argv[1]);
+	
+	model_t *model;
+	model_t *tsnp_model = NULL;
+	uint8_t *model_header = NULL;
+	uint32_t input_offset = 0;
+	if (vbx_cnn->comp_config == 2) {
+		ucomp_model_t *ucomp_model = read_ucompmodel_file(vbx_cnn, argv[1]);
+		model = ucomp_model->mxp_model;
+		tsnp_model = ucomp_model->tsnp_model;
+		model_header = ucomp_model->header_info;
+		input_offset = *((uint32_t*)model_header + 6);
+	} else {
+		model = read_model_file(vbx_cnn, argv[1]);
+	}
 	if (!model) {
 		fprintf(stderr, "Unable to correctly read %s. Exiting\n", argv[1]);
 		exit(1);
 	}
-	if (model_check_sanity(model) != 0) {
-		printf("Model %s is not sane\n", argv[1]);
-	};
+	int verify_model = model_check_configuration(model, vbx_cnn);
+	if (verify_model == -1) {
+		printf("Model %s version mismatch. Please generate the model with appropriate version of VBX_SDK \n", argv[1]);
+		exit(1);
+	} else if (verify_model == -2) {
+		printf("Model %s and VBX_CORE compression configuration mismatch. Make sure the compression configuration is set properly when the model is generated. \n", argv[1]);
+		exit(1);
+	} else if (verify_model == -3) {
+		printf("Model %s and VBX_CORE size configuration mismatch. Make sure the size configuration is set properly when the model is generated. \n", argv[1]);
+		exit(1);
+	}
 	int total_size = 32*1024*1024; //#TODO Check limit size in comparison
-	
 	
 	uint64_t pdma_out = pdma_mmap(total_size);
 	int32_t pdma_channel = pdma_ch_open();
@@ -172,6 +244,7 @@ int main(int argc, char **argv) {
 		}
 	}
 	
+	unsigned expected_checksum = 0;
 	if(argc > 2){
 		if(std::string(argv[2]) != "TEST_DATA"){
 			printf("Reading %s\n", argv[2]);
@@ -189,32 +262,59 @@ int main(int argc, char **argv) {
 				read_buffer = read_image(argv[2], input_shape[dims-3], input_shape[dims-2], input_shape[dims-1], input_datatype,use_bgr);
 				memcpy(input_buffer, read_buffer, input_length);
 				io_buffers[i] = (vbx_cnn_io_ptr_t)input_buffer;
-#if 0
-				fix16_t scale = (fix16_t)model_get_input_scale_fix16_value(model,i); // input scale * 255 (as inputs are 0-255 not 0-1.
-				int32_t zero_point = model_get_input_zeropoint(model,i); 
-				int8_t* input = (int8_t*)io_buffers[i];
-				preprocess_inputs((uint8_t*)input, scale, zero_point,(int)model_get_input_length(model, i),0);
-#endif
 			}
 		}
 		else {
-		for (unsigned i = 0; i < model_get_num_inputs(model); ++i) {
-			io_buffers[i] = (vbx_cnn_io_ptr_t)(uint8_t*)model_get_test_input(model,i);
-		}
+			for (unsigned i = 0; i < model_get_num_inputs(model); ++i) {
+				io_buffers[i] = (vbx_cnn_io_ptr_t)(uint8_t*)model_get_test_input(model,i);
+			}
+			int output_bytes = model_get_output_datatype(model,0) == VBX_CNN_CALC_TYPE_INT16 ? 2 : 1;
+			if (model_get_output_datatype(model,0) == VBX_CNN_CALC_TYPE_INT32) output_bytes = 4;
+			expected_checksum = fletcher32((uint16_t*)model_get_test_output(model, 0), model_get_output_length(model, 0)*output_bytes/sizeof(uint16_t));
+			for(unsigned o =1;o<model_get_num_outputs(model);++o){
+				output_bytes = model_get_output_datatype(model,o) == VBX_CNN_CALC_TYPE_INT16 ? 2 : 1;
+				if (model_get_output_datatype(model,o) == VBX_CNN_CALC_TYPE_INT32) output_bytes = 4;
+				expected_checksum ^= fletcher32((uint16_t*)model_get_test_output(model, o), model_get_output_length(model, o)*output_bytes/sizeof(uint16_t));
+			}
 		}
 	} else {
 		for (unsigned i = 0; i < model_get_num_inputs(model); ++i) {
 			io_buffers[i] = (vbx_cnn_io_ptr_t)(uint8_t*)model_get_test_input(model,i);
 		}
-	}
-	for (unsigned o = 0; o < model_get_num_outputs(model); ++o) {
-		io_buffers[model_get_num_inputs(model) + o] = (vbx_cnn_io_ptr_t)vbx_allocate_dma_buffer(
-				vbx_cnn, model_get_output_length(model, o) * sizeof(uint32_t), 0);
-		if(!io_buffers[model_get_num_inputs(model) + o]){
-			fprintf(stderr,"Model io_buffer requested exceeds buffer length.\n");
-			exit(1);
+		int output_bytes = model_get_output_datatype(model,0) == VBX_CNN_CALC_TYPE_INT16 ? 2 : 1;
+		if (model_get_output_datatype(model,0) == VBX_CNN_CALC_TYPE_INT32) output_bytes = 4;
+		expected_checksum = fletcher32((uint16_t*)model_get_test_output(model, 0), model_get_output_length(model, 0)*output_bytes/sizeof(uint16_t));
+		for(unsigned o =1;o<model_get_num_outputs(model);++o){
+			output_bytes = model_get_output_datatype(model,o) == VBX_CNN_CALC_TYPE_INT16 ? 2 : 1;
+			if (model_get_output_datatype(model,o) == VBX_CNN_CALC_TYPE_INT32) output_bytes = 4;
+			expected_checksum ^= fletcher32((uint16_t*)model_get_test_output(model, o), model_get_output_length(model, o)*output_bytes/sizeof(uint16_t));
 		}
 	}
+	unsigned num_outputs = model_get_num_outputs(model);
+	for (unsigned o = 0; o < num_outputs; ++o) {
+		if (vbx_cnn->comp_config == 2) {
+			uint32_t output_length = model_get_output_length(model, o);
+			unsigned j;
+			uint32_t output_offset = 0;
+			for(j = 0; j < num_outputs; j++) {
+				uint32_t output_size = *((uint32_t*)model_header + 7 + (2 * j));
+				output_offset = *((uint32_t*)model_header + 8 + (2 * j));
+				if (output_length == output_size) {
+					break;
+				}
+			}
+			io_buffers[model_get_num_inputs(model) + o] = (vbx_cnn_io_ptr_t)((uint32_t)(uintptr_t)model + output_offset);
+		} else {
+			io_buffers[model_get_num_inputs(model) + o] = (vbx_cnn_io_ptr_t)vbx_allocate_dma_buffer(
+					vbx_cnn, model_get_output_length(model, o) * sizeof(uint32_t), 0);
+			if(!io_buffers[model_get_num_inputs(model) + o]){
+				fprintf(stderr,"Model io_buffer requested exceeds buffer length.\n");
+				exit(1);
+			}
+			memset((void *)(io_buffers[model_get_num_inputs(model) + o]), 0, (size_t)(model_get_output_length(model, o) * sizeof(uint32_t)));
+		}
+	}
+		
 #if USE_INTERRUPTS
 	enable_interrupt(vbx_cnn);
 #endif
@@ -227,23 +327,43 @@ int main(int argc, char **argv) {
 	//we can run the model.
 #else
 	printf("Starting inference runs\n");
-	for(int run=0; run < 1; ++run){
-		struct timeval tv1, tv2;
-		gettimeofday(&tv1, NULL);
-		int status = vbx_cnn_model_start(vbx_cnn, model, io_buffers);
+	struct timeval tv1, tv2;
+	gettimeofday(&tv1, NULL);
+	for(int run = 0; run < NUM_LOOPS; ++run){
+		int status;
+		if (vbx_cnn->comp_config == 2) {
+			status = vbx_tsnp_model_start(vbx_cnn, model, tsnp_model, input_offset, io_buffers);
+		} else {
+			status = vbx_cnn_model_start(vbx_cnn, model, io_buffers);
+		}
 #if USE_INTERRUPTS
 		status = vbx_cnn_model_wfi(vbx_cnn);
 #else
 		while(vbx_cnn_model_poll(vbx_cnn) > 0);
 #endif
-		gettimeofday(&tv2, NULL);
 		if (status < 0) {
 			printf("Model failed with error %d\n", vbx_cnn_get_error_val(vbx_cnn));
 		}	
-		printf("network took %3.4f ms\n", gettimediff_us(tv1, tv2) * 1.0 / 1000);
-
 	}
+	gettimeofday(&tv2, NULL);
+	printf("network took %3.4f ms (%3.2f FPS) over %d cycles\n", gettimediff_us(tv1, tv2) * 1.0 / 1000 / NUM_LOOPS, 1000./(gettimediff_us(tv1, tv2) * 1.0 / 1000 / NUM_LOOPS), NUM_LOOPS);
 #endif
+#if INT8FLAG
+	// users can modify this post-processing function in post_process.c
+	vbx_cnn_io_ptr_t pdma_buffer[model_get_num_outputs(model)];
+	int output_offset=0;
+	for(int o =0; o<(int)model_get_num_outputs(model);o++){
+#if !TEST_OUT
+		int output_length = model_get_output_length(model, o);
+		pdma_ch_transfer(pdma_out, (void*)io_buffers[model_get_num_inputs(model)+o], output_offset, output_length, vbx_cnn, pdma_channel);
+		pdma_buffer[o] = (vbx_cnn_io_ptr_t)(pdma_mmap_t + output_offset);
+		output_offset+= output_length;
+#else
+		pdma_buffer[o] = (vbx_cnn_io_ptr_t)model_get_test_output(model, o);
+#endif
+	}
+	if (argc > 3) pprint_post_process(argv[1], argv[3], model, (fix16_t**)(uintptr_t)pdma_buffer,1,0);
+#else	
 	fix16_t* fix16_output_buffers[model_get_num_outputs(model)];
 	for (int o = 0; o < (int)model_get_num_outputs(model); ++o){
 		int size=model_get_output_length(model, o);
@@ -251,41 +371,41 @@ int main(int argc, char **argv) {
 		int32_t zero_point = model_get_output_zeropoint(model,o); // get output zero
 		fix16_output_buffers[o] = (fix16_t*)malloc(size*sizeof(fix16_t));
 		int8_to_fix16(fix16_output_buffers[o], (int8_t*)io_buffers[model_get_num_inputs(model)+o], size, scale, zero_point);
-	}	
-	// users can modify this post-processing function in post_process.c
-	vbx_cnn_io_ptr_t pdma_buffer[model_get_num_outputs(model)];
-	for(int i =0; i<(int)model_get_num_inputs(model);i++){
-		pdma_buffer[i]=0;
 	}
-	int output_offset=0;
-
-	
-	for(int o =0; o<(int)model_get_num_outputs(model);o++){
-		int output_length = model_get_output_length(model, o);
-		pdma_ch_transfer(pdma_out,(void*)io_buffers[model_get_num_inputs(model)+o],output_offset,model_get_output_length(model, o),vbx_cnn,pdma_channel);
-		pdma_buffer[o] = (vbx_cnn_io_ptr_t)(pdma_mmap_t + output_offset);
-		output_offset+= output_length;
-	}
-
-#if INT8FLAG	
-	if (argc > 3) pprint_post_process(argv[1], argv[3], model, (fix16_t**)(uintptr_t)pdma_buffer,1,0);
-#else	
 	if (argc > 3) pprint_post_process(argv[1], argv[3], model, fix16_output_buffers,0,0);
 #endif
-
+	
 	int output_bytes = model_get_output_datatype(model,0) == VBX_CNN_CALC_TYPE_INT16 ? 2 : 1;
 	if (model_get_output_datatype(model,0) == VBX_CNN_CALC_TYPE_INT32) output_bytes = 4;
-	unsigned checksum = fletcher32((uint16_t*)(io_buffers[model_get_num_inputs(model)]),model_get_output_length(model, 0)*output_bytes/sizeof(uint16_t));
+	unsigned checksum = 0;
+	int size_of_output_in_bytes = model_get_output_length(model, 0)*output_bytes;
+	size_of_output_in_bytes += (size_of_output_in_bytes % sizeof(uint16_t)); // output buffers are init to uint32_t, OK to increase byte if odd (can only happen if int8)
+	if (vbx_cnn->comp_config == 2) {
+		checksum = fletcher32((uint16_t*)pdma_buffer[0], size_of_output_in_bytes/sizeof(uint16_t));
+	}
+	else {
+		checksum = fletcher32((uint16_t*)(io_buffers[model_get_num_inputs(model)]),size_of_output_in_bytes/sizeof(uint16_t));
+	}
 	for(unsigned o =1;o<model_get_num_outputs(model);++o){
 		int output_bytes = model_get_output_datatype(model,o) == VBX_CNN_CALC_TYPE_INT16 ? 2 : 1;
-		if (model_get_output_datatype(model,0) == VBX_CNN_CALC_TYPE_INT32) output_bytes = 4;
-		checksum ^= fletcher32((uint16_t*)io_buffers[model_get_num_inputs(model)+o], model_get_output_length(model, o)*output_bytes/sizeof(uint16_t));
+		if (model_get_output_datatype(model,o) == VBX_CNN_CALC_TYPE_INT32) output_bytes = 4;
+		int size_of_output_in_bytes = model_get_output_length(model, o)*output_bytes;
+		size_of_output_in_bytes += (size_of_output_in_bytes % sizeof(uint16_t));
+		if (vbx_cnn->comp_config == 2) {
+			checksum ^= fletcher32((uint16_t*)pdma_buffer[o], size_of_output_in_bytes/sizeof(uint16_t));
+		} else {
+			checksum ^= fletcher32((uint16_t*)io_buffers[model_get_num_inputs(model)+o], size_of_output_in_bytes/sizeof(uint16_t));
+		}
 	}
-	printf("CHECKSUM = %08x\n",checksum);
-	if(WRITE_OUT || (argc<=3 && !strcmp(argv[1],"test.vnnx"))){
+	printf("CHECKSUM = %08x \n", checksum);
+	if(argc>=3){
+		if ((expected_checksum != checksum) && (std::string(argv[2]) == "TEST_DATA")) {
+			printf("Checksum mismatch for the model %s: expected = %08x, actual = %08x \n", argv[1], expected_checksum, checksum);
+		}
+	}
+	if(getenv("WRITE_OUT") != NULL || (argc<=3 && !strcmp(argv[1],"test.vnnx"))){
 		print_json(model,io_buffers,INT8FLAG);
 	}
 	if (read_buffer) free(read_buffer);
-
 	return 0;
 }

@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v2.0                                                   #
+# v3.0                                                   #
 #                                                        #
 ##########################################################
 
@@ -32,15 +32,15 @@ if [ -f QuickSRNetLarge-Quantized.tflite ]; then
 fi
 
 if [ -f QuickSRNetLarge-Quantized.pre.tflite ]; then
-    echo "Generating VNNX for V1000 configuration..."
-    vnnx_compile -c V1000 -t QuickSRNetLarge-Quantized.pre.tflite -o QuickSRNetLarge-Quantized.vnnx
+    echo "Generating VNNX for V1000 ncomp configuration..."
+    vnnx_compile -s V1000 -c ncomp -t QuickSRNetLarge-Quantized.pre.tflite  -o QuickSRNetLarge-Quantized_V1000_ncomp.vnnx
 fi
 
-if [ -f QuickSRNetLarge-Quantized.vnnx ]; then
+if [ -f QuickSRNetLarge-Quantized_V1000_ncomp.vnnx ]; then
     echo "Running Simulation..."
-    python $VBX_SDK/example/python/super_resolution.py QuickSRNetLarge-Quantized.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg 
+    python $VBX_SDK/example/python/super_resolution.py QuickSRNetLarge-Quantized_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg 
     echo "C Simulation Command:"
-    echo '$VBX_SDK/example/sim-c/sim-run-model QuickSRNetLarge-Quantized.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg  '
+    echo '$VBX_SDK/example/sim-c/sim-run-model QuickSRNetLarge-Quantized_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg  '
 fi
 
 deactivate

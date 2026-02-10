@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v2.0                                                   #
+# v3.0                                                   #
 #                                                        #
 ##########################################################
 
@@ -59,15 +59,15 @@ if [ -f yolov5n.tflite ]; then
 fi
 
 if [ -f yolov5n.pre.tflite ]; then
-    echo "Generating VNNX for V1000 configuration..."
-    vnnx_compile -c V1000 -t yolov5n.pre.tflite -o yolov5n.vnnx
+    echo "Generating VNNX for V1000 ncomp configuration..."
+    vnnx_compile -s V1000 -c ncomp -t yolov5n.pre.tflite  -o yolov5n_V1000_ncomp.vnnx
 fi
 
-if [ -f yolov5n.vnnx ]; then
+if [ -f yolov5n_V1000_ncomp.vnnx ]; then
     echo "Running Simulation..."
-    python $VBX_SDK/example/python/yoloInfer.py yolov5n.vnnx $VBX_SDK/tutorials/test_images/dog.jpg -j yolov5n.json -v 5 -l coco.names -t 0.25 
+    python $VBX_SDK/example/python/yoloInfer.py yolov5n_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/dog.jpg -j yolov5n.json -v 5 -l coco.names -t 0.25 
     echo "C Simulation Command:"
-    echo '$VBX_SDK/example/sim-c/sim-run-model yolov5n.vnnx $VBX_SDK/tutorials/test_images/dog.jpg  '
+    echo '$VBX_SDK/example/sim-c/sim-run-model yolov5n_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/dog.jpg  '
 fi
 
 deactivate
