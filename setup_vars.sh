@@ -5,7 +5,7 @@ function install_venv() {
     source $SCRIPTDIR/vbx_env/bin/activate
 
     python -m pip install "pip<23.1"
-    python -m pip install --upgrade setuptools
+    python -m pip install "setuptools<=68.2.2"
     python -m pip install wheel 
     python -m pip install psutil==5.9.5
     python -m pip install onnx==1.16.1
