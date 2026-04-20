@@ -12,6 +12,9 @@ Summary of key changes in the current release.
 ### Inference Simulation
 [inference_simulation](./inference_simulation.md) provides instructions and example scripts for running classification, object detection, and pose detection models on the VBX simulator using both C and Python.
 
+### Known Issues
+[known_issues](./known_issues.md) provides a list of currently known bugs and workarounds across VectorBlox
+
 ### Operators
 [OPS](./OPS.md) lists the currently supported operators
 
