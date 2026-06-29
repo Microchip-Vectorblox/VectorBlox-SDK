@@ -37,11 +37,17 @@ def preprocess_img_to_input_array(img, model, bgr, preprocess_scale=1, preproces
             data = json.load(f)
             input_shape = data['inputs'][0]['shape']            
 
-            channels_last = input_shape[-1] < input_shape[-3]
-            if channels_last:
-                channels, input_height, input_width = input_shape[-1], input_shape[-3], input_shape[-2]
-            else:
-                channels, input_height, input_width = input_shape[-3], input_shape[-2], input_shape[-1]
+            channels_last = False
+            if len(input_shape) == 2:
+                channels, input_height, input_width = 1, 1,input_shape[-1]
+            elif len(input_shape) == 3:
+                channels, input_height, input_width = 1, input_shape[-2],input_shape[-1]
+            elif len(input_shape) == 4:
+                channels_last = input_shape[-1] < input_shape[-3]
+                if channels_last:
+                    channels, input_height, input_width = input_shape[-1], input_shape[-3], input_shape[-2]
+                else:
+                    channels, input_height, input_width = input_shape[-3], input_shape[-2], input_shape[-1]
 
             v_idx = [-1] + [i for i,_ in enumerate(model) if _ == 'v']
             t_idx = [-1] + [i for i,_ in enumerate(model) if _ == 't']
@@ -98,7 +104,7 @@ def preprocess_img_to_input_array(img, model, bgr, preprocess_scale=1, preproces
     else:
         img_resized = img
     if channels == 1:
-        img_resized = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        img_resized = cv2.cvtColor(img_resized, cv2.COLOR_BGR2GRAY)
     elif not bgr:
         img_resized = cv2.cvtColor(img_resized, cv2.COLOR_BGR2RGB)
 
@@ -142,7 +148,7 @@ def vnnx_simulator(arr, model, outputs, outputs_int8):
         model_outputs[o] = model_outputs[o].reshape(model.output_shape[o])
         outputs[o] = model_outputs[o]
     
-def model_run(arr, model):
+def model_run(arr, model, apply_sc_and_mean=True):
     if model.endswith('.onnx'):
         outputs = onnx_infer(model, arr)
         output_shapes = onnx_output_shape(model)
@@ -241,7 +247,12 @@ def model_run(arr, model):
         outputs = model.run([arr.flatten()])
         
         for o, output in enumerate(outputs):
-            outputs[o] = model.output_scale_factor[o] * (outputs[o].astype(np.float32) - model.output_zeropoint[o])
+            # TODO Added to fix Midas-V2-Quantized which needs to be in int32 not FP32 to preserve RBGA structure for pixels
+            # Would like to find a cleaner fix for this instead of adding extra 2 conditionals in model run
+            # Tried converting back to int32 in segmentation.py but lost accurracy when converting FP32->Int32
+            if apply_sc_and_mean:
+                outputs[o] = model.output_scale_factor[o] * (outputs[o].astype(np.float32) - model.output_zeropoint[o])
+
             outputs[o] = outputs[o].reshape(model.output_shape[o])
 
     elif model.endswith('.xml'):
@@ -264,7 +275,8 @@ def model_run(arr, model):
         for o in range(len(output_details)):
             output_scale, output_zero_point = output_details[o].get('quantization', (0.0, 0))
             output = interpreter.get_tensor(output_details[o]['index'])
-            if  output_scale != 0.0:
+            # TODO Added to fix Midas-V2-Quantized, needs cleaner fix, refer to first Midas-V2-Quantized comment for more info
+            if output_scale != 0.0 and apply_sc_and_mean:
                 output = output_scale * (output.astype(np.float32) - output_zero_point)
            
             outputs.append(output)
@@ -288,5 +300,3 @@ if __name__ == "__main__":
     
     # run inference
     outputs, _ = model_run(args.input_data, args.model)
-    
-    

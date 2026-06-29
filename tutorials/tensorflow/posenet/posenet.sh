@@ -7,9 +7,11 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.0                                                   #
+# v3.1                                                   #
 #                                                        #
 ##########################################################
+
+
 
 set -e
 echo "Checking and activating VBX Python Environment..."
@@ -18,6 +20,11 @@ if [ -z $VBX_SDK ]; then
 fi
 source $VBX_SDK/vbx_env/bin/activate
 
+
+# generate_npy is an internal tool that creates a npy array
+#  Purpose: Generates a npy array if an existing one does not exist, this is using custom img data
+#  - Required Inputs: source dataset, output name, size
+#  - Output: npy array
 echo "Checking for Numpy calibration data file..."
 if [ ! -f $VBX_SDK/tutorials/face_rgb_20x273x481x3.npy ]; then
     generate_npy $VBX_SDK/tutorials/face_rgb_20x273x481x3.npy -o $VBX_SDK/tutorials/face_rgb_20x273x481x3.npy -s 273 481 
@@ -60,6 +67,18 @@ if [ ! -d $VBX_SDK/example/python/posenet_python ]; then
 fi
 
 
+if [ -f mobilenet100_stride16.pb ]; then
+   if ! echo "26552c97bc7eb96f2642ca059ca62037 mobilenet100_stride16.pb" | md5sum -c; then
+       echo -e "\n There is an issue with the posenet model file as the expected checksum does not match.\n The model source can be found at: https://github.com/tensorflow/tfjs-models/blob/master/posenet.\n If the model information has changed, please update this script and re-run the tutorial."
+       exit 1
+   fi
+fi
+
+
+# tflite_quantize is an internal tool designed to quantize a saved_model directory using the npy array
+#  Purpose: Convert source model directory to int8 tflite format
+#  - Required Inputs: model source directory, calibration npy array
+#  - Output: int8 tflite model
 if [ ! -f posenet.tflite ]; then
    echo "Generating TF Lite..."
    tflite_quantize mobilenet100_stride16.pb posenet.tflite -d $VBX_SDK/tutorials/face_rgb_20x273x481x3.npy \
@@ -67,15 +86,28 @@ if [ ! -f posenet.tflite ]; then
 --scale 128 --shape 1 273 481 3
 fi
 
+
+# tflite_preprocess is an internal tool used to add a preprocess layer to the start of the model
+#  Purpose: adds a preprocess layer to the start of the model (if none, will just preprocess by adding a uint8->int8 layer)
+#  - Required Inputs: tflite source model, additional arguments 
+#  - Outputs: preprocessed tflite model
 if [ -f posenet.tflite ]; then
    tflite_preprocess posenet.tflite  --mean 128 --scale 128
 fi
 
+
+# vnnx_compile is an internal tool that converts an int8 tflite file to a binary file that can be run on the SDK and VectorBlox FPGA
+#  Purpose: converts int8 tflite to binary
+#  - Required Inputs: int8 tflite, size configuration, compression configuration, output file name
+#  - Outputs: binary object files(.hex and binary file)
 if [ -f posenet.pre.tflite ]; then
     echo "Generating VNNX for V1000 ncomp configuration..."
     vnnx_compile -s V1000 -c ncomp -t posenet.pre.tflite  -o posenet_V1000_ncomp.vnnx
 fi
 
+
+# This step runs the final compiled binary in Python, it also shows how to run the same file in C simulation for SDK
+#   *Currently C simulation is not supported for unstructured compression
 if [ -f posenet_V1000_ncomp.vnnx ]; then
     echo "Running Simulation..."
     python $VBX_SDK/example/python/posenetInfer.py posenet_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/ski.273.481.jpg 

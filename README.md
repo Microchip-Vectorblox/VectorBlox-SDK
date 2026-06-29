@@ -1,17 +1,21 @@
-# VectorBlox SDK
+# VectorBlox 3.1 SDK
 
-VectorBlox is an SDK for compiling and running TFLITE INT8 models on the VectorBlox accelerator.
+VectorBlox is an SDK for compiling and running TFLite INT8 models on the VectorBlox accelerator.
 
-Models must be quantized, then compiled via the included scripts.  
+Models must be quantized and compiled using the included scripts.
 
-The models can then be ran via the VectorBlox simulator, or on a physical VectorBlox accelerator.
+The models can then be run via the VectorBlox simulator or on a physical VectorBlox accelerator on a Microchip FPGA.
 
-## Quickstart 
+## Getting Started
+
 
 ### Prerequisites
 
- To use the VectorBlox SDK, you will need run the SDK in an Ubuntu 20.04, 22.04, or 24.04 environment.
- If using WSL, ensure you are running from your home directory or have permissions set.
+To use the VectorBlox SDK, you need to run it in an Ubuntu environment (version 20.04, 22.04, or 24.04).
+
+If you are using Windows, we recommend installing WSL (Windows Subsystem for Linux) so you can run Ubuntu on your computer. Setup instructions are available here:[Microsoft WSL Install Guide](https://learn.microsoft.com/en-us/windows/wsl/install).
+
+Important for WSL users: run the SDK from your Ubuntu home folder, or make sure the folder you are using has the correct access permissions.
 
 > If cloning the repo, `git` and `git-lfs` must be installed via `apt install git-lfs && git-lfs install`
 
@@ -19,61 +23,72 @@ The models can then be ran via the VectorBlox simulator, or on a physical Vector
 
 There are two options for downloading the SDK:
 
- 1) Download an archive (zip or tar.gz) from https://github.com/Microchip-Vectorblox/VectorBlox-SDK/releases
-     
- 2) Clone this repository
-     
+1. Download an archive (zip or tar.gz) from <https://github.com/Microchip-Vectorblox/VectorBlox-SDK/releases>
+
+2. Clone this repository
+
 ### Install dependencies (done once, requires sudo permission)
 
-Navigate to the root directory of `VectorBlox-SDK` and run the following commands:
+Navigate to the root directory of `VectorBlox-SDK` and run the following command:
 
-```
+```bash
 bash install_dependencies.sh
 ```
 
-### Activate (which installs if needed) Python3.10 virtual environment, and sets necessary environment variables
-```
+### Activate (which installs if needed) Python 3.10 virtual environment, and set necessary environment variables
+
+```bash
 source setup_vars.sh
+```
+
+Once in the VBX Python environment, the shell prompt is prefixed with (vbx_env).
+
+**Note:** To exit or deactivate the environment, run the following command:
+
+```bash
+deactivate
 ```
 
 ### Run Tutorials
 
-Example tutorials are provided that generate CoreVectorBlox compatible binary files.
+When getting started with VectorBlox, it is recommended to review our tutorials to understand the flow. These example tutorials show how to generate CoreVectorBlox-compatible binary files using a shell script in the [tutorials directory](./tutorials/).
 
 Tutorials will download the model and convert it to a quantized `.tflite` if necessary.
 It will then be compiled into a VectorBlox binary file (`.vnnx` and `.hex` or `.ucomp` extensions) and simulated.
 
-Follow the below steps to run a tutorial.
+Follow the steps below to run a tutorial shell script:
 
-```bash 
+```bash
 cd $VBX_SDK/tutorials/SOURCE_NAME/MODEL_NAME
 bash MODEL_NAME.sh
 ```
 
+For a more detailed walkthrough of three tutorials, refer to the [Tutorial Walkthrough Guide](./docs/tutorial_walkthrough_guide.md) in the docs folder.
 
+Also, within the docs folder, a [Tutorial Metrics Appendix](./docs/tutorial_metrics_appendix.md) can be found that contains a complete list of tutorials along with their metrics.
 
-### Next Steps
+**For more information on the commands presented in the shell script of the tutorials, see our [SDK Programmer's Guide](./docs/VectorBloxPG.md)**. Finally, a high-level overview of our tutorials is available in the [Tutorial README](./tutorials/README.md).
 
-Once a model's binary file has been obtained from the SDK, it can be run on the board. Currently the 3.0 SDK only supports the PolarFire SoC Video Kit.
+### After Generating a Binary File with the SDK
 
+Once a model’s binary file has been obtained from the SDK, it can be run on a PolarFire FPGA. Currently, the 3.1 SDK does not support PolarFire Non SoC Video Kit.
 
-Please refer to the Quickstart Guide in the [VectorBlox-SoC-Video-Kit-Demo](https://github.com/Microchip-Vectorblox/VectorBlox-SoC-Video-Kit-Demo/tree/main) GitHub repo for the quickest way to set up the board
+More information on setting up the PolarFire SoC Video Kit for VectorBlox can be found in the [VectorBlox-SoC-Video-Kit-Demo](https://github.com/Microchip-Vectorblox/VectorBlox-SoC-Video-Kit-Demo/tree/main) repository.
 
+Within the VectorBlox-SoC-Video-Kit-Demo repository, refer to the Quickstart Guide when getting started. This guide provides a walkthrough for properly setting up the PolarFire SoC Video Kit so that a model’s binary file generated by the SDK can run on it.
 
-Then refer to adding_models.md in the docs folder for instructions on adding the binary file generated by the SDK to the demo.
+Also, see the Adding Models Markdown File in the VectorBlox-SoC-Video-Kit-Demo repository for information on how to transfer the model’s binary file generated by the SDK to the board. This file also shows how to add a compiled model binary file to demo_models.h file so it can be run on the VectorBlox demo.
 
 ## Known Issues
 
-For up to date information on known issues for the VectorBlox SDK and Demos, please refer to the [known issues page](./docs/known_issues.md)
+For up-to-date information on known issues for the VectorBlox SDK and Demos, please refer to the [known issues page](./docs/known_issues.md).
 
 ## Resources
 
-Model accuracy and performance can be found [here](./tutorials/README.md)
+Model accuracy and performance can be found [here](./tutorials/README.md).
 
-Resource utilization for the PolarFire SoC can be found [here](./docs/resource_utilization.md)
+Supported TFLite INT8 operators can be found [here](./docs/OPS.md).
 
-Supported TFLITE INT8 operators can be found [here](./docs/OPS.md)
+Supported C postprocessing can be found [here](./docs/C_Postprocessing.md).
 
-Supported C postprocessing can be found [here](./docs/postprocess.md)
-
-For additional information, refer to the SDK [docs folder](./docs)
+For additional information, refer to the SDK [docs folder](./docs).

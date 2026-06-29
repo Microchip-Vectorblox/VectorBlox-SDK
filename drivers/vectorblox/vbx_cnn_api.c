@@ -98,7 +98,6 @@ static const int TSNP_AP_CONTROL_START = 0x00000001;
 #include <fcntl.h>
 #include <sys/mman.h>
 
-
 static uint64_t u64_from_attribute(const char* filename){
   FILE* fd = fopen(filename,"r");
   uint64_t ret;

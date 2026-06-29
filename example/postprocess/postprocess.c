@@ -2827,7 +2827,108 @@ int pprint_post_process(const char *name, const char *pptype, model_t *model, fi
 		printf("\n");
 
 
-	} else if (!strcmp(pptype, "YOLOV2") || !strcmp(pptype, "YOLOV3") || !strcmp(pptype, "YOLOV4") || !strcmp(pptype, "YOLOV5") || !strcmp(pptype, "SSDV2") || !strcmp(pptype, "SSDTORCH") || !strcmp(pptype, "ULTRALYTICS_FULL") || !strcmp(pptype, "ULTRALYTICS")) {
+	} else if (!strcmp(pptype, "SPACE") || !strcmp(pptype, "SPACE_T")){
+
+		int transpose_first = !strcmp(pptype, "SPACE_T");
+		fix16_t points2D[24];
+		int8_t* output_buffers_int8[25];
+		for(int o=0; o< (int)model_get_num_outputs(model); o++){
+			output_buffers_int8[o] = (int8_t*)(uintptr_t)o_buffers[o];
+		}
+		fix16_t max_val = post_process_space_int8(points2D, output_buffers_int8, model, transpose_first);
+#ifdef HARDWARE_DRAW
+		if (max_val > F16(0)) {
+			for (int p=0; p < 12; p++) {
+				points2D[12+p] *= 1080./1200;
+			}
+			int color, x0, y0, x1, y1;
+			
+			color = GET_COLOUR(0, 255, 0, 255); // front face - green (1,2),(2,3),(3,4),(4,1)
+			x0 = fix16_to_int(points2D[1]); y0 = fix16_to_int(points2D[12+1]);
+			x1 = fix16_to_int(points2D[2]); y1 = fix16_to_int(points2D[12+2]);
+			draw_line(x0, y0, x1, y1, color, overlay_draw_frame, 2048,1080, 2,0);
+			x0 = fix16_to_int(points2D[2]); y0 = fix16_to_int(points2D[12+2]);
+			x1 = fix16_to_int(points2D[3]); y1 = fix16_to_int(points2D[12+3]);
+			draw_line(x0, y0, x1, y1, color, overlay_draw_frame, 2048,1080, 2,0);
+			x0 = fix16_to_int(points2D[3]); y0 = fix16_to_int(points2D[12+3]);
+			x1 = fix16_to_int(points2D[4]); y1 = fix16_to_int(points2D[12+4]);
+			draw_line(x0, y0, x1, y1, color, overlay_draw_frame, 2048,1080, 2,0);
+			x0 = fix16_to_int(points2D[4]); y0 = fix16_to_int(points2D[12+4]);
+			x1 = fix16_to_int(points2D[1]); y1 = fix16_to_int(points2D[12+1]);
+			draw_line(x0, y0, x1, y1, color, overlay_draw_frame, 2048,1080, 2,0);
+
+			color = GET_COLOUR(255, 0, 0, 255); // body ring - blue (5,6),(6,7),(7,8),(8,5)
+			x0 = fix16_to_int(points2D[5]); y0 = fix16_to_int(points2D[12+5]);
+			x1 = fix16_to_int(points2D[6]); y1 = fix16_to_int(points2D[12+6]);
+			draw_line(x0, y0, x1, y1, color, overlay_draw_frame, 2048,1080, 2,0);
+			x0 = fix16_to_int(points2D[6]); y0 = fix16_to_int(points2D[12+6]);
+			x1 = fix16_to_int(points2D[7]); y1 = fix16_to_int(points2D[12+7]);
+			draw_line(x0, y0, x1, y1, color, overlay_draw_frame, 2048,1080, 2,0);
+			x0 = fix16_to_int(points2D[7]); y0 = fix16_to_int(points2D[12+7]);
+			x1 = fix16_to_int(points2D[8]); y1 = fix16_to_int(points2D[12+8]);
+			draw_line(x0, y0, x1, y1, color, overlay_draw_frame, 2048,1080, 2,0);
+			x0 = fix16_to_int(points2D[8]); y0 = fix16_to_int(points2D[12+8]);
+			x1 = fix16_to_int(points2D[5]); y1 = fix16_to_int(points2D[12+5]);
+			draw_line(x0, y0, x1, y1, color, overlay_draw_frame, 2048,1080, 2,0);
+
+			color = GET_COLOUR(0, 255, 255, 255); // sides - yellow (1,5),(2,6),(3,7),(4,8)
+			x0 = fix16_to_int(points2D[1]); y0 = fix16_to_int(points2D[12+1]);
+			x1 = fix16_to_int(points2D[5]); y1 = fix16_to_int(points2D[12+5]);
+			draw_line(x0, y0, x1, y1, color, overlay_draw_frame, 2048,1080, 2,0);
+			x0 = fix16_to_int(points2D[2]); y0 = fix16_to_int(points2D[12+2]);
+			x1 = fix16_to_int(points2D[6]); y1 = fix16_to_int(points2D[12+6]);
+			draw_line(x0, y0, x1, y1, color, overlay_draw_frame, 2048,1080, 2,0);
+			x0 = fix16_to_int(points2D[3]); y0 = fix16_to_int(points2D[12+3]);
+			x1 = fix16_to_int(points2D[7]); y1 = fix16_to_int(points2D[12+7]);
+			draw_line(x0, y0, x1, y1, color, overlay_draw_frame, 2048,1080, 2,0);
+			x0 = fix16_to_int(points2D[4]); y0 = fix16_to_int(points2D[12+4]);
+			x1 = fix16_to_int(points2D[8]); y1 = fix16_to_int(points2D[12+8]);
+			draw_line(x0, y0, x1, y1, color, overlay_draw_frame, 2048,1080, 2,0);
+
+			color = GET_COLOUR(0, 165, 255, 255); // solar panels - orange (2,9),(3,10),(4,11)
+			x0 = fix16_to_int(points2D[2]); y0 = fix16_to_int(points2D[12+2]);
+			x1 = fix16_to_int(points2D[9]); y1 = fix16_to_int(points2D[12+9]);
+			draw_line(x0, y0, x1, y1, color, overlay_draw_frame, 2048,1080, 2,0);
+			x0 = fix16_to_int(points2D[3]); y0 = fix16_to_int(points2D[12+3]);
+			x1 = fix16_to_int(points2D[10]); y1 = fix16_to_int(points2D[12+10]);
+			draw_line(x0, y0, x1, y1, color, overlay_draw_frame, 2048,1080, 2,0);
+			x0 = fix16_to_int(points2D[4]); y0 = fix16_to_int(points2D[12+4]);
+			x1 = fix16_to_int(points2D[11]); y1 = fix16_to_int(points2D[12+11]);
+			draw_line(x0, y0, x1, y1, color, overlay_draw_frame, 2048,1080, 2,0);
+		}
+#else
+		if (max_val > F16(0)) {
+			printf("keypoints x\t%3.3f,%3.3f,%3.3f,%3.3f,%3.3f,%3.3f\n\t\t%3.3f,%3.3f,%3.3f,%3.3f,%3.3f,%3.3f\n",
+				fix16_to_float(points2D[0]),
+				fix16_to_float(points2D[1]),
+				fix16_to_float(points2D[2]),
+				fix16_to_float(points2D[3]),
+				fix16_to_float(points2D[4]),
+				fix16_to_float(points2D[5]),
+				fix16_to_float(points2D[6]),
+				fix16_to_float(points2D[7]),
+				fix16_to_float(points2D[8]),
+				fix16_to_float(points2D[9]),
+				fix16_to_float(points2D[10]),
+				fix16_to_float(points2D[11]));
+			printf("keypoints y\t%3.3f,%3.3f,%3.3f,%3.3f,%3.3f,%3.3f\n\t\t%3.3f,%3.3f,%3.3f,%3.3f,%3.3f,%3.3f\n",
+				fix16_to_float(points2D[12+0]),
+				fix16_to_float(points2D[12+1]),
+				fix16_to_float(points2D[12+2]),
+				fix16_to_float(points2D[12+3]),
+				fix16_to_float(points2D[12+4]),
+				fix16_to_float(points2D[12+5]),
+				fix16_to_float(points2D[12+6]),
+				fix16_to_float(points2D[12+7]),
+				fix16_to_float(points2D[12+8]),
+				fix16_to_float(points2D[12+9]),
+				fix16_to_float(points2D[12+10]),
+				fix16_to_float(points2D[12+11]));
+		}
+#endif
+
+
+	} else if (!strcmp(pptype, "YOLOV2") || !strcmp(pptype, "YOLOV3") || !strcmp(pptype, "YOLOV4") || !strcmp(pptype, "YOLOV5") || !strcmp(pptype, "SSDV2") || !strcmp(pptype, "SSDTORCH") || !strcmp(pptype, "OBJECT_DETECT_FULL") || !strcmp(pptype, "OBJECT_DETECT")) {
 		char **class_names = NULL;
 		int valid_boxes = 0;
 		int max_boxes = 100;
@@ -2878,7 +2979,7 @@ int pprint_post_process(const char *name, const char *pptype, model_t *model, fi
 				valid_boxes = post_process_yolo(outputs, num_outputs, cfg, thresh, iou, boxes, max_boxes);
 			}
 
-		} else if (!strcmp(pptype, "ULTRALYTICS_FULL")){
+		} else if (!strcmp(pptype, "OBJECT_DETECT_FULL")){
 			class_names = coco_classes;
 			fix16_t* output=(fix16_t*)(uintptr_t)o_buffers[0];
 			int8_t* output_int8 =(int8_t*)(uintptr_t)o_buffers[0];
@@ -2890,7 +2991,7 @@ int pprint_post_process(const char *name, const char *pptype, model_t *model, fi
 				valid_boxes = post_process_ultra_nms(output, 8400, input_h, input_w, thresh, iou, boxes, NULL, max_boxes, 80, 0, 0);
 			}
 
-		} else if (!strcmp(pptype, "ULTRALYTICS")){
+		} else if (!strcmp(pptype, "OBJECT_DETECT")){
 			class_names = coco_classes;
 			int* outputs_shape[9];
 			int8_t *outputs_int8[9];
@@ -3230,7 +3331,7 @@ int pprint_post_process(const char *name, const char *pptype, model_t *model, fi
 				printf("[%d , %d] %d \n",y,x, fix16_to_int(fix16_mul(score,F16(100))));	
 			}
 		}
-	} else if (!strcmp(pptype, "ULTRALYTICS_POSE")){
+	} else if (!strcmp(pptype, "POSE_DETECT")){
 		char **class_names = NULL;
 		int valid_boxes = 0;
 		int max_boxes = 100;
@@ -3380,7 +3481,7 @@ int pprint_post_process(const char *name, const char *pptype, model_t *model, fi
 		}
 #endif		
 
-	} else if (!strcmp(pptype, "ULTRALYTICS_OBB")){
+	} else if (!strcmp(pptype, "OBB_DETECT")){
 		char **class_names = NULL;
 		int valid_boxes = 0;
 		int max_boxes = 2000;

@@ -402,6 +402,9 @@ int vbx_cnn_get_debug_prints(vbx_cnn_t* vbx_cnn,char* buf,size_t max_chars)
     __attribute__((warning("vbx_cnn_get_debug_prints() is not part of the official Vectorblox API"
                            " and could be removed at any time")));
 int model_get_debug_json(const model_t* model);
+
+void vbx_cnn_get_and_print_cycle_counters(const vbx_cnn_t* vbx_cnn);
+
 #ifdef __cplusplus
 }
 #endif

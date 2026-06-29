@@ -8,8 +8,10 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/mman.h>
-#include "pdma/pdma_helpers.h"
 #include <cassert>
+#ifdef PDMA
+#include "pdma/pdma_helpers.h"
+#endif
 
 extern "C" int read_JPEG_file (const char * filename, int* width, int* height,
 		unsigned char **image, const int grayscale);
@@ -28,6 +30,10 @@ extern "C" int resize_image(uint8_t *image_in, int in_w, int in_h,
 #define NUM_LOOPS 1
 #endif
 
+#ifndef DEBUG_CYCLE
+#define DEBUG_CYCLE 0
+#endif
+
 static inline void* virt_to_phys(vbx_cnn_t* vbx_cnn,void* virt){
 	return (char*)(virt) + vbx_cnn->dma_phys_trans_offset;
 }
@@ -41,6 +47,7 @@ void enable_interrupt(vbx_cnn_t *vbx_cnn){
 };
 #endif
 
+#ifdef PDMA
 int8_t* pdma_mmap_t;
 uint64_t pdma_mmap(int total_size/*total num of all outputs*/){
 	
@@ -62,7 +69,7 @@ int32_t pdma_ch_transfer(uint64_t output_data_phys, void* source_buffer,int offs
 	return pdma_ch_cpy(output_data_phys + offset, srcbuf, size, channel);
 
 }
-
+#endif
 
 void* read_image(const char* filename, const int channels, const int height, const int width, int data_type, int use_bgr){
 	unsigned char* image;
@@ -189,12 +196,12 @@ int main(int argc, char **argv) {
 		fprintf(stderr,
 		"Usage: %s MODEL_FILE IMAGE.jpg [POST_PROCESS]\n"
 		"   if using POST_PROCESS to select post-processing, must be one of:\n"
-		"   CLASSIFY, YOLOV2, YOLOV3, YOLOV4, YOLOV5, ULTRALYTICS, ULTRALYTICS_FULL\n"
-		"   BLAZEFACE, SCRFD, RETINAFACE, SSDV2, PLATE, LPD, LPR\n",
+		"   CLASSIFY, YOLOV2, YOLOV3, YOLOV4, YOLOV5, OBJECT_DETECT, OBJECT_DETECT_FULL\n"
+		"   BLAZEFACE, SCRFD, RETINAFACE, SSDV2, PLATE, LPD, LPR, SPACE, SPACE_T\n",
 				argv[0]);
 		return 1;
 	}
-
+	
 	vbx_cnn_t *vbx_cnn = vbx_cnn_init(NULL);
 	if (!vbx_cnn) {
 		fprintf(stderr, "Unable to initialize vbx_cnn. Exiting\n");
@@ -229,10 +236,15 @@ int main(int argc, char **argv) {
 		printf("Model %s and VBX_CORE size configuration mismatch. Make sure the size configuration is set properly when the model is generated. \n", argv[1]);
 		exit(1);
 	}
+	
+	#ifdef PDMA
 	int total_size = 32*1024*1024; //#TODO Check limit size in comparison
 	
 	uint64_t pdma_out = pdma_mmap(total_size);
 	int32_t pdma_channel = pdma_ch_open();
+	#endif
+	
+	
 	void *read_buffer = NULL;
 	
 	vbx_cnn_io_ptr_t io_buffers[MAX_IO_BUFFERS];
@@ -347,9 +359,13 @@ int main(int argc, char **argv) {
 	}
 	gettimeofday(&tv2, NULL);
 	printf("network took %3.4f ms (%3.2f FPS) over %d cycles\n", gettimediff_us(tv1, tv2) * 1.0 / 1000 / NUM_LOOPS, 1000./(gettimediff_us(tv1, tv2) * 1.0 / 1000 / NUM_LOOPS), NUM_LOOPS);
+#if DEBUG_CYCLE
+	vbx_cnn_get_and_print_cycle_counters(vbx_cnn);
+#endif
 #endif
 #if INT8FLAG
 	// users can modify this post-processing function in post_process.c
+	#ifdef PDMA
 	vbx_cnn_io_ptr_t pdma_buffer[model_get_num_outputs(model)];
 	int output_offset=0;
 	for(int o =0; o<(int)model_get_num_outputs(model);o++){
@@ -363,6 +379,13 @@ int main(int argc, char **argv) {
 #endif
 	}
 	if (argc > 3) pprint_post_process(argv[1], argv[3], model, (fix16_t**)(uintptr_t)pdma_buffer,1,0);
+	#else
+	vbx_cnn_io_ptr_t output_bufs[model_get_num_outputs(model)];
+	for(int o =0; o<(int)model_get_num_outputs(model);o++){
+		output_bufs[o] = io_buffers[model_get_num_inputs(model) + o];
+	}
+	if (argc > 3) pprint_post_process(argv[1], argv[3], model, (fix16_t**)(uintptr_t)output_bufs,1,0);
+	#endif
 #else	
 	fix16_t* fix16_output_buffers[model_get_num_outputs(model)];
 	for (int o = 0; o < (int)model_get_num_outputs(model); ++o){
@@ -380,22 +403,32 @@ int main(int argc, char **argv) {
 	unsigned checksum = 0;
 	int size_of_output_in_bytes = model_get_output_length(model, 0)*output_bytes;
 	size_of_output_in_bytes += (size_of_output_in_bytes % sizeof(uint16_t)); // output buffers are init to uint32_t, OK to increase byte if odd (can only happen if int8)
+	
+	#ifdef PDMA
 	if (vbx_cnn->comp_config == 2) {
 		checksum = fletcher32((uint16_t*)pdma_buffer[0], size_of_output_in_bytes/sizeof(uint16_t));
 	}
 	else {
 		checksum = fletcher32((uint16_t*)(io_buffers[model_get_num_inputs(model)]),size_of_output_in_bytes/sizeof(uint16_t));
 	}
+	#else
+	checksum = fletcher32((uint16_t*)output_bufs[0], size_of_output_in_bytes/sizeof(uint16_t));
+	#endif
 	for(unsigned o =1;o<model_get_num_outputs(model);++o){
 		int output_bytes = model_get_output_datatype(model,o) == VBX_CNN_CALC_TYPE_INT16 ? 2 : 1;
 		if (model_get_output_datatype(model,o) == VBX_CNN_CALC_TYPE_INT32) output_bytes = 4;
 		int size_of_output_in_bytes = model_get_output_length(model, o)*output_bytes;
 		size_of_output_in_bytes += (size_of_output_in_bytes % sizeof(uint16_t));
+
+	#ifdef PDMA
 		if (vbx_cnn->comp_config == 2) {
 			checksum ^= fletcher32((uint16_t*)pdma_buffer[o], size_of_output_in_bytes/sizeof(uint16_t));
 		} else {
 			checksum ^= fletcher32((uint16_t*)io_buffers[model_get_num_inputs(model)+o], size_of_output_in_bytes/sizeof(uint16_t));
 		}
+	#else
+	checksum ^= fletcher32((uint16_t*)output_bufs[o], size_of_output_in_bytes/sizeof(uint16_t));
+	#endif
 	}
 	printf("CHECKSUM = %08x \n", checksum);
 	if(argc>=3){

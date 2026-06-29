@@ -6,7 +6,7 @@ function install_venv() {
 
     python -m pip install "pip<23.1"
     python -m pip install "setuptools<=68.2.2"
-    python -m pip install wheel 
+    python -m pip install wheel
     python -m pip install psutil==5.9.5
     python -m pip install onnx==1.16.1
 
@@ -23,6 +23,8 @@ function install_venv() {
     python -m pip install onnxsim==0.4.36
     python -m pip install sor4onnx
     python -m pip install sne4onnx
+    python -m pip install onnx2json
+    python -m pip install json2onnx
     python -m pip install sng4onnx==1.0.1
     python -m pip install onnxruntime==1.18.1
     python -m pip install ml_dtypes==0.3.1
@@ -36,8 +38,8 @@ function install_venv() {
     python -m pip install openvino-telemetry==2023.2.1
 
     python -m pip install openvino2tensorflow==1.34.0
-    python -m pip install torch==2.3.0
-    python -m pip install torchvision==0.18.0
+    python -m pip install --extra-index-url https://download.pytorch.org/whl/cpu torch==2.3.0+cpu
+    python -m pip install --extra-index-url https://download.pytorch.org/whl/cpu torchvision==0.18.0+cpu
     python -m pip install matplotlib
     python -m pip install silence_tensorflow
     python -m pip install natsort

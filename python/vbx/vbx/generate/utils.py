@@ -15,48 +15,84 @@ from contextlib import contextmanager
 
 
 @contextmanager
-def sp_invalid_exception_catcher(sp, opcode, tmp_dir, graph_idx, tmp_dir_obj):
+def sp_invalid_exception_catcher(sp, opcode, json_graph, split, graph_idx, error_type=0):
+    """
+    Context manager to catch allocation failures and save the failing subgraph.
+
+    Args:
+        sp: Scratchpad size in bytes
+        opcode: Operator type string
+        json_graph: Full JSON graph dict (from flatc conversion)
+        split: List of operator indices for the current subgraph
+        graph_idx: Current subgraph index
+        error_type: 0 = scratchpad too small, 1 = allocation not found
+    """
     try:
         yield
     except AssertionError as e:
-        errors_dir = os.path.join(os.path.join(os.getcwd(), 'failing_subgraphs'))
+        from .transform_tflite import create_graph_from_split
+        from .split_tflite import json2tflite
+
+        errors_dir = os.path.join(os.getcwd(), 'failing_subgraphs')
         if os.path.exists(errors_dir):
             shutil.rmtree(errors_dir)
-            os.mkdir(errors_dir)
-        else:
-            os.mkdir(errors_dir)
+        os.makedirs(errors_dir, exist_ok=True)
 
-        subgraph_name = ''
-        if tmp_dir is not None and graph_idx is not None:
-           list_graph = sorted(
-                glob.glob(os.path.join(tmp_dir, 'subgraphs/*.tflite')),
-                key=lambda x: int(x.split('.')[-2])
+        subgraph_name = f'failing.{graph_idx}.tflite'
+        subgraph_json = os.path.join(errors_dir, f'failing.{graph_idx}.json')
+        subgraph_tflite = os.path.join(errors_dir, subgraph_name)
+
+        # Create and save the failing subgraph
+        try:
+            if json_graph is not None and split is not None:
+                subgraph = create_graph_from_split(json_graph, split)
+                with open(subgraph_json, 'wb') as f:
+                    f.write(orjson.dumps(subgraph))
+                json2tflite(subgraph_json)
+                os.remove(subgraph_json)  # Clean up JSON, keep only tflite
+            else:
+                subgraph_name = '(graph data not available)'
+        except Exception as save_err:
+            subgraph_name = f'(failed to save: {save_err})'
+
+        error_messages = {
+            0: "\n\033[31mError:\033[0m Layer cannot fit within the memory scratchpad\n",
+            1: "\n\033[31mError:\033[0m Valid allocation could not be found for the layer\n"
+        }
+
+        header_msg = {
+            0: (
+                "\n" + "="*75 + "\n"
+                "\033[31m" + "CRITICAL ERROR: Memory Allocation Failure".center(75) + "\033[0m\n"
+                + "="*75 + "\n"
+            ),
+            1: (
+                "\n" + "="*75 + "\n"
+                "\033[31m" + "CRITICAL ERROR: Valid Allocation Not Found".center(75) + "\033[0m\n"
+                + "="*75 + "\n"
             )
-           for i, subgraph_name in enumerate(list_graph):
-               if i== graph_idx:
-                   shutil.copy(subgraph_name, errors_dir)
-                   subgraph_name = os.path.basename(subgraph_name)
-                   break
-        if tmp_dir_obj is not None:
-            tmp_dir_obj.cleanup()
+        }
 
-        error_msg = (
-            "\n" + "="*75 + "\n"
-            "\033[31m" + "CRITICAL ERROR: Memory Allocation Failure".center(75) + "\033[0m\n"
-            "="*1 + "\n"
-            f"\n\033[31mLayer Type:\033[0m {opcode}\n"
-            f"\033[31mError:\033[0m Layer cannot fit within the memory scratchpad\n"
-            f"\033[31mScratchpad Capacity:\033[0m {sp / 1024:.1f} KB\n"
-            f"\n\033[31mFailing Subgraph:\033[0m {subgraph_name}\n"
-            f"\033[31mLocation:\033[0m failing_subgraphs/{subgraph_name}\n"
-            f"\nWe are continuously working to improve the SDK.\n"
-            f"\n\033[36mFor further assistance:\033[0m\n"
+        footer_msg = (
+            "\n\033[36mFor further assistance:\033[0m\n"
             f"  Email: vectorblox@microchip.com\n"
             f"  Repository: https://github.com/Microchip-Vectorblox/\n"
             + "="*75 + "\n"
         )
-        
-        sys.stderr.write(error_msg)
+
+        msg = (
+            f"{header_msg.get(error_type, 'A CRITICAL ERROR OCCURRED')}"
+            f"\n\033[31mLayer Type:\033[0m {opcode}\n"
+            f"\033[31mScratchpad Capacity:\033[0m {sp / 1024:.1f} KB\n"
+            f"\033[31mSubgraph Index:\033[0m {graph_idx}\n"
+            f"{error_messages.get(error_type, 'Unknown error occurred.')}"
+            f"\n\033[31mFailing Subgraph:\033[0m {subgraph_name}\n"
+            f"\033[31mLocation:\033[0m failing_subgraphs/{subgraph_name}\n"
+            f"\nWe are continuously working to improve the SDK.\n"
+            + footer_msg
+        )
+
+        sys.stderr.write(msg)
         sys.exit(1)
 
 def get_input_details(model):
@@ -70,17 +106,11 @@ def get_output_details(model):
 
 
 def json_load(path):
-    # with open(path) as f:
-    #     return json.loads(f.read())
-
     with open(path, 'rb') as f:
         return orjson.loads(f.read())
 
 
 def json_dump(obj, path):
-    # with open(path, 'w') as f:
-    #     return f.write(json.dumps(obj))
-
     with open(path, 'wb') as f:
         return f.write(orjson.dumps(obj))
 

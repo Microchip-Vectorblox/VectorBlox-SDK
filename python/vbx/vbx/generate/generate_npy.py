@@ -30,7 +30,10 @@ def read_images(directory_path, num_images, rgb=False, grayscale=False, debug=Fa
     images = []
     for image_file in selected_images:
         image_path = os.path.join(directory_path, image_file)
-        image = cv2.imread(image_path)
+        try:
+            image = cv2.imread(image_path)
+        except:
+            print("Invalid image path, please check that a valid image is selected")
         if grayscale:
             image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         elif rgb:

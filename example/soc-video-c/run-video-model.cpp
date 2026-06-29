@@ -497,7 +497,7 @@ int main(int argc, char **argv) {
 		int status = 1;
 		while(status > 0) {
 			if (privacy)
-				if (!strcmp(models[mode].post_process_type, "POSENET") || !strcmp(models[mode].post_process_type, "ULTRALYTICS_POSE")){ //blank screen
+				if (!strcmp(models[mode].post_process_type, "POSENET") || !strcmp(models[mode].post_process_type, "POSE_DETECT")){ //blank screen
 					int split = 1;
 					privacy_draw(split);
 				}		
@@ -559,7 +559,7 @@ int main(int argc, char **argv) {
 				delete_embedding(input_buf,models,mode+1);
 			} 	
 			else if(tolower(input_buf[0])=='b'){
-				if (!strcmp(models[mode].post_process_type, "POSENET") || !strcmp(models[mode].post_process_type, "ULTRALYTICS_POSE")){ //blank screen
+				if (!strcmp(models[mode].post_process_type, "POSENET") || !strcmp(models[mode].post_process_type, "POSE_DETECT")){ //blank screen
 					privacy = !privacy;
 				}
 			}
