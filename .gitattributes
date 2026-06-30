@@ -7,3 +7,4 @@
 docs/images/VBX_SDK_Flow_Diagram.png !filter !diff !merge -text
 docs/images/VBX_SDK_Tutorial_Workflow.png !filter !diff !merge -text
 docs/images/tutorial_pattern_flow.png !filter !diff !merge -text
+docs/CoreVectorBlox_IP_Handbook.pdf !filter !diff !merge -text
