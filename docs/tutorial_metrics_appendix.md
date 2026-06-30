@@ -78,7 +78,6 @@ Below is a list of tutorials included with the VectorBlox SDK. Runtime in millis
 | tensorflow | [mobilenet_v1_050_160](tensorflow/mobilenet_v1_050_160/mobilenet_v1_050_160.sh) | [160, 160, 3] | 3.319 | classification | Top1 | 49.4 | 49.9 |
 | tensorflow | [mobilenet_v2](tensorflow/mobilenet_v2/mobilenet_v2.sh) | [224, 224, 3] | 12.875 | classification | Top1 | 70.2 | 70.1 |
 | tensorflow | [mobilenet_v2_140_224](tensorflow/mobilenet_v2_140_224/mobilenet_v2_140_224.sh) | [224, 224, 3] | 20.146 | classification | Top1 | 75.5 | 75.4 |
-| tensorflow | [posenet](tensorflow/posenet/posenet.sh) | [273, 481, 3] | 41.077 | pose detection |  |  |  |
 | tensorflow | [yolo-v3-tf](tensorflow/yolo-v3-tf/yolo-v3-tf.sh) | [416, 416, 3] | 477.906 | object detection | mAP⁵⁰⁻⁹⁵ | 34.73 | 34.54 |
 | tensorflow | [yolo-v3-tiny-tf](tensorflow/yolo-v3-tiny-tf/yolo-v3-tiny-tf.sh) | [416, 416, 3] | 35.531 | object detection | mAP⁵⁰⁻⁹⁵ | 10.86 | 11.0 |
 | tensorflow | [yolo-v4-tiny-tf](tensorflow/yolo-v4-tiny-tf/yolo-v4-tiny-tf.sh) | [416, 416, 3] | 46.247 | object detection | mAP⁵⁰⁻⁹⁵ | 12.29 | 12.29 |
