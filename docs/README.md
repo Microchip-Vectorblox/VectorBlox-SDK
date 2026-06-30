@@ -1,7 +1,5 @@
 # Documentation Index
 
-To view these documents in a printable PDF form, [Markdown to Word](https://markdowntoword.io/tools/markdown-to-pdf) can be used.
-
 To generate printable PDFs locally of these markdown documents, you can use `pandoc input.md -o output.pdf --pdf-engine=pdflatex` (recommended) or similar tools after pip installing them. Online tools like Markdown to Word also exist.
 
 ## API for Interacting with CoreVBX

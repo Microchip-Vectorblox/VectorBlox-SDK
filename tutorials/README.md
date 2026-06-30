@@ -7,71 +7,7 @@ This directory contains end-to-end tutorials that show how to generate a binary 
 
 Each tutorial includes a shell script that demonstrates the complete pipeline:
 
-```mermaid
-%%{init: {
-  'flowchart': {'curve':'linear', 'nodeSpacing':40, 'rankSpacing':65, 'padding':30, 'defaultRenderer':'elk'},
-  'theme':'base',
-  'themeVariables': {
-    'background':'#ffffff',
-    'fontFamily':'system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
-    'fontSize':'20px',
-    'primaryColor':'#ffffff',
-    'primaryTextColor':'#1a2533',
-    'lineColor':'#334155'
-  }
-}}%%
-flowchart LR
-    Start(["Download Source Model"])
-    Decision{"Source Format?"}
-
-    subgraph Convert["Convert to INT8 TFLite"]
-        direction TB
-        OpenVINO["openvino2tensorflow"]
-        ONNX["onnx2tf"]
-        TFQuant["tflite_quantize<br/>"]
-    end
-
-    TFLite["INT8 TFLite Model"]
-    Preprocess["tflite_preprocess<br/>"]
-    PreTFLite[".pre.tflite"]
-    Compile["vnnx_compile"]
-    Vnnx["Model Binary File (.vnnx or .ucomp)"]
-    Simulate["Python Simulation<br/>"]
-    Deploy(["Deploy Model Binary File<br/>to Target Hardware"])
-
-    Start --> Decision
-    Decision -->|"OpenVINO IR"| OpenVINO
-    Decision -->|"ONNX"| ONNX
-    Decision -->|"FP32 TF / Keras"| TFQuant
-    Decision -->|"Already INT8 TFLite"| TFLite
-
-    OpenVINO --> TFLite
-    ONNX --> TFLite
-    TFQuant --> TFLite
-
-    TFLite --> Preprocess
-    Preprocess --> PreTFLite
-    PreTFLite --> Compile
-    Compile --> Vnnx
-    Vnnx --> Simulate
-    Simulate --> Deploy
-
-    classDef startEnd fill:#ffffff,stroke:#64748b,stroke-width:2.5px,color:#1a2533
-    classDef tool fill:#e0e7ff,stroke:#4f46e5,stroke-width:2px,color:#1e1b4b
-    classDef decision fill:#fff6d6,stroke:#d4a84b,stroke-width:2px,color:#5a4210
-    classDef artifact fill:#ffffff,stroke:#64748b,stroke-width:2px,color:#1a2533
-    classDef hw fill:#5cb85c,stroke:#2e7a2e,stroke-width:2.5px,color:#ffffff
-
-    class Start startEnd
-    class OpenVINO,ONNX,TFQuant,Preprocess,Compile,Simulate tool
-    class Decision decision
-    class TFLite,PreTFLite,Vnnx artifact
-    class Deploy hw
-
-    style Convert fill:#f8fafc,stroke:#94a3b8,stroke-width:2px,stroke-dasharray:6 6,color:#475569
-
-    linkStyle default stroke:#334155,stroke-width:2.5px
-```
+![](../docs/images/tutorial_pattern_flow.png)
 
 1. Download the source model.
 2. Convert the model to TensorFlow Lite (if needed) using one of the following: openvino2tensorflow, onnx2tf, or tflite_quantize.

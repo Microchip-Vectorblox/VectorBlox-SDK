@@ -49,7 +49,7 @@ The following flow diagram shows the steps of a Convolutional Neural Network (CN
 
 #### Figure 1-1. VectorBlox SDK Flow Diagram
 
-![](./assets/VBX_SDK_Flow_Diagram.png)
+![](./images/VBX_SDK_Flow_Diagram.png)
 
 ## SDK
 

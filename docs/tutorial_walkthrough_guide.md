@@ -34,7 +34,7 @@ This guide walks through three VectorBlox SDK tutorials that convert models from
 
 #### Covered Tutorials Workflow Diagram
 
-![](./assets/VBX_SDK_Tutorial_Workflow.png)
+![](./images/VBX_SDK_Tutorial_Workflow.png)
 
 ## Common Tutorial Pattern
 
