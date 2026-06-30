@@ -43,7 +43,7 @@ fi
 
 
 if [ -f yolo-v4-tiny.h5 ]; then
-   if ! echo "247794ca5525491797ec3047c1c9a486 yolo-v4-tiny.h5" | md5sum -c; then
+   if ! echo "8911bf808aed305d6854c4ea48fcc731 public/yolo-v4-tiny-tf/yolov4-tiny.weights" | md5sum -c; then
        echo -e "\n There is an issue with the yolo-v4-tiny-tf model file as the expected checksum does not match.\n The model source can be found at: https://github.com/openvinotoolkit/open_model_zoo/tree/2021.4.2/models/public/yolo-v4-tiny-tf/.\n If the model information has changed, please update this script and re-run the tutorial."
        exit 1
    fi

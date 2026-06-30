@@ -17,6 +17,7 @@ function install_venv() {
     python -m pip install numpy==1.23.5
 
     python -m pip install tensorflow_datasets==4.9.3
+    python -m pip install tensorflow-metadata==1.13.1 --no-deps
     python -m pip install nvidia-pyindex
     python -m pip install onnx-graphsurgeon
     python -m pip install protobuf==3.20.3
