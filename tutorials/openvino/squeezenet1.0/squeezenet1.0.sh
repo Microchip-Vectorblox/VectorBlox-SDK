@@ -7,9 +7,11 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.0                                                   #
+# v3.1                                                   #
 #                                                        #
 ##########################################################
+
+
 
 set -e
 echo "Checking and activating VBX Python Environment..."
@@ -18,6 +20,11 @@ if [ -z $VBX_SDK ]; then
 fi
 source $VBX_SDK/vbx_env/bin/activate
 
+
+# generate_npy is an internal tool that creates a npy array
+#  Purpose: Generates a npy array if an existing one does not exist, this is using custom img data
+#  - Required Inputs: source dataset, output name, size
+#  - Output: npy array
 echo "Checking for Numpy calibration data file..."
 if [ ! -f $VBX_SDK/tutorials/imagenetv2_20x227x227x3.npy ]; then
     generate_npy $VBX_SDK/tutorials/imagenetv2_rgb_20x224x224x3.npy -o $VBX_SDK/tutorials/imagenetv2_20x227x227x3.npy -s 227 227  -b 
@@ -31,6 +38,13 @@ omz_downloader --name squeezenet1.0
 fi
 
 
+if [ -f public/squeezenet1.0/squeezenet1.0.caffemodel ]; then
+   if ! echo "bb9a2fd4be158e5b1e58a5cdc2b4aaa8 public/squeezenet1.0/squeezenet1.0.caffemodel" | md5sum -c; then
+       echo -e "\n There is an issue with the squeezenet1.0 model file as the expected checksum does not match.\n The model source can be found at: https://github.com/openvinotoolkit/open_model_zoo/tree/2021.4.2/models/public/squeezenet1.0/.\n If the model information has changed, please update this script and re-run the tutorial."
+       exit 1
+   fi
+fi
+
 if [ ! -f squeezenet1.0.tflite ]; then
    echo "Running Model Optimizer..."
    mo --input_model public/squeezenet1.0/squeezenet1.0.caffemodel \
@@ -39,6 +53,12 @@ if [ ! -f squeezenet1.0.tflite ]; then
 --static_shape \
 --input_shape [1,3,227,227]
 fi
+
+# openvino2tensorflow is an external model conversion tool to convert an openvino model to int8 tflite
+# specific operation information can be found here: https://pypi.org/project/openvino2tensorflow
+#  Purpose: Convert source model to int8 tflite format
+#  - Required Inputs: openvino compliant model, calibration npy array
+#  - Output: int8 tflite model
 if [ ! -f squeezenet1.0.tflite ]; then
    echo "Running OpenVINO2Tensorflow..."
    openvino2tensorflow --load_dest_file_path_for_the_calib_npy $VBX_SDK/tutorials/imagenetv2_20x227x227x3.npy \
@@ -48,15 +68,28 @@ if [ ! -f squeezenet1.0.tflite ]; then
    cp saved_model/model_full_integer_quant.tflite squeezenet1.0.tflite
 fi
 
+
+# tflite_preprocess is an internal tool used to add a preprocess layer to the start of the model
+#  Purpose: adds a preprocess layer to the start of the model (if none, will just preprocess by adding a uint8->int8 layer)
+#  - Required Inputs: tflite source model, additional arguments 
+#  - Outputs: preprocessed tflite model
 if [ -f squeezenet1.0.tflite ]; then
    tflite_preprocess squeezenet1.0.tflite   
 fi
 
+
+# vnnx_compile is an internal tool that converts an int8 tflite file to a binary file that can be run on the SDK and VectorBlox FPGA
+#  Purpose: converts int8 tflite to binary
+#  - Required Inputs: int8 tflite, size configuration, compression configuration, output file name
+#  - Outputs: binary object files(.hex and binary file)
 if [ -f squeezenet1.0.pre.tflite ]; then
     echo "Generating VNNX for V1000 ncomp configuration..."
     vnnx_compile -s V1000 -c ncomp -t squeezenet1.0.pre.tflite  -o squeezenet1.0_V1000_ncomp.vnnx
 fi
 
+
+# This step runs the final compiled binary in Python, it also shows how to run the same file in C simulation for SDK
+#   *Currently C simulation is not supported for unstructured compression
 if [ -f squeezenet1.0_V1000_ncomp.vnnx ]; then
     echo "Running Simulation..."
     python $VBX_SDK/example/python/classifier.py squeezenet1.0_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg 

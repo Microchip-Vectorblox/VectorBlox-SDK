@@ -5,7 +5,11 @@ from ctypes import c_void_p,c_char_p,c_int,c_size_t,c_uint64
 from ctypes import c_int16,c_int8,c_uint8,c_int32,c_float
 import os.path
 #_so = ctypes.cdll.LoadLibrary('libvbx_cnn_sim.so')
-_so = np.ctypeslib.load_library('libvbx_cnn_sim.so', os.path.dirname(__file__))
+_so_size = os.path.getsize(os.getenv('VBX_SDK') +  "/lib/" + "libvbx_cnn_sim.so")
+if _so_size < 2114408:
+    raise Exception("Please run `git lfs pull` to ensure you have the proper .so file")
+    exit()
+_so = np.ctypeslib.load_library('libvbx_cnn_sim.so', os.path.dirname(os.getenv('VBX_SDK') +  "/lib/"))
 #vbx_cnn_t vbx_cnn_init(volatile void* ctrl_reg_addr);
 
 _so.vbx_cnn_init.arg_types = [c_void_p]
@@ -81,6 +85,7 @@ def vbx_cnn_model_start(vbx_cnn,model,io_buffers):
 #vbx_cnn_state_e vbx_cnn_get_state(vbx_cnn_t* vbx_cnn);
 def vbx_cnn_get_state(vbx_cnn):
     return _so.vbx_cnn_get_state(vbx_cnn.p)
+
 #int vbx_cnn_model_poll(vbx_cnn_t* vbx_cnn);
 def vbx_cnn_model_poll(vbx_cnn):
     ret = _so.vbx_cnn_model_poll(vbx_cnn.p)
@@ -88,13 +93,12 @@ def vbx_cnn_model_poll(vbx_cnn):
         err = vbx_cnn_err(vbx_cnn_get_err_val)
         raise RuntimeError(err.name)
     return ret
-#
-#
+
 #size_t model_get_output_length(const model_t* model,int output_index);
 _so.model_get_output_length.restype = c_size_t
 def model_get_output_length(model,output_index):
     return _so.model_get_output_length(c_char_p(model),c_int(output_index))
-#
+
 #size_t model_get_input_length(const model_t* model,int input_index);
 _so.model_get_input_length.restype = c_size_t
 def model_get_input_length(model,input_index):
@@ -116,18 +120,19 @@ def model_get_output_shape(model,output_index):
     dims = model_get_output_dims(model,output_index)
     ret = _so.model_get_output_shape(c_char_p(model),c_int(output_index))
     return [ret[_] for _ in range(dims)]
-#
+
 #size_t* model_get_input_shape(const model_t* model,int input_index);
 _so.model_get_input_shape.restype = ctypes.POINTER(c_int)
 def model_get_input_shape(model,input_index):
     dims = model_get_input_dims(model,input_index)
     ret = _so.model_get_input_shape(c_char_p(model),c_int(input_index))
     return [ret[_] for _ in range(dims)]
-#
+
 #vbx_cnn_calc_type_e model_get_output_datatype(const model_t* model,int output_index);
 def model_get_output_datatype(model,output_index):
     ret = _so.model_get_output_datatype(c_char_p(model),c_int(output_index))
     return np.dtype(ctype_from_enum(ret))
+
 #vbx_cnn_calc_type_e model_get_input_datatype(const model_t* model,int input_index);
 def model_get_input_datatype(model,input_index):
     ret = _so.model_get_input_datatype(c_char_p(model),c_int(input_index))
@@ -139,27 +144,29 @@ _so.model_get_num_inputs.restype = c_size_t
 def model_get_num_inputs(model):
     ret = _so.model_get_num_inputs(c_char_p(model))
     return ret
+
 _so.model_get_data_bytes.restype = c_size_t
 def model_get_data_bytes(model):
     ret = _so.model_get_data_bytes(c_char_p(model))
     return ret
+
+#size_t model_get_data_bytes(const model_t* model);
 _so.model_get_allocate_bytes.restype = c_size_t
 def model_get_allocate_bytes(model):
     ret = _so.model_get_allocate_bytes(c_char_p(model))
     return ret
 
-#
 #size_t model_get_num_outputs(const model_t* model);
 _so.model_get_num_outputs.restype = c_size_t
 def model_get_num_outputs(model):
     ret = _so.model_get_num_outputs(c_char_p(model))
     return ret
 
-
 #vbx_cnn_size_conf_e model_get_size_conf(const model_t* model);
 def model_get_size_conf(model):
     size = _so.model_get_size_conf(c_char_p(model))
     return size
+
 #void* model_get_test_input(const model_t* model,int input_index);
 _so.model_get_test_input.restype= c_void_p
 def model_get_test_input(model,input_index):
@@ -180,30 +187,37 @@ def model_get_test_output(model,output_index):
     length = model_get_output_length(model,output_index)
     return np.ctypeslib.as_array(ptr,shape=(length,))
 
+#float model_get_input_scale_value(const model_t* model, int index);
 _so.model_get_input_scale_value.restype = c_float
 def model_get_input_scale_value(model,input_index):
     return _so.model_get_input_scale_value(model,input_index)
 
+#float model_get_output_scale_value(const model_t* model,int index);
 _so.model_get_output_scale_value.restype = c_float
 def model_get_output_scale_value(model,output_index):
     return _so.model_get_output_scale_value(model,output_index)
 
+#int model_get_output_zeropoint(const model_t* model, int index);
 _so.model_get_output_zeropoint.restype = c_int
 def model_get_output_zeropoint(model,output_index):
     return _so.model_get_output_zeropoint(model,output_index)
 
+#int model_get_input_zeropoint(const model_t* model, int index);
 _so.model_get_input_zeropoint.restype = c_int
 def model_get_input_zeropoint(model,input_index):
     return _so.model_get_input_zeropoint(model,input_index)
 
+#size_t model_get_input_offset(const model_t* model,int input_index);
 _so.model_get_input_offset.restype = c_int
 def model_get_input_offset(model,input_index):
     return _so.model_get_input_offset(model,input_index)
 
+#size_t model_get_output_offset(const model_t* model,int output_index);
 _so.model_get_output_offset.restype = c_int
 def model_get_output_offset(model,output_index):
     return _so.model_get_output_offset(model,output_index)
 
+#int model_check_sanity(const model_t* model);
 def model_check_sanity(model):
     return _so.model_check_sanity(model)
 

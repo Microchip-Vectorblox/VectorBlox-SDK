@@ -22,6 +22,7 @@ then
         && tar -zxvf flatc.tar.gz \
         && sudo chmod +x flatc \
         && sudo mv flatc /usr/bin/
+    git lfs pull
 else
     echo "Unsupported OS, please install dependencies manually" && exit 1
 fi

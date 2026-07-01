@@ -7,9 +7,11 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.0                                                   #
+# v3.1                                                   #
 #                                                        #
 ##########################################################
+
+
 
 set -e
 echo "Checking and activating VBX Python Environment..."
@@ -27,16 +29,24 @@ if [ ! -f yolov9s_70s_15p_512x512.tflite ]; then
 fi
 
 
+
+# vnnx_compile is an internal tool that converts an int8 tflite file to a binary file that can be run on the SDK and VectorBlox FPGA
+#  Purpose: converts int8 tflite to binary
+#  - Required Inputs: int8 tflite, size configuration, compression configuration, output file name
+#  - Outputs: binary object files(.hex and binary file)
 if [ -f yolov9s_70s_15p_512x512.tflite ]; then
     echo "Generating VNNX for V1000 ucomp configuration..."
     vnnx_compile -s V1000 -c ucomp -t yolov9s_70s_15p_512x512.tflite --uint8 -o yolov9s_70s_15p_512x512.ucomp
 fi
 
+
+# This step runs the final compiled binary in Python, it also shows how to run the same file in C simulation for SDK
+#   *Currently C simulation is not supported for unstructured compression
 if [ -f yolov9s_70s_15p_512x512.ucomp ]; then
     echo "Running Simulation..."
     python $VBX_SDK/example/python/yoloInfer.py yolov9s_70s_15p_512x512.ucomp $VBX_SDK/tutorials/test_images/dog.jpg -v 8 -l coco.names 
     echo "C Simulation Command:"
-    echo '$VBX_SDK/example/sim-c/sim-run-model yolov9s_70s_15p_512x512.ucomp $VBX_SDK/tutorials/test_images/dog.jpg ULTRALYTICS'
+    echo '$VBX_SDK/example/sim-c/sim-run-model yolov9s_70s_15p_512x512.ucomp $VBX_SDK/tutorials/test_images/dog.jpg OBJECT_DETECT'
 fi
 
 deactivate

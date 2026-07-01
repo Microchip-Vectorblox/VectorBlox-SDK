@@ -13,6 +13,7 @@ import json
 
 from .utils import match_shape, calc_diff, generate_inputs_outputs, get_input_details, get_output_details
 from .split_tflite import generate_split_graphs
+import vbx.sim.model_run as mr
 
 import subprocess
 import shlex
@@ -42,10 +43,12 @@ def default_input_arr(shape, dtype, seed=42):
     return arr.astype(dtype)
 
 
-def get_tflite_io(tflite_model, input_files, subdir, mean=0., scale=1., rgb=False):
+def get_tflite_io(tflite_model, input_files, subdir, mean=0., scale=1., rgb=False, all_tensors=False):
 
-    interpreter= tf.lite.Interpreter(
-             model_path=tflite_model)
+    if all_tensors:
+        interpreter= tf.lite.Interpreter(model_path=tflite_model, experimental_preserve_all_tensors=True)
+    else:
+        interpreter= tf.lite.Interpreter(model_path=tflite_model)
     interpreter.allocate_tensors()
 
     input_details = get_input_details(tflite_model)
@@ -74,13 +77,8 @@ def get_tflite_io(tflite_model, input_files, subdir, mean=0., scale=1., rgb=Fals
                 elif type(input_file) is np.ndarray:
                     arr = input_file
                 else:
-                    assert(len(shape) == 4), "Input image passing supported only for 4-dimension input TFLite"
-                    channels, height, width = shape[3], shape[1], shape[2]
-                    arr = get_input_data(input_file, width, height, channels, mean, scale, rgb)
-                    input_scale, input_zero_point = input_detail.get('quantization', (0.0, 0))
-                    if  input_scale != 0.0:
-                        arr = (arr / input_scale) + input_zero_point
-                    arr = arr.astype(dtype)
+                    img = cv2.imread(input_file)
+                    arr, height, width, channels_last = mr.preprocess_img_to_input_array(img, tflite_model, not rgb, scale, mean)
         else:
             arr = default_input_arr(shape, dtype)
 
@@ -120,7 +118,13 @@ def get_tflite_io(tflite_model, input_files, subdir, mean=0., scale=1., rgb=Fals
         # outputs[output_detail['index']] = interpreter.get_tensor(output_detail['index'])
         outputs[output_detail['name']] = interpreter.get_tensor(output_detail['index'])
 
-    return inputs, outputs
+    tensors = {}
+    if all_tensors:
+        for t in interpreter.get_tensor_details():
+            tensors[t['name']] = interpreter.get_tensor(t['index'])
+
+    return inputs, outputs, tensors
+
 
 def get_vnnx_io(vnnx_model, tflite_keys, input_files, tfin, subdir, mean=0., scale=1., rgb=False):
     with open(vnnx_model, 'rb') as mf:
@@ -144,16 +148,8 @@ def get_vnnx_io(vnnx_model, tflite_keys, input_files, tfin, subdir, mean=0., sca
             if input_files is not None and len(input_files) > i:
                 input_file = input_files[i]
                 if type(input_file) is str and '.npy' not in input_file:
-                    if shape[-1] not in [1,3]:
-                        channels, height, width = shape
-                        nchw = True
-                    else:
-                        height, width, channels = shape
-                        nchw = False
-                    img = get_input_data(input_file, width, height, channels, mean, scale, rgb)
-                    if nchw:
-                        img = img.swapaxes(-2, -1).swapaxes(-3, -2)
-                    arr = ((img / model.input_scale_factor[i]) + model.input_zeropoint[i])
+                    img = cv2.imread(input_file)
+                    arr, height, width, channels_last = mr.preprocess_img_to_input_array(img, tflite_model, not rgb, scale, mean)
                 elif type(input_file) is str and '.npy' in input_file:
                     arr = np.load(input_file)
                 elif os.path.exists(vnnx_inp_path):
@@ -295,22 +291,30 @@ def compare_tflite(tflite_graph_name, size_conf='V1000', compression_vbx='ncomp'
 
 def compare():
     parser = argparse.ArgumentParser()
-    parser.add_argument('tflite', type=existing_file)
+    parser.add_argument('tflite')
     parser.add_argument('-s', '--size-conf', help='size configuration to build model for',
                         choices = ['V250','V500','V1000'], default='V1000')
     parser.add_argument('-c', '--compression-vbx', help='compression config to build model for',
-                        choices = ['ncomp','comp','ucomp'], default='V1000')                        
+                        choices = ['ncomp','comp','ucomp'], default='ncomp')                        
     parser.add_argument('-e', '--error-rate', type=int, default=0)
     parser.add_argument('-t', '--error-threshold',  type=int, default=1)
     parser.add_argument('--split-every-op', action='store_true')
-    parser.add_argument("-v", "--verbose", action='store_true', help='Prints all activations, even those with less than 1% off-by-one')
+    parser.add_argument("-v", "--verbose", action='store_true', help='Prints all activations')
     args = parser.parse_args()
 
-    if os.path.isdir('./subgraphs'):
-        shutil.rmtree('./subgraphs', ignore_errors=True)
-    generate_split_graphs(args.tflite, './', split_every_op=args.split_every_op)
-    for t in natsort.natsorted(glob.glob(os.path.join('./subgraphs', '*.tflite'))):
-        compare_tflite(t, args.size_conf, args.compression_vbx, args.error_rate, args.error_threshold, args.verbose)
+    if os.path.isdir(args.tflite):
+        path = os.path.join(args.tflite,'subgraphs')
+    else:
+        if os.path.isdir('./subgraphs'):
+            shutil.rmtree('./subgraphs', ignore_errors=True)
+        generate_split_graphs(args.tflite, './', split_every_op=args.split_every_op, gen_subgraphs_from_splits=True)
+        path = './subgraphs'
+
+    for t in natsort.natsorted(glob.glob(os.path.join(path, '*.tflite'))):
+        try:
+            compare_tflite(t, args.size_conf, args.compression_vbx, args.error_rate, args.error_threshold, args.verbose)
+        except:
+            print('WARNING', t, 'FAILED') 
 
 
 def main():
@@ -324,7 +328,7 @@ def main():
     parser.add_argument("--tfin", action='store_true', help='When comparing vnnxlite, compare with tflite input activations instead')
     parser.add_argument("--count", type=int, default=8, help='Used when args.input is a directory of images')
     parser.add_argument("--layers_to_sub", nargs='+', default=[], help='List of layer IDs to substitute the tflite subgraph with corresponding vnnx subgraph (use : for contiguous sequence like in python syntax)')
-    parser.add_argument("-v", "--verbose", action='store_true', help='Prints all activations, even those with less than 1% off-by-one')
+    parser.add_argument("-v", "--verbose", action='store_true', help='Prints all activations')
     args = parser.parse_args()
 
 
@@ -392,7 +396,7 @@ def main():
                 op_codes = jmodel['operator_codes']
                 subgraph = jmodel['subgraphs'][0]
                 layer_types = [op_codes[_['opcode_index']]['builtin_code'] for _ in subgraph['operators']]
-                tf_inputs, outputs = get_tflite_io(model, inputs, subdir, args.mean, args.scale, (not args.bgr))
+                tf_inputs, outputs, _ = get_tflite_io(model, inputs, subdir, args.mean, args.scale, (not args.bgr))
 
                 if args.tfin:
                     vnnx_i, vnnx_o = get_vnnx_io(vnnx_model, tf_inputs.keys(), tf_inputs, True, subdir, args.mean, args.scale, (not args.bgr))
@@ -426,7 +430,7 @@ def main():
         else:
             inputs = [img]
             for idx, model in enumerate(models):
-                tf_inputs, outputs = get_tflite_io(model, inputs, subdir)
+                tf_inputs, outputs, _ = get_tflite_io(model, inputs, subdir)
                 if idx in layer_ids_subbed:
                     v_inputs, v_outputs = get_vnnx_io(vnnx_models[idx], tf_inputs.keys(), inputs, True, subdir)
                     

@@ -51,8 +51,8 @@ int main(int argc, char** argv){
 		"Usage: %s  MODEL_FILE IMAGE.jpg [POST_PROCESS]\n"
 		"   if using POST_PROCESS to select post-processing, must be one of:\n"
 		"   CLASSIFY, YOLOV2, YOLOV3, YOLOV4, YOLOV5\n"
-		"   ULTRALYTICS, ULTRALYTICS_FULL, ULTRALYTICS_OBB, ULTRALYTICS_POSE\n"
-		"   BLAZEFACE, SCRFD, RETINAFACE, SSDV2, PLATE, LPD, LPR\n",
+		"   OBJECT_DETECT, OBJECT_DETECT_FULL, OBB_DETECT, POSE_DETECT\n"
+		"   BLAZEFACE, SCRFD, RETINAFACE, SSDV2, PLATE, LPD, LPR, SPACE, SPACE_T\n",
 				argv[0]);
 		return 1;
 	}

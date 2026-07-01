@@ -31,7 +31,7 @@ if __name__ == "__main__":
     scale = args.scale
     img = cv2.imread(args.image)
     arr, input_height, input_width, channels_last = mr.preprocess_img_to_input_array(img, args.model, args.bgr, scale)
-    outputs, output_shapes = mr.model_run(arr, args.model)
+    outputs, output_shapes = mr.model_run(arr, args.model, not args.injected_pixels)
     
     output=outputs[0].squeeze()
 

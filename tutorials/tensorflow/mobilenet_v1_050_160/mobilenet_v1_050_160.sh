@@ -7,9 +7,11 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.0                                                   #
+# v3.1                                                   #
 #                                                        #
 ##########################################################
+
+
 
 set -e
 echo "Checking and activating VBX Python Environment..."
@@ -18,6 +20,11 @@ if [ -z $VBX_SDK ]; then
 fi
 source $VBX_SDK/vbx_env/bin/activate
 
+
+# generate_npy is an internal tool that creates a npy array
+#  Purpose: Generates a npy array if an existing one does not exist, this is using custom img data
+#  - Required Inputs: source dataset, output name, size
+#  - Output: npy array
 echo "Checking for Numpy calibration data file..."
 if [ ! -f $VBX_SDK/tutorials/imagenetv2_rgb_20x160x160x3.npy ]; then
     generate_npy $VBX_SDK/tutorials/imagenetv2_rgb_20x224x224x3.npy -o $VBX_SDK/tutorials/imagenetv2_rgb_20x160x160x3.npy -s 160 160 
@@ -35,21 +42,46 @@ fi
 
 
 
+if [ -f mobilenet_v1_050_160.tar.gz ]; then
+   if ! echo "650d8027839f3fc7aa82d2e8a19c5b58 mobilenet_v1_050_160.tar.gz" | md5sum -c; then
+       echo -e "\n There is an issue with the mobilenet_v1_050_160 model file as the expected checksum does not match.\n The model source can be found at: https://tfhub.dev/google/imagenet/mobilenet_v1_050_160/classification/5.\n If the model information has changed, please update this script and re-run the tutorial."
+       exit 1
+   fi
+fi
+
+
+# tflite_quantize is an internal tool designed to quantize a saved_model directory using the npy array
+#  Purpose: Convert source model directory to int8 tflite format
+#  - Required Inputs: model source directory, calibration npy array
+#  - Output: int8 tflite model
 if [ ! -f mobilenet_v1_050_160.tflite ]; then
    echo "Generating TF Lite..."
    tflite_quantize mobilenet_v1_050_160 mobilenet_v1_050_160.tflite -d $VBX_SDK/tutorials/imagenetv2_rgb_20x160x160x3.npy \
 --scale 255. --shape 1 160 160 3
 fi
 
+
+# tflite_preprocess is an internal tool used to add a preprocess layer to the start of the model
+#  Purpose: adds a preprocess layer to the start of the model (if none, will just preprocess by adding a uint8->int8 layer)
+#  - Required Inputs: tflite source model, additional arguments 
+#  - Outputs: preprocessed tflite model
 if [ -f mobilenet_v1_050_160.tflite ]; then
    tflite_preprocess mobilenet_v1_050_160.tflite  --scale 255
 fi
 
+
+# vnnx_compile is an internal tool that converts an int8 tflite file to a binary file that can be run on the SDK and VectorBlox FPGA
+#  Purpose: converts int8 tflite to binary
+#  - Required Inputs: int8 tflite, size configuration, compression configuration, output file name
+#  - Outputs: binary object files(.hex and binary file)
 if [ -f mobilenet_v1_050_160.pre.tflite ]; then
     echo "Generating VNNX for V1000 ncomp configuration..."
     vnnx_compile -s V1000 -c ncomp -t mobilenet_v1_050_160.pre.tflite  -o mobilenet_v1_050_160_V1000_ncomp.vnnx
 fi
 
+
+# This step runs the final compiled binary in Python, it also shows how to run the same file in C simulation for SDK
+#   *Currently C simulation is not supported for unstructured compression
 if [ -f mobilenet_v1_050_160_V1000_ncomp.vnnx ]; then
     echo "Running Simulation..."
     python $VBX_SDK/example/python/classifier.py mobilenet_v1_050_160_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/oreo.jpg 

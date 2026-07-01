@@ -53,6 +53,8 @@ if __name__ == "__main__":
     classes = [str(_) for _ in range(args.num_classes)]
     if args.num_classes == 91:
         classes = ssd.coco91
+    elif args.num_classes == 90:
+        classes = ssd.coco91[1:]
     colors = dataset.coco91_colors
     for p in predictions:
         print("{}\t{}\t({}, {}, {}, {})".format(classes[p['class_id']],

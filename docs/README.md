@@ -1,39 +1,46 @@
-## Documentation Index
+# Documentation Index
 
-### C API
-[C_API](./C_API.md) contains the VectorBlox API calls used by C and C++ programmers.
+To generate printable PDFs locally of these markdown documents, you can use `pandoc input.md -o output.pdf --pdf-engine=pdflatex` (recommended) or similar tools after pip installing them. Online tools like Markdown to Word also exist.
 
-### CoreVectorBlox v3.0 IP Handbook
-This handbook provides details about the Microchip CoreVectorBlox environment and how to use it. This document is used by Microchip FPGA designers using Libero® System-on-Chip (SoC).
+## API for Interacting with CoreVBX
 
-### CoreVectorBlox v3.0 Release Notes
-Summary of key changes in the current release.
+[API for Interacting with CoreVBX](./API_for_Interacting_with_CoreVBX.md) contains the VectorBlox API calls used by C and C++ programmers. This document also contains information on the VectorBlox Python API.
 
-### Inference Simulation
-[inference_simulation](./inference_simulation.md) provides instructions and example scripts for running classification, object detection, and pose detection models on the VBX simulator using both C and Python.
+## CoreVectorBlox IP Handbook  
 
-### Known Issues
-[known_issues](./known_issues.md) provides a list of currently known bugs and workarounds across VectorBlox
+[CoreVectorBlox IP Handbook](./CoreVectorBlox_IP_Handbook.pdf) provides details about the Microchip CoreVectorBlox environment and how to use it. This document is used by Microchip FPGA designers using Libero® System-on-Chip (SoC).
 
-### Operators
-[OPS](./OPS.md) lists the currently supported operators
+## Operators
 
-### Postprocess
-[postprocess](./postprocess.md) lists the currently supported postprocessing functions
+[OPS](./OPS.md) lists the currently supported TFLite INT8 operators.
 
-### Resource Utilization
-[resource_utilization](./resource_utilization.md) contains a table of PolarFire SoC resource utilization metrics for seven different size and compression configurations
+## Known Issues
+[known_issues](./known_issues.md) provides a list of currently known bugs and workarounds across VectorBlox.
 
-### SDK Toolkit
-[sdk_toolkit](./sdk_toolkit.md) outlines of the SDK toolkits used in the CoreVectorBlox flow for model conversion, detailing tools for handling OpenVINO, ONNX, and TensorFlow Lite formats. It provides an overview of each tool’s purpose, usage examples
+## C Postprocessing
 
-### VBX Graph Generation
-[vbx_graph_generation](./vbx_graph_generation.md) describes vnnx_compile tool converts a TF Lite model into a quantized binary file for that can be run on hardware. Currently, vnnx_compile supports {V250, V500, V1000} size configurations, and {no compression, compression, unstructured compression} compression configurations .
-  
-### VBX SDK Programmer's Guide
-This VectorBloxPG provides details about Microchip VectorBlox Tool Flow environment, and it is used for converting neural networks and generating graphs, to accelerate inference on an FPGA using CoreVectorBlox IP. However, for the most updated information about the SDK please refer to this repo's markdown files
+[C Postprocessing](./C_Postprocessing.md) lists the currently supported C postprocessing functions.
 
+## Resource Utilization  
 
+[resource_utilization](./resource_utilization.md) contains a table of PolarFire SoC resource utilization metrics for seven different core sizes and compression configurations.
 
-   
+## VectorBlox Programmer's Guide
 
+[VectorBloxPG](./VectorBloxPG.md) provides details on the Microchip VectorBlox Tool Flow environment within the SDK, which converts models and generates model binary files to accelerate inference on an FPGA using CoreVectorBlox IP.
+
+## Tutorial Metrics Appendix
+
+[tutorial_metrics_appendix](./tutorial_metrics_appendix.md) contains a complete list of tutorial metrics for all supported models.
+
+## Tutorial Walkthrough Guide
+
+[tutorial_walkthrough_guide](./tutorial_walkthrough_guide.md) provides a detailed walkthrough of three example tutorials.
+
+## Debug Model Guide
+
+[debug_model_guide](./debug_model_guide.md) provides guidance on debugging models at each stage of the VectorBlox SDK workflow.
+
+## VectorBlox SDK Glossary
+
+[vectorblox_sdk_glossary](./vectorblox_sdk_glossary.md) contains definitions and acronyms used throughout the VectorBlox SDK documentation.

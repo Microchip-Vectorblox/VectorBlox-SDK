@@ -1,5 +1,23 @@
 
+# Resource Utilization For VectorBlox Core
 
+Numbers measured with Libero using the PolarFire SoC Video Kit Demo. To find resource utilization metrics in Libero, view the reports tab after completing synthesis.
+
+## Resource Utilization For VectorBlox 3.1 Core
+
+| IP                                       | Fabric 4LUT | Fabric DFF | Interface 4LUT | Interface DFF | Total 4LUT | Total DFF | uSRAM | LSRAM | MATH |
+| ---------------------------------------- | ----------- | ---------- | -------------- | ------------- | ---------- | --------- | ----- | ----- | ---- |
+| VBx V1000 No Compression                 | 49694       | 51005      | 22788          | 22788         | 72482      | 73793     | 534   | 151   | 304  |
+| VBx V1000 With Compression               | 62521       | 61691      | 24228          | 24228         | 86749      | 85919     | 534   | 191   | 304  |
+| VBx V1000 With Unstructured Compression  | 38482       | 59332      | 34740          | 34740         | 73222      | 94072     | 450   | 526   | 289  | 
+| VBx V500 No Compression                  | 30998       | 30430      | 12036          | 12036         | 43034      | 42466     | 295   | 84    | 152  |
+| VBx V500 With Compression                | 36959       | 36144      | 12900          | 12900         | 49859      | 49044     | 295   | 108   | 152  |
+| VBx V250 No Compression                  | 22493       | 21400      | 7260           | 7260          | 29753      | 28660     | 185   | 56    | 84   |
+| VBx V250 With Compression                | 26499       | 24836      | 8016           | 8016          | 34515      | 32852     | 185   | 77    | 84   |  
+
+
+
+## Resource Utilization For VectorBlox 3.0 Core
 
 | IP                                        | Fabric 4LUT | Fabric DFF | Interface 4LUT | Interface DFF | Total 4LUT | Total DFF | uSRAM | LSRAM | MATH |
 |-------------------------------------------|-------------|------------|----------------|---------------|------------|-----------|-------|-------|------|

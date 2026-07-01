@@ -377,11 +377,13 @@ typedef STRUCT_PACKED vnnx_layer{
 			int32_t out_used;
 			int32_t sp_used;
 			int32_t fia_preloaded;
-			int32_t next_fia_preload;
+			int32_t next_fia_node_id;
+			int32_t preload_next_fia;
 			obj_off_t filter_data;
 			obj_off_t bias_data;
 			obj_off_t quantization_records;
 			obj_off_t nlf_data;
+			uint32_t tile_count;
 		} Conv2DOptions;
 		STRUCT_PACKED {
 			int32_t axis;
@@ -397,6 +399,11 @@ typedef STRUCT_PACKED vnnx_layer{
 			int32_t left_shift;
 			int32_t type;
 		} eltwise8;
+		STRUCT_PACKED {
+			int32_t channels;
+			int32_t rows;
+			int32_t columns;
+		} reduce8;
 		STRUCT_PACKED {
 			int32_t filter_shape_dims[4];
 			obj_off_t filter_multiplier;
@@ -414,11 +421,6 @@ typedef STRUCT_PACKED vnnx_layer{
 			int32_t sub;
 			int32_t swap_inputs;
 		} broadcast8;
-		STRUCT_PACKED {
-			int32_t axis;
-			int32_t arg_max;
-			obj_off_t axis_list;
-		} reduce8;
 		STRUCT_PACKED{ 
 			int32_t value;
 			int32_t transpose_dilate_w;
@@ -521,7 +523,13 @@ typedef STRUCT_PACKED vnnx_layer{
             int32_t mode;
             int32_t num_c_inc;
             obj_off_t c_inc;
-            int32_t b_postproc_tiling;
+			int32_t min_rows;
+			int32_t min_cols;
+			int32_t min_maps;
+			int32_t rows_trips;
+			int32_t cols_trips;
+			int32_t maps_trips;
+            int32_t in_scratchpad;
 		}ResizeOptions;
 		STRUCT_PACKED{
 			int32_t permutation[3];
@@ -549,9 +557,11 @@ typedef STRUCT_PACKED vnnx_layer{
 			int32_t height;
 			int32_t height_final;
 			int32_t width;
+			int32_t width_final;
 			int32_t shaper_height;
 			int32_t shaper_height_final;
 			int32_t shaper_width;
+			int32_t shaper_width_final;
 			int32_t stride_height;
 			int32_t use_strided;
 		}ShaperOptions;
@@ -648,11 +658,13 @@ typedef STRUCT_PACKED vnnx_subgraph_node {
 			int32_t out_used;
 			int32_t sp_used;
 			int32_t fia_preloaded;
-			int32_t next_fia_preload;
+			int32_t next_fia_node_id;
+			int32_t preload_next_fia;
 			obj_off_t filter_data;
 			obj_off_t bias_data;
 			obj_off_t quantization_records;
 			obj_off_t nlf_data;
+			uint32_t tile_count;
 		} Conv2DOptions;
 		STRUCT_PACKED {
 			obj_off_t input2_multiplier;
@@ -665,6 +677,11 @@ typedef STRUCT_PACKED vnnx_subgraph_node {
 			int32_t left_shift;
 			int32_t type;
 		} eltwise8;
+		STRUCT_PACKED {
+			int32_t channels;
+			int32_t rows;
+			int32_t columns;
+		} reduce8;
 		STRUCT_PACKED {
 			int32_t filter_shape_dims[2];
 			int32_t input_stride;
@@ -705,17 +722,20 @@ typedef STRUCT_PACKED vnnx_subgraph_node {
 			int32_t tile[4];
 		}TileOptions;
 		STRUCT_PACKED{
-			int32_t m0;
-		}reduce;
-		STRUCT_PACKED{
 			int32_t stride;
 		}reorg;
 		STRUCT_PACKED{
 			float scale[2];
-            int32_t mode;
-            int32_t num_c_inc;
-            obj_off_t c_inc;
-            int32_t b_postproc_tiling;
+			int32_t mode;
+			int32_t num_c_inc;
+			obj_off_t c_inc;
+			int32_t min_rows;
+			int32_t min_cols;
+			int32_t min_maps;
+			int32_t rows_trips;
+			int32_t cols_trips;
+			int32_t maps_trips;
+            int32_t in_scratchpad;
 		}ResizeOptions;
 		STRUCT_PACKED{
 			int32_t permutation[3];

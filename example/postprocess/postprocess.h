@@ -171,6 +171,7 @@ extern char *coco_classes[80];
 extern char* coco91_classes[92];
 extern char* vehicle_classes[3];
 
+int ultralytics_process_box_int8(fix16_t *xywh, int8_t* arr, fix16_t angle, const int h, const int w, const int H, const int W, int zero_point, fix16_t scale_output);
 fix16_t calcIou_LTRB(fix16_t* A, fix16_t* B);
 fix16_t calcIou_XYWH(fix16_t* A, fix16_t* B);
 void fix16_softmax(fix16_t *input, int n, fix16_t *output);
@@ -209,6 +210,8 @@ void int8_to_fix16(fix16_t* output, int8_t* input, int size, fix16_t f16_scale, 
 fix16_t int8_to_fix16_single(int8_t input,fix16_t scale, int32_t zero_point);
 fix16_t post_process_lpr_int8(int8_t *output, model_t *model, char *label);
 fix16_t post_process_lpr(fix16_t *output, int output_length, char *label);
+
+fix16_t post_process_space_int8(fix16_t *points2D, int8_t **output_buffers_int8, model_t *model, int transpose_first);
 
 int post_process_ssdv2(fix16_box *boxes, int max_boxes,
                        fix16_t *network_outputs[12], int num_classes,
