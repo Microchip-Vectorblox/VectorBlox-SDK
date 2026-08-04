@@ -1802,6 +1802,9 @@ def apply_transformation(transform, operators, tensors, buffers, opcodes, builti
                     oshape = tensors[tensor_idx]['shape'].copy()
                     oshape[-3] -= kernel_h-1
                     oshape[-2] -= kernel_w-1
+
+                    oshape[-1] = weights.shape[0]
+
                     conv_opts['padding'] = 'VALID'
 
                     conv_op, tensors, buffers = op_conv(tensors, buffers, builtin_codes.index('CONV_2D'), tensor_idx, False, 'Conv2DOptions', conv_opts,
