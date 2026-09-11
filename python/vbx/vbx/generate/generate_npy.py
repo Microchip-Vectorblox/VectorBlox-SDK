@@ -61,7 +61,7 @@ def preprocess_images(images, shape, grayscale=False, norm=False):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('src')
+    parser.add_argument('src', help="Directory of images, or source npy array")
     parser.add_argument('-o', '--output-name', type=str, default='')
     parser.add_argument('-c', '--count', type=int, default=20)
     parser.add_argument('-s', '--shape', nargs=2, type=int, default=[224,224]) # height width

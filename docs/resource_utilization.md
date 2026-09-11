@@ -1,7 +1,7 @@
 
 # Resource Utilization For VectorBlox Core
 
-Numbers measured with Libero using the PolarFire SoC Video Kit Demo. To find resource utilization metrics in Libero, view the reports tab after completing synthesis.
+Numbers measured with Libero using the PolarFire SoC Video Kit Demo. To find resource utilization metrics in Libero, view the reports tab after completing synthesis. **Please note that VBX 3.1.1 uses the 3.1 VBX Core**.
 
 ## Resource Utilization For VectorBlox 3.1 Core
 

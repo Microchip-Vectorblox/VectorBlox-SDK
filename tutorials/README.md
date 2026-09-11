@@ -32,21 +32,22 @@ To run a tutorial script, change into the model's tutorial directory and run:
 
 | Source | Tutorial | Input<br>(H,W,C) | Runtime<br>(ms) | Task | Metric | TFLITE | VNNX |
 |:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| PINTO | [081_MiDaS_v2](PINTO/081_MiDaS_v2/081_MiDaS_v2.sh) | [256, 256, 3] | 121.921 | depth estimation | depthdelta1 (nyuv2) | 60.89 | 59.93 |
 | kaggle | [efficientnet-lite0](kaggle/efficientnet-lite0/efficientnet-lite0.sh) | [224, 224, 3] | 16.481 | classification | Top1 | 70.8 | 70.4 |
-| onnx | [onnx_resnet18-v1](onnx/onnx_resnet18-v1/onnx_resnet18-v1.sh) | [224, 224, 3] | 25.741 | classification | Top1 | 69.1 | 68.9 |
 | openvino | [mobilenet-v1-1.0-224](openvino/mobilenet-v1-1.0-224/mobilenet-v1-1.0-224.sh) | [224, 224, 3] | 11.811 | classification | Top1 | 70.1 | 70.1 |
-| qualcomm | [FFNet-122NS-LowRes_512x288](qualcomm/FFNet-122NS-LowRes_512x288/FFNet-122NS-LowRes_512x288.sh) | [288, 512, 3] | 76.168 | segmentation | meanIoU (cityscapes) | 44.82 | 44.45 |
-| qualcomm | [MobileNet-v3-Large-Quantized](qualcomm/MobileNet-v3-Large-Quantized/MobileNet-v3-Large-Quantized.sh) | [224, 224, 3] | 22.895 | classification | Top1 | 69.6 | 68.8 |
-| qualcomm | [QuickSRNetMedium-Quantized](qualcomm/QuickSRNetMedium-Quantized/QuickSRNetMedium-Quantized.sh) | [128, 128, 3] | 9.353 | image enhancement | PSNR (bsd300) | 26.79 | 26.81 |
 | tensorflow | [mobilenet_v2](tensorflow/mobilenet_v2/mobilenet_v2.sh) | [224, 224, 3] | 12.875 | classification | Top1 | 70.2 | 70.1 |
+| qualcomm | [MobileNet-v3-Large-Quantized](qualcomm/MobileNet-v3-Large-Quantized/MobileNet-v3-Large-Quantized.sh) | [224, 224, 3] | 22.895 | classification | Top1 | 69.6 | 68.8 |
+| onnx | [onnx_resnet18-v1](onnx/onnx_resnet18-v1/onnx_resnet18-v1.sh) | [224, 224, 3] | 25.741 | classification | Top1 | 69.1 | 68.9 |
+| ultralytics | [yolov8n-cls](ultralytics/yolov8n-cls/yolov8n-cls.sh) | [224, 224, 3] | 4.104 | classification | Top1 | 67.2 | 67.3 |
 | ultralytics | [yolov5n](ultralytics/yolov5n/yolov5n.sh) | [640, 640, 3] | 38.817 | object detection | mAP⁵⁰⁻⁹⁵ | 22.88 | 22.95 |
 | ultralytics | [yolov8n](ultralytics/yolov8n/yolov8n.sh) | [640, 640, 3] | 54.129 | object detection | mAP⁵⁰⁻⁹⁵ | 37.4 | 37.38 |
-| ultralytics | [yolov8n-cls](ultralytics/yolov8n-cls/yolov8n-cls.sh) | [224, 224, 3] | 4.104 | classification | Top1 | 67.2 | 67.3 |
+| ultralytics | [yolov9t](ultralytics/yolov9t/yolov9t.sh) | [640, 640, 3] | 65.068 | object detection | mAP⁵⁰⁻⁹⁵ | 37.92 | 38.18 |
 | ultralytics | [yolov8n-obb](ultralytics/yolov8n-obb/yolov8n-obb.sh) | [1024, 1024, 3] | 142.268 | obb detection | mAP⁵⁰⁻⁹⁵ |  |  |
 | ultralytics | [yolov8n-pose_512x288_split](ultralytics/yolov8n-pose_512x288_split/yolov8n-pose_512x288_split.sh) | [288, 512, 3] | 21.998 | pose detection | Pose Detection |  |  |
+| vectorblox | [yolov9s-spn](vectorblox/yolov9s-spn/yolov9s-spn.sh) | [512, 768, 3] | 207.024 | 6d pose | |  |  |
 | ultralytics | [yolov8n-seg](ultralytics/yolov8n-seg/yolov8n-seg.sh) | [640, 640, 3] | 70.769 | instance segmentation |  |  |  |
-| ultralytics | [yolov9t](ultralytics/yolov9t/yolov9t.sh) | [640, 640, 3] | 65.068 | object detection | mAP⁵⁰⁻⁹⁵ | 37.92 | 38.18 |
+| qualcomm | [FFNet-122NS-LowRes_512x288](qualcomm/FFNet-122NS-LowRes_512x288/FFNet-122NS-LowRes_512x288.sh) | [288, 512, 3] | 76.168 | segmentation | meanIoU (cityscapes) | 44.82 | 44.45 |
+| PINTO | [081_MiDaS_v2](PINTO/081_MiDaS_v2/081_MiDaS_v2.sh) | [256, 256, 3] | 121.921 | depth estimation | depthdelta1 (nyuv2) | 60.89 | 59.93 |
+| qualcomm | [QuickSRNetMedium-Quantized](qualcomm/QuickSRNetMedium-Quantized/QuickSRNetMedium-Quantized.sh) | [128, 128, 3] | 9.353 | image enhancement | PSNR (bsd300) | 26.79 | 26.81 |
 
 
 ## Compression

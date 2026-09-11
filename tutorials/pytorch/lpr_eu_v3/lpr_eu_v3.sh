@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1                                                   #
+# v3.1.1                                                 #
 #                                                        #
 ##########################################################
 
@@ -27,7 +27,7 @@ source $VBX_SDK/vbx_env/bin/activate
 #  - Output: npy array
 echo "Checking for Numpy calibration data file..."
 if [ ! -f $VBX_SDK/tutorials/sample_plates_20x34x146x3.npy ]; then
-    generate_npy $VBX_SDK/tutorials/sample_plates_20x34x146x3.npy -o $VBX_SDK/tutorials/sample_plates_20x34x146x3.npy -s 34 146  -b 
+    echo "If sample_plates_20x34x146x3.npy is not found, please generate a corresponding quantization dataset using generate_npy (use generate_npy --help for specifics)"
 fi
 
 echo "Checking for lpr_eu_v3 files..."

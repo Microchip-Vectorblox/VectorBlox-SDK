@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1                                                   #
+# v3.1.1                                                 #
 #                                                        #
 ##########################################################
 
@@ -77,14 +77,6 @@ fi
     if [ ! -f calibration_image_sample_data_20x128x128x3_float32.npy ]; then
         wget -q --no-check-certificate https://github.com/Microchip-Vectorblox/assets/raw/refs/heads/main/npy_files/calibration_image_sample_data_20x128x128x3_float32.npy
     fi
-
-
-if [ -f v9-t.cut.onnx ]; then
-   if ! echo "7a83b1343264f339e7856739eae90ebc v9-t.cut.onnx" | md5sum -c; then
-       echo -e "\n There is an issue with the yolov9-t model file as the expected checksum does not match.\n The model source can be found at: https://github.com/LibreYOLO/libreyolo.\n If the model information has changed, please update this script and re-run the tutorial."
-       exit 1
-   fi
-fi
 
 
 # onnx2tf is an external model conversion tool to convert an onnx model to int8 tflite

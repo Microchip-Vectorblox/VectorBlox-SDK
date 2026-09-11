@@ -567,7 +567,7 @@ def onnx_input_shape(model_file):
     for input in model.graph.input:
         tensor_type = input.type.tensor_type
         if (tensor_type.HasField("shape")):
-            input_shapes.append([d.dim_value for d in tensor_type.shape.dim if d.HasField("dim_value") ])
+             input_shapes.append([d.dim_value for d in tensor_type.shape.dim if (d.HasField("dim_value") or  d.HasField("dim_param"))])
     return input_shapes
 
 def onnx_output_shape(model_file):

@@ -1,6 +1,6 @@
 # VectorBlox Tutorial Walkthrough Guide
 
-This guide walks through three VectorBlox SDK tutorials that convert models from their source framework into a compiled binary file suitable for the PolarFire FPGA. Note that these three walkthroughs are just examples, and other models will likely require slightly different steps to generate a binary file.
+This guide walks through three VectorBlox SDK tutorials that convert models from their source framework into a compiled binary file suitable for the PolarFire FPGA. These three walkthroughs are examples, and other models will likely require slightly different steps to generate a binary file.
 
 ## Table of Contents
 
@@ -50,7 +50,7 @@ Most tutorials for classification and detection follow this flow:
 
 ## Walkthrough for mediapipe/efficientnet_lite0
 
-EfficientNet-Lite0 is a lightweight image classifier from Google's MediaPipe. This tutorial is the simplest path through the SDK since the model is already quantized to INT8 by MediaPipe, so it enters the pipeline at the tflite preprocess step.
+EfficientNet-Lite0 is a lightweight image classifier from Google's MediaPipe. This tutorial is the simplest path through the SDK because MediaPipe already quantizes the model to INT8, so it enters the pipeline at the TFLite preprocess step.
 
 ### Step 1 — Download efficientnet_lite0.tflite
 
@@ -68,9 +68,9 @@ tflite_preprocess efficientnet_lite0.tflite --scale 255
 
 `tflite_preprocess` injects normalization operations at the beginning of the TFLite graph and writes the result to `efficientnet_lite0.pre.tflite`.
 
-The `--scale 255` argument means the inserted layer will divide input pixel values by 255. This is done by the Multiply operator `MUL`, which multiplies by 0.00392. Layers inserted by tflite_preprocess can be seen when inspecting the model's graph in [Netron](https://netron.app/).
+The `--scale 255` argument means the inserted layer will divide input pixel values by 255. The Multiply operator `MUL` does this by multiplying by 0.00392. You can see layers inserted by tflite_preprocess when inspecting the model's graph in [Netron](https://netron.app/).
 
-Also, this step adds a `Quantize` layer for converting from uint8 to int8.
+This step also adds a `Quantize` layer to convert from uint8 to int8.
 
 Output file: `efficientnet_lite0.pre.tflite`
 
@@ -80,7 +80,7 @@ Output file: `efficientnet_lite0.pre.tflite`
 vnnx_compile -s V1000 -c ncomp -t efficientnet_lite0.pre.tflite -o efficientnet_lite0_V1000_ncomp.vnnx
 ```
 
-`vnnx_compile` is the compilation step that converts the INT8 TFLite graph into a VectorBlox binary (`.vnnx`) or (`.ucomp` for unstructured compression) that can be executed on physical hardware. A (`.hex`) file will also be output that can be used with the Non SoC demo.  
+`vnnx_compile` is the compilation step that converts the INT8 TFLite graph into a VectorBlox binary (`.vnnx`) or (`.ucomp` for unstructured compression) that can be executed on physical hardware. It also outputs a (`.hex`) file that can be used with the Non SoC demo.  
 
 The `-s V1000` flag selects the V1000 hardware size configuration, and `-c ncomp` selects the `no compression` configuration.
 
@@ -98,7 +98,7 @@ $VBX_SDK/example/sim-c/sim-run-model efficientnet_lite0_V1000_ncomp.vnnx $VBX_SD
 
 `classifier.py` runs inference through the VectorBlox Python simulator.
 
-The C simulation command shown (using `sim-run-model`) is useful for verifying that the model will run on hardware.
+The C simulation command shown (using `sim-run-model`) helps verify that the model will run on hardware.
 
 ---
 
@@ -118,7 +118,7 @@ Post-training quantization (converting a float32 or float16 model to INT8) requi
 
 The SDK comes with a pre-collected calibration dataset `imagenetv2_rgb_20x224x224x3.npy`  
 
-`generate_npy` reformats this array for use with `openvino2tensorflow`. The `-b` flag converts from RGB to BGR channel order, since OpenVINO is BGR. The reformatted result is saved to `imagenetv2_20x224x224x3.npy`.
+`generate_npy` reformats this array for use with `openvino2tensorflow`. The `-b` flag converts from RGB to BGR channel order, since OpenVINO uses BGR. It saves the reformatted result to `imagenetv2_20x224x224x3.npy`.
 
 ### Step 2 — Download the Caffe model
 
@@ -139,7 +139,7 @@ omz_downloader --name mobilenet-v2
       --input_shape [1,3,224,224]
 ```
 
-The OpenVINO Model Optimizer (`mo`) is an external tool that converts the Caffe model into OpenVINO's Intermediate Representation (IR) format — a pair of `.xml` (graph structure) and `.bin` (weights) files. This is a required step because `openvino2tensorflow` (used in the next step) consumes OpenVINO IR, and not Caffe models.
+The OpenVINO Model Optimizer (`mo`) is an external tool that converts the Caffe model into OpenVINO's Intermediate Representation (IR) format — a pair of `.xml` (graph structure) and `.bin` (weights) files. This step is required because `openvino2tensorflow` (used in the next step) consumes OpenVINO IR, not Caffe models.
 
 ### Step 4 — Convert to quantized INT8 TFLite
 
@@ -154,7 +154,7 @@ The OpenVINO Model Optimizer (`mo`) is an external tool that converts the Caffe 
 
 `openvino2tensorflow` converts the OpenVINO IR model to the TensorFlow SavedModel format and then applies full-integer post-training quantization to produce an INT8 TFLite file. This step takes the model from FP32 to INT8.
 
-Flags to notice:
+Flags to note:
 
 - `--load_dest_file_path_for_the_calib_npy` — points to the calibration dataset prepared in Step 1.  
 - `--output_full_integer_quant_tflite` — requests full integer quantization where all ops, including inputs and outputs, are quantized to INT8.
@@ -172,7 +172,7 @@ The quantized TFLite is saved to `saved_model/model_full_integer_quant.tflite` a
 
 In this case, `tflite_preprocess` only inserts a `Quantize` op at the model input, converting the graph's input tensor type from `INT8` (which TFLite full-integer quantization produces) to `uint8`. The normalization was already handled in Step 3 with the `mo` command.
 
-For the compile and simulate steps, refer to the EfficientNet-Lite0 tutorial above, as they follow the same pattern.
+For the compile and simulate steps, refer to the EfficientNet-Lite0 tutorial above, which follows the same pattern.
 
 Output file: `mobilenet-v2.pre.tflite`
 
@@ -202,7 +202,7 @@ Refer to step 4 of the mediapipe/efficientnet_lite0 tutorial for more informatio
 
 ## Walkthrough for ultralytics/yolov8n
 
-YOLOv8n (Nano) from Ultralytics is designed for object detection with 80 COCO classes. The key difference in this tutorial is that the postprocessing is cut from the graph, and VectorBlox's own post-processing is used to improve performance and accuracy.
+YOLOv8n (Nano) from Ultralytics is designed for object detection with 80 COCO classes. The key difference in this tutorial is that we remove postprocessing from the graph and use VectorBlox's postprocessing to improve performance and accuracy.
 
 ### Step 1 — Export quantized TFLite from Ultralytics
 

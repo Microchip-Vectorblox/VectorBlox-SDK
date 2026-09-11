@@ -1,21 +1,26 @@
-# VectorBlox 3.1 SDK
+# VectorBlox 3.1.1 SDK
 
-VectorBlox is an SDK for compiling and running TFLite INT8 models on the VectorBlox accelerator.
+The VectorBlox™ SDK compiles quantized INT8 TFLite models into binaries that can be evaluated in the SDK simulator or deployed on Microchip PolarFire® and PolarFire® SoC FPGAs running the VectorBlox™ accelerator.  
 
-Models must be quantized and compiled using the included scripts.
+The shell scripts in the tutorials can be run to demonstrate quantizing and compiling models.
 
-The models can then be run via the VectorBlox simulator or on a physical VectorBlox accelerator on a Microchip FPGA.
+You can then run the models using the VectorBlox simulator or on a VectorBlox accelerator deployed on a Microchip FPGA.
 
 ## Getting Started
 
 
 ### Prerequisites
 
-To use the VectorBlox SDK, you need to run it in an Ubuntu environment (version 20.04, 22.04, or 24.04).
+To use the VectorBlox SDK, run it in an Ubuntu environment (version 20.04, 22.04, or 24.04).
 
-If you are using Windows, we recommend installing WSL (Windows Subsystem for Linux) so you can run Ubuntu on your computer. Setup instructions are available here:[Microsoft WSL Install Guide](https://learn.microsoft.com/en-us/windows/wsl/install).
+If you use Windows, we recommend installing WSL (Windows Subsystem for Linux) to run Ubuntu. Setup instructions are available here: [Microsoft WSL Install Guide](https://learn.microsoft.com/en-us/windows/wsl/install).
 
-Important for WSL users: run the SDK from your Ubuntu home folder, or make sure the folder you are using has the correct access permissions.
+Please note the following considerations when using Windows Subsystem for Linux:
+
+- DNS may not function correctly when connected to a VPN. Disconnect from the VPN while installing or running the VectorBlox Accelerator SDK.
+- Install the SDK in the Linux filesystem, not in the Windows filesystem located at /mnt/c.
+
+For WSL users: Run the SDK from your Ubuntu home directory or ensure the working directory has the correct access permissions.
 
 > If cloning the repo, `git` and `git-lfs` must be installed via `apt install git-lfs && git-lfs install`
 
@@ -35,15 +40,15 @@ Navigate to the root directory of `VectorBlox-SDK` and run the following command
 bash install_dependencies.sh
 ```
 
-### Activate (which installs if needed) Python 3.10 virtual environment, and set necessary environment variables
+### Activate (which installs if needed) the Python 3.10 virtual environment, and set necessary environment variables
 
 ```bash
 source setup_vars.sh
 ```
 
-Once in the VBX Python environment, the shell prompt is prefixed with (vbx_env).
+When the VBX Python environment is active, the shell prompt will display (vbx_env).
 
-**Note:** To exit or deactivate the environment, run the following command:
+**Note:** To exit or deactivate the environment, use the following command:
 
 ```bash
 deactivate
@@ -51,33 +56,33 @@ deactivate
 
 ### Run Tutorials
 
-When getting started with VectorBlox, it is recommended to review our tutorials to understand the flow. These example tutorials show how to generate CoreVectorBlox-compatible binary files using a shell script in the [tutorials directory](./tutorials/).
+We recommend reviewing our tutorials to understand the workflow. These examples demonstrate how to generate CoreVectorBlox-compatible binary files using shell scripts in the [tutorials directory](./tutorials/).
 
-Tutorials will download the model and convert it to a quantized `.tflite` if necessary.
-It will then be compiled into a VectorBlox binary file (`.vnnx` and `.hex` or `.ucomp` extensions) and simulated.
+Tutorials download the model and convert it to a quantized `.tflite`file if needed.y.
+The model is then compiled into a VectorBlox binary file (`.vnnx, `.hex`, or `.ucomp` extensions) and simulated.
 
-Follow the steps below to run a tutorial shell script:
+To run a tutorial shell script, follow these steps:
 
 ```bash
 cd $VBX_SDK/tutorials/SOURCE_NAME/MODEL_NAME
 bash MODEL_NAME.sh
 ```
 
-For a more detailed walkthrough of three tutorials, refer to the [Tutorial Walkthrough Guide](./docs/tutorial_walkthrough_guide.md) in the docs folder.
+For a detailed walkthrough of three tutorials, see the [Tutorial Walkthrough Guide](./docs/tutorial_walkthrough_guide.md) in the docs folder.
 
-Also, within the docs folder, a [Tutorial Metrics Appendix](./docs/tutorial_metrics_appendix.md) can be found that contains a complete list of tutorials along with their metrics.
+The docs folder also contains a [Tutorial Metrics Appendix](./docs/tutorial_metrics_appendix.md) with a complete list of tutorials and their metrics.
 
-**For more information on the commands presented in the shell script of the tutorials, see our [SDK Programmer's Guide](./docs/VectorBloxPG.md)**. Finally, a high-level overview of our tutorials is available in the [Tutorial README](./tutorials/README.md).
+**For more information on the commands used in the tutorial shell scripts, see the [SDK Programmer's Guide](./docs/VectorBloxPG.md).** A high-level overview of the tutorials is available in the [Tutorial README](./tutorials/README.md).
 
 ### After Generating a Binary File with the SDK
 
-Once a model’s binary file has been obtained from the SDK, it can be run on a PolarFire FPGA. Currently, the 3.1 SDK does not support PolarFire Non SoC Video Kit.
+After generating a model’s binary file with the SDK, you can run it on a PolarFire FPGA. The 3.1.1 SDK does not support the PolarFire Non-SoC Video Kit.
 
 More information on setting up the PolarFire SoC Video Kit for VectorBlox can be found in the [VectorBlox-SoC-Video-Kit-Demo](https://github.com/Microchip-Vectorblox/VectorBlox-SoC-Video-Kit-Demo/tree/main) repository.
 
-Within the VectorBlox-SoC-Video-Kit-Demo repository, refer to the Quickstart Guide when getting started. This guide provides a walkthrough for properly setting up the PolarFire SoC Video Kit so that a model’s binary file generated by the SDK can run on it.
+Refer to the Quickstart Guide in the VectorBlox-SoC-Video-Kit-Demo repository for setup instructions. This guide explains how to configure the PolarFire SoC Video Kit to run a model’s binary file generated by the SDK.
 
-Also, see the Adding Models Markdown File in the VectorBlox-SoC-Video-Kit-Demo repository for information on how to transfer the model’s binary file generated by the SDK to the board. This file also shows how to add a compiled model binary file to demo_models.h file so it can be run on the VectorBlox demo.
+See the Adding Models Markdown file in the VectorBlox-SoC-Video-Kit-Demo repository for instructions on transferring the model’s binary file to the board. This file also explains how to add a compiled model binary to demo_models.h so it can be run on the VectorBlox demo.
 
 ## Known Issues
 
@@ -87,8 +92,8 @@ For up-to-date information on known issues for the VectorBlox SDK and Demos, ple
 
 Model accuracy and performance can be found [here](./tutorials/README.md).
 
-Supported TFLite INT8 operators can be found [here](./docs/OPS.md).
+Supported TFLite INT8 operators are listed [here](./docs/OPS.md).
 
-Supported C postprocessing can be found [here](./docs/C_Postprocessing.md).
+Supported C post-processing is described [here](./docs/C_Postprocessing.md).
 
 For additional information, refer to the SDK [docs folder](./docs).
