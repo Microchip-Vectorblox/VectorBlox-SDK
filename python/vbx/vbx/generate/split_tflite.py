@@ -2,6 +2,7 @@ import argparse
 from .utils import existing_file, existing_dir, json_load, json_dump
 from .transform_tflite import is_forked, is_multi_input, is_singleton_op, json2tflite
 from .transform_tflite import graph_pattern, get_scale_factor, get_numpy_data, create_graph
+from .transform_tflite import is_pattern, valid_lut_patterns, is_graph_input
 import json
 import copy
 import subprocess
@@ -157,7 +158,7 @@ def get_splits_vbx2(jname, split_every_op=False, size_config='V1000', engine_op_
 
         # If a pattern is found, check if it should be processed
         if len(pattern):
-            if pattern_type == "TRANSFORM" or (pattern_type == "LUT" and (current_lut_count or partial_pattern)) or not connected:
+            if pattern_type in ["TRANSFORM"] or (pattern_type == "LUT" and (current_lut_count or partial_pattern)) or not connected:
                 if len(current):
                     splits.append(current)
                 current = []         
@@ -250,6 +251,13 @@ def is_broadcastable_constant(tensor_idx, tensors, buffers):
         return True
     # Check if all dims except last are 1 (channel-wise broadcast)
     return all(d == 1 for d in shape[:-1])
+
+
+def transpose_required(ishape, oshape):
+    if len(ishape) >= 4 and len(oshape) < 4:
+        return True
+    if len(oshape) >= 4 and len(ishape) < 4:
+        return True
 
 
 def get_splits_vbx2_optimized(jname, split_every_op=False, size_config='V1000', engine_op_types=None):
@@ -356,9 +364,19 @@ def get_splits_vbx2_optimized(jname, split_every_op=False, size_config='V1000', 
             current = []
             current_lut_count = 0
 
+        new_lut_input = False
+        if current_lut_count and current and opcode in ELTWISE_OPS and len(op_inputs) == 2:
+            produced = {t for idx in current for t in operators[idx]['outputs'] if t != -1}
+            external = {t for idx in current for t in operators[idx]['inputs']
+                        if t != -1 and t not in produced
+                        and 'data' not in buffers[tensors[t]['buffer']]}
+            new_lut_input = any(t not in produced and t not in external
+                                and 'data' not in buffers[tensors[t]['buffer']]
+                                for t in op_inputs)
+
         # === PATTERN HANDLING ===
         if len(pattern):
-            if pattern_type == "TRANSFORM" or (pattern_type == "LUT" and (current_lut_count or partial_pattern)) or not connected:
+            if pattern_type in ["TRANSFORM", "NORM"] or (pattern_type == "LUT" and (current_lut_count or partial_pattern)) or not connected:
                 if len(current):
                     splits.append(current)
                 current = []
@@ -438,12 +456,16 @@ def get_splits_vbx2_optimized(jname, split_every_op=False, size_config='V1000', 
             current.append(i)
 
         # === RESHAPE: Split if actual shape change ===
-        elif opcode == 'RESHAPE' and not ([_ for _ in op_ishapes[0] if _ != 1] == [_ for _ in op_oshapes[0] if _ != 1]):
+        elif opcode == 'RESHAPE' and (not ([_ for _ in op_ishapes[0] if _ != 1] == [_ for _ in op_oshapes[0] if _ != 1]) or transpose_required(op_ishapes[0],op_oshapes[0])):
             if len(current):
                 splits.append(current)
             current = []
             current_lut_count = 0
             current.append(i)
+
+            splits.append(current) #TODO forcing isolation
+            current = []
+
 
         # === Element-wise with singleton broadcast ===
         elif opcode in ELTWISE_OPS and multi_input and singleton:
@@ -452,6 +474,13 @@ def get_splits_vbx2_optimized(jname, split_every_op=False, size_config='V1000', 
             current = []
             current_lut_count = 0
             current.append(i)
+        
+        # A LUT wrapper has only one activation stream; a new dynamic operand
+        # must instead be loaded by a separate elementwise IDENTITY node.
+        elif new_lut_input:
+            splits.append(current)
+            current = [i]
+            current_lut_count = 0
 
         # === DEFAULT: Add to current subgraph ===
         else:
@@ -464,9 +493,79 @@ def get_splits_vbx2_optimized(jname, split_every_op=False, size_config='V1000', 
         prev_inputs = op_inputs
         prev_outputs = op_outputs
         i = i + 1
+    # To remove empty splits
+    if current:
+        splits.append(current)
 
-    splits.append(current)
     return splits, errors, specials
+
+
+
+def split_mixed_engine_splits(splits, operators, tensors, codes, engine_op_types, buffers=None):
+    # Enforce one engine per split: break any split that mixes NX-only and MXP-only
+    # ops into contiguous single-engine sub-splits. Agnostic ops (which may run on
+    # either engine) attach to the current run; an all-agnostic split is left intact
+    # and resolved later by get_engine_from_split_ops / get_splits_per_engine.
+    #
+    # This catches engine mixing introduced by pattern grouping (e.g. a Conv pulled
+    # into the same pattern as a pixel-shuffle Reshape/Transpose tail), which the
+    # per-op force_split_due_to_engine path never sees. Single-engine splits are
+    # returned unchanged.
+    new_splits = []
+    for split_idx, split in enumerate(splits):
+        if not split:
+            new_splits.append(split)
+            continue
+        seg = []                       # ops in the current single-engine segment
+        seg_engine = Engine.Agnostic   # committed engine of the current segment
+        last_committed = -1            # position in seg of the last engine-committed op
+        for op_idx in split:
+            eng = get_op_engine(op_idx, operators, tensors, codes, engine_op_types, buffers)
+            if eng == Engine.Agnostic or seg_engine == Engine.Agnostic or eng == seg_engine:
+                # Agnostic op, first committed op, or same engine: keep in segment.
+                seg.append(op_idx)
+                if eng != Engine.Agnostic:
+                    seg_engine = eng
+                    last_committed = len(seg) - 1
+            else:
+                # Engine switch. Close the segment after its last committed op. Any
+                # trailing agnostic ops (between that op and this one) normally belong
+                # with the new engine (e.g. a PAD leading into a Conv), so they are
+                # carried into the new segment along with this op.
+                #
+                # Exception 1: a LUT activation pattern (QUANTIZE/CAST/GATHER) trailing an
+                # NX op is the activation of that NX op, which NX can execute itself. Keep
+                # it on NX instead of dragging it onto the following MXP-only op (e.g. a
+                # DILATE from an expanded TRANSPOSE_CONV). Only applies when the trailing
+                # agnostic ops are *exactly* a LUT pattern.
+                trailing = seg[last_committed + 1:]
+                lut_match = is_pattern([operators[t] for t in trailing], codes, None, None,
+                                       valid_lut_patterns) if trailing else []
+
+                # Exception 2: PIXEL_SHUFFLE pattern (RESHAPE/TRANSPOSE/RESHAPE) transitioning
+                # from agnostic ops to MXP ops. The agnostic ops (e.g., ADD, QUANTIZE, CAST,
+                # GATHER) should stay with the NX segment, not get dragged into the MXP segment.
+                # This keeps ops like ADD_52 on NX instead of getting pulled to MXP.
+                is_pixel_shuffle_start = (eng != Engine.Agnostic and
+                                         codes[operators[op_idx]['opcode_index']] in ['RESHAPE', 'TRANSPOSE'])
+
+                if seg_engine == Engine.NX and len(lut_match) == len(trailing):
+                    # NX segment keeps its trailing LUT activation ops.
+                    new_splits.append(seg)
+                    seg = [op_idx]
+                elif seg_engine == Engine.NX and is_pixel_shuffle_start and trailing:
+                    # NX segment keeps its trailing agnostic ops when transitioning to PIXEL_SHUFFLE (RESHAPE/TRANSPOSE).
+                    # The PIXEL_SHUFFLE ops and this MXP op start a new segment without the agnostics.
+                    new_splits.append(seg)
+                    seg = [op_idx]
+                else:
+                    new_splits.append(seg[:last_committed + 1])
+                    seg = seg[last_committed + 1:] + [op_idx]
+                seg_engine = eng
+                last_committed = len(seg) - 1
+        if seg:
+            new_splits.append(seg)
+    return new_splits
 
 
 def get_splits(jname, split_every_op=False, engine_op_types=None):
@@ -548,19 +647,51 @@ def get_splits(jname, split_every_op=False, engine_op_types=None):
             current = []
             current_lut_count = 0
 
+        # A dtype-cast QUANTIZE immediately feeding the identity CONV_2D that
+        # transform_tflite.py's try_build_conv_uint8 synthesizes during input
+        # preprocessing (replacing the old quantize+cast+gather LUT) must stay a
+        # standalone split so it can be routed to MXP independently of the
+        # CONV_2D, which stays on NX like any other CONV_2D. Without this,
+        # force_split_due_to_engine's "agnostic op before an engine op never
+        # forces a split" rule would fuse them into one NX split, same as before
+        # the LUT->conv transform existed. The CONV_2D carries a non-empty
+        # custom_options marker (set at synthesis time) identifying it as an
+        # input-preprocessing conv, rather than matching by name or op-adjacency.
+        if prev_opcode == 'QUANTIZE' and opcode == 'CONV_2D' and op.get('custom_options'):
+            if len(current):
+                splits.append(current)
+            current = []
+            current_lut_count = 0
+
         if len(pattern):
+            # A matched pattern that starts a new, disconnected branch must not be merged
+            # into the current split. E.g. YOLO_ARG_MAX produces a sibling PAD (->scores) and
+            # ARG_MAX/RESHAPE/CAST (->class index) both reading the same tensor: PAD opens a
+            # split, then the ARG_MAX pattern would otherwise be appended to it, yielding one
+            # node with a linear PAD->ARG_MAX->CAST sublayer chain that overwrites the PAD
+            # (scores) output. Flush first so each parallel branch becomes its own MXP op.
+            if len(current) and (not connected or forked):
+                splits.append(current)
+                current = []
+                current_lut_count = 0
+
             if pattern_type == "LUT" and (current_lut_count or partial_pattern):
                 if len(current):
                     splits.append(current)
-                current = []         
+                current = []
                 current_lut_count = 0
 
             current += pattern
             if pattern_type == "LUT":
                 current_lut_count += 1
             i += len(pattern) - 1
-            # update outputs to be from last op in pattern
+            # update outputs (and opcode) to be from last op in pattern - prev_opcode
+            # below must reflect the pattern's actual last op (e.g. CONCATENATION for
+            # the multi-gather LUT pattern), not its first (QUANTIZE), or boundary
+            # rules keyed on prev_opcode (like the CONCATENATION split-forcing rule)
+            # never fire on the op immediately following a matched pattern.
             op = operators[i]
+            opcode = codes[op['opcode_index']]
             op_outputs = [_ for _ in op['outputs'] if _ != -1]
             
         elif prev_opcode in ['UNPACK', 'RESHAPE','TRANSPOSE']: #TODO start a new graph after OP
@@ -623,6 +754,8 @@ def get_splits(jname, split_every_op=False, engine_op_types=None):
         i = i + 1
 
     splits.append(current)
+    if engine_op_types is not None:
+        splits = split_mixed_engine_splits(splits, operators, tensors, codes, engine_op_types, buffers)
     return splits, errors, specials
 
 # Enum to represent engine types
@@ -632,38 +765,105 @@ class Engine(Enum):
     NX = 1
     Agnostic = 2
 
+# Classify a single op's target engine. Ops on either engine (e.g. ADD, CONCAT) are
+# Agnostic. This is the single source of truth for op->engine classification, shared
+# by get_engine_from_split_ops and split_mixed_engine_splits so the rule stays in one
+# place.
+def get_op_engine(op_idx, operators, tensors, codes, engine_op_types, buffers=None) -> Engine:
+    opcode = codes[operators[op_idx]['opcode_index']]
+    # The dtype-cast QUANTIZE feeding an input-preprocessing CONV_2D (marked via
+    # custom_options, see try_build_conv_uint8) must commit to MXP outright rather
+    # than being left Agnostic. Agnostic ops with nothing decided yet simply
+    # inherit whatever engine the next committed split happens to be (see
+    # get_splits_per_engine's deferred-target handling) - when this QUANTIZE is
+    # the very first split in the graph, that would silently pull it onto NX
+    # alongside the CONV_2D instead of MXP.
+    if (opcode == 'QUANTIZE' and op_idx + 1 < len(operators)
+            and codes[operators[op_idx + 1]['opcode_index']] == 'CONV_2D'
+            and operators[op_idx + 1].get('custom_options')):
+        return Engine.MXP
+    # A multi-input op (two dynamic, non-constant inputs - e.g. an SE-block sigmoid-gate x
+    # feature-map multiply) has no constant operand to fold into an NX-side scale/bias, so
+    # leaving it Agnostic lets the deferred-target logic in get_splits_per_engine drag it
+    # onto NX along with whatever it's adjacent to. Commit it to MXP outright instead.
+    # ADD and CONCATENATION are excluded - NX natively supports multi-input Add/Concat
+    # (see MULTIPLE_INPUT_OPS in the snp_compiler side), so those stay on their normal
+    # engine_op_types classification below.
+    if (opcode not in ('ADD', 'CONCATENATION') and buffers is not None
+            and is_multi_input(operators[op_idx], tensors, buffers)):
+        return Engine.MXP
+    if opcode in engine_op_types.agnostic_op_types:
+        result = Engine.Agnostic
+    elif opcode in engine_op_types.nx_op_types:
+        result = Engine.NX
+    else:
+        result = Engine.MXP
+    return result
+
 # Iterate over all of the ops in this split to get the split's target engine
 # Assert every op in this split is for one engine
-def get_engine_from_split_ops(split, operators, codes, engine_op_types) -> Engine:
+def get_engine_from_split_ops(split, operators, tensors, buffers, codes, engine_op_types, ucomp_odd_pad_to_mxp=False) -> Engine:
     current_split_target = None
 
+
+    # Special case: the QUANTIZE+CAST+(SPLIT+)GATHER(+CONCATENATION) LUT pattern
+    # is the split+gather+concat fallback op_lut synthesizes when
+    # try_build_conv_uint8 can't express the calibrated dtype-remap table as an
+    # affine 1x1 conv (see transform_tflite.py). When it sits at the very start
+    # of the graph (its input is the graph input), it is pure data-movement
+    # preprocessing with no NX-specific structure (no folding factor, no
+    # systolic tiling) - it always feeds a real NX op afterwards (e.g. CONV_2D),
+    # so leaving it Agnostic would let the deferred-target logic in
+    # get_splits_per_engine drag it onto NX, where ops downstream of it (like
+    # CONCATENATION) can crash NX-only passes such as
+    # calc_concat_folding_factor. Force it onto MXP outright.
+    split_opcodes = [codes[operators[idx]['opcode_index']] for idx in split]
+    if split_opcodes in valid_lut_patterns and is_graph_input(operators[split[0]], operators, tensors, buffers):
+        return Engine.MXP
+
     # Special case: Pad nodes are usually done as subnodes. However, if there
-    # is a case of [Non-NX] -> Pad -> Conv, the Pad is currently done on the NX
-    # as part of the Conv. This means there would be a split before the Pad. But
-    # Conv also always makes a new split, resulting in a split with Pad on its own.
-    # In such cases, put the split on NX.
+    # is a case of [Non-NX] -> Pad -> Conv, the Pad is done on the NX as part of
+    # the Conv (its padding). Conv always makes a new split, so this leaves the
+    # Pad on its own in a split - which should go on NX so it fuses into the Conv.
+    #
+    # But a lone Pad that is NOT followed by a convolution (an NX op) has nothing
+    # to fuse into on NX, so it must run standalone on MXP. Only keep it on NX
+    # when its output actually feeds an NX op (CONV_2D / MAX_POOL_2D).
     if len(split) == 1 and codes[operators[split[0]]['opcode_index']] == 'PAD':
-        return Engine.NX
+        pad_outputs = [t for t in operators[split[0]]['outputs'] if t != -1]
+        # UCOMP: an odd x odd input (H and W) feeding a stride-2 conv is padded to the nearest multiple of 4,
+        # and that pad runs on MXP rather than on TSNP.
+        if ucomp_odd_pad_to_mxp:
+            pad_input = operators[split[0]]['inputs'][0]
+            in_shape = tensors[pad_input]['shape']
+            feeds_stride2_conv = any(
+                codes[consumer['opcode_index']] == 'CONV_2D'
+                and (consumer.get('builtin_options') or {}).get('stride_h') == 2
+                and (consumer.get('builtin_options') or {}).get('stride_w') == 2
+                for consumer in operators
+                if any(t in [i for i in consumer['inputs'] if i != -1] for t in pad_outputs)
+            )
+            if feeds_stride2_conv and in_shape[1] % 2 == 1 and in_shape[2] % 2 == 1:
+                return Engine.MXP
+        feeds_nx_op = any(
+            codes[consumer['opcode_index']] in engine_op_types.nx_op_types
+            for consumer in operators
+            if any(t in [i for i in consumer['inputs'] if i != -1] for t in pad_outputs)
+        )
+        return Engine.NX if feeds_nx_op else Engine.MXP
 
     for op_idx in split:
-        op = operators[op_idx]
-        opcode = codes[op['opcode_index']]
+        eng = get_op_engine(op_idx, operators, tensors, codes, engine_op_types, buffers)
 
         # Check where this op will be executed and assign it for the
         # first op, or assert it for the remaining.
         # For ops on either engine (e.g., ADD), do not set the target yet.
-        if opcode in engine_op_types.agnostic_op_types:
-            pass
-        elif opcode in engine_op_types.nx_op_types:
-            if current_split_target == None:
-                current_split_target = Engine.NX
-            else:
-                assert current_split_target == Engine.NX
+        if eng == Engine.Agnostic:
+            continue
+        if current_split_target == None:
+            current_split_target = eng
         else:
-            if current_split_target == None:
-                current_split_target = Engine.MXP
-            else:
-                assert current_split_target == Engine.MXP
+            assert current_split_target == eng
 
     # Sometimes, every op in the split is agnostic (can run on either engine),
     # e.g., a single Concat or a Pad at the beginning of the graph.
@@ -687,7 +887,7 @@ class EngineOpTypes:
 #   The splits would be [ [0, 1, 2], [0], [0], [0] ], meaning there are 4 MXP/FIA subgraphs.
 #   The engine graphs would be NX = [ [0, 1] ] and MXP = [ [2, 3] ], so 1 engine graph on each.
 #   The first 2 Conv are on NX, and 2 Pool on MXP (assumes NX can do SiLU).
-def get_splits_per_engine(jname: str, splits: list, engine_op_types: EngineOpTypes) -> (list, list):
+def get_splits_per_engine(jname: str, splits: list, engine_op_types: EngineOpTypes, ucomp_odd_pad_to_mxp: bool = False) -> (list, list):
 
     # Read graph from JSON file
     with open(jname) as f:
@@ -698,6 +898,7 @@ def get_splits_per_engine(jname: str, splits: list, engine_op_types: EngineOpTyp
     subgraph = graph['subgraphs'][0]
     operators = subgraph['operators']
     tensors = subgraph['tensors']
+    buffers = graph['buffers']
     codes = [_['builtin_code'] for _ in graph['operator_codes']]
 
     # Initialize data structures
@@ -710,12 +911,17 @@ def get_splits_per_engine(jname: str, splits: list, engine_op_types: EngineOpTyp
     for split_idx, split in enumerate(splits):
 
         # Get the target engine for this split
-        current_split_target = get_engine_from_split_ops(split, operators, codes, engine_op_types)
+        current_split_target = get_engine_from_split_ops(split, operators, tensors, buffers, codes, engine_op_types, ucomp_odd_pad_to_mxp)
 
-        # If Agnostic is returned, it could run on either engine (e.g., PAD, CONCATENATION)
+        # If Agnostic is returned, it could run on either engine (e.g., PAD, CONCATENATION, and the
+        # LUT pattern QUANTIZE/CAST/GATHER). Inherit the current engine so a LUT/agnostic op that
+        # follows MXP ops stays on MXP instead of being pulled onto NX.
         if current_split_target == Engine.Agnostic:
-            # If there is a current engine, put it in that one too
-            if current_engine_graph_target:
+            # If there is a current engine, put it in that one too.
+            # NB: Engine.MXP == 0, so this must be an explicit `is not None` check - a truthy test
+            # treats MXP as "no current engine" and wrongly defers the agnostic op to the next
+            # (often NX) split.
+            if current_engine_graph_target is not None:
                 current_split_target = current_engine_graph_target
             # If there is no current target (e.g., this is the first split, such as a Pad at the
             # beginning of the graph), decide on the next iteration
@@ -742,6 +948,12 @@ def get_splits_per_engine(jname: str, splits: list, engine_op_types: EngineOpTyp
             current_engine_graph_target = current_split_target
 
     # Add whatever is remaining to the correct graph
+    # Handle case where all operations are agnostic (can run on either engine)
+    if current_engine_graph_target == None and current_split_target == Engine.Agnostic:
+        # Default to MXP engine for agnostic-only graphs
+        current_engine_graph_target = Engine.MXP
+        current_split_target = Engine.MXP
+
     assert current_engine_graph_target == current_split_target
     if current_engine_graph_target == Engine.NX:
         engine_graphs_nx.append(current_engine_graph)
@@ -875,7 +1087,7 @@ def gen_signature(operators, tensors, buffers):
     for op in operators:
         all_input_tensors += op['inputs']
         all_output_tensors += op['outputs']
-        
+
     input_tensors = [_ for _ in all_input_tensors if _ not in all_output_tensors]
     output_tensors = [_ for _ in all_output_tensors if _ not in all_input_tensors]
 
@@ -1403,7 +1615,7 @@ def generate_split_graphs(tflite_model, dir, split_every_op=False, cuts=None, vn
 
     # errors.append([i,op,opcode])
     if compression_vbx == 'ucomp':
-        nx_op_types = ['CONV_2D', 'MAX_POOL_2D']
+        nx_op_types = ['CONV_2D', 'MAX_POOL_2D', 'TRANSPOSE_CONV']
         agnostic_op_types = ['QUANTIZE', 'RESIZE_NEAREST_NEIGHBOR', 'PAD', 'ADD', 'CONCATENATION',\
                              'STRIDED_SLICE', 'LOGISTIC', 'MUL', 'SPLIT', 'CAST', 'GATHER']
         engine_op_types = EngineOpTypes(nx_op_types, agnostic_op_types)
@@ -1447,7 +1659,7 @@ def generate_split_graphs(tflite_model, dir, split_every_op=False, cuts=None, vn
         # Map each split to an engine
         # TODO: Currently these are only being used as lists of splits. The engine graph concept
         # (list of lists) is not used anywhere. If it will never be needed, can simplify this.
-        engine_graphs_nx, engine_graphs_mxp = get_splits_per_engine(jname, splits, engine_op_types)
+        engine_graphs_nx, engine_graphs_mxp = get_splits_per_engine(jname, splits, engine_op_types, ucomp_odd_pad_to_mxp=True)
         
         # For NX, write the required engine graphs to JSON files
         write_json_for_nx(jname, dir, splits, engine_graphs_nx, engine_graphs_mxp)
@@ -1532,7 +1744,7 @@ def cut():
     if args.post_process_layer in ['PIXEL_VOC', 'PIXEL_COCO', 'PIXEL_CITYSCAPES', 'PIXEL_DEPTH']:
         tgraph = postprocess_graph(graph, args.post_process_layer.split('_')[-1], args.opacity, args.height, args.width)
     else:
-        tgraph = transform_graph(graph, ['YOLO_ARG_MAX'], args.verbose)
+        tgraph = transform_graph(graph, ['YOLO_ARG_MAX'], args.verbose, None)
     save_graph(args.tflite.replace('.tflite', '.post.tflite'), dir_obj, tgraph, copy=True)
 
     if not dir_obj is None:

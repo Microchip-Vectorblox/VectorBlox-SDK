@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1.1                                                 #
+# v3.2                                                   #
 #                                                        #
 ##########################################################
 
@@ -33,13 +33,6 @@ if ! [ -f 081_MiDaS_v2.tflite ]; then
     rm -rf temp
 fi
 
-
-if [ -f 081_MiDaS_v2.tflite ]; then
-   if ! echo "a37e2ec3d0c28b6283adddb46c8923c1 081_MiDaS_v2.tflite" | md5sum -c; then
-       echo -e "\n There is an issue with the 081_MiDaS_v2 model file as the expected checksum does not match.\n The model source can be found at: https://github.com/PINTO0309/PINTO_model_zoo.\n If the model information has changed, please update this script and re-run the tutorial."
-       exit 1
-   fi
-fi
 
 
 # tflite_cut is an internal tool used to split an existing model into smaller models

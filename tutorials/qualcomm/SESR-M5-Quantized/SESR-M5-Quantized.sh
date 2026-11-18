@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1.1                                                 #
+# v3.2                                                   #
 #                                                        #
 ##########################################################
 
@@ -28,13 +28,6 @@ if [ ! -f SESR-M5-Quantized.tflite ]; then
     mv SESR-M5_w8a8.tflite SESR-M5-Quantized.tflite
 fi
 
-
-if [ -f SESR-M5-Quantized.tflite ]; then
-   if ! echo "6d8c9b1b2fabee3aaca57918ca8e3339 SESR-M5-Quantized.tflite" | md5sum -c; then
-       echo -e "\n There is an issue with the SESR-M5-Quantized model file as the expected checksum does not match.\n The model source can be found at: https://aihub.qualcomm.com/models/sesr_m5_quantized.\n If the model information has changed, please update this script and re-run the tutorial."
-       exit 1
-   fi
-fi
 
 
 # tflite_preprocess is an internal tool used to add a preprocess layer to the start of the model

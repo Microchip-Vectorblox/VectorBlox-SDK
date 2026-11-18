@@ -31,6 +31,11 @@ MEMORY_MAPPED_WIDTH = 256
 QUANTIZATION_RECORD_WIDTH = 64
 QUANTIZATION_RECORD_WIDTH_BYTES = QUANTIZATION_RECORD_WIDTH // 8
 
+# Must match HISTORY_SIZE in vnnx-subgraph.cpp
+FIA_DMA_HISTORY_SIZE = 2
+
+# Must match fia.h accumulators
+FIA_ACCUMULATORS = 32
 
 ##################################################################
 # The below 6 functions must match fia.h equivalent functions; update both at the same time.
@@ -112,7 +117,7 @@ def _get_input_and_weight_shaper_bank_sizes(
 
 
 def sp_used_fn(node):
-    if node.Conv2DOptions.mxp_double_buffer:
+    if node.Conv2DOptions.mxp_double_buffer or node.FullyConnectedOptions.mxp_double_buffer:
         return lambda o, t0, t: (
             o * 2 + t0
             if (len(node.subnode_array) == 0 and node.output_strides == [1, 1])
@@ -285,6 +290,11 @@ def minimum_valid_tile_subgraph(
 ):
 
     tile = minimum_tile_subgraph(node, fx)
+
+    # reject tiles with zero-length dims from minimum_tile_subgraph
+    if not np.all(np.asarray(tile) >= 1):
+        return tile, False
+
     sp_invalid = is_sp_invalid(node, preset, sp, tile, sparse=sparse)
 
     if sp_invalid:
@@ -306,6 +316,39 @@ def max_scratchpad_required(node, preset, tile, sp=None, sparse=None):
         tile = max_output_tile(sn, sparse=sparse)(tile)
 
     return v_out, v_tmp0, v_tmp
+
+
+def has_trailing_input_transpose(node):
+    """True when this node (producer) emits a row/col-swapped output for a FullyConnected consumer.
+
+    For the FIA multi-row (m > 1) case the FC input must be pre-transposed from
+    (A x B) to the (B x A) layout the FIA reads. vnnx_tflite.inject_input_transpose()
+    arranges that either by appending a trailing TRANSPOSE [0,2,1] subnode to the
+    producing node (append_output_transpose_subnode) or, when the producer cannot
+    absorb it, by injecting a dedicated IDENTITY node carrying that subnode
+    (inject_transpose_identity). Both cases are detected here: the marker is a
+    *trailing* TRANSPOSE [0,2,1] subnode, on any node type.
+
+    Because that subnode swaps rows/cols, set_tile_attr must walk the row/col tiles in
+    the node's own (pre-transpose) output space; otherwise get_tile_steps measures the
+    row walk through the swap and collapses it to a single row.
+
+    FULLY_CONNECTED is explicitly excluded. An FC's *own* output transpose is also a
+    TRANSPOSE [0,2,1] subnode, so it would otherwise match here; that case is a
+    different transform and is already described by FullyConnectedOptions.adj_c.
+
+    This check cannot be replaced by FullyConnectedOptions.adj_x, since that
+    flag lives on the FC while this is evaluated while tiling the upstream producer. A
+    dedicated marker on the producer would make this explicit.
+    """
+    if node.type == BuiltinOperator.FULLY_CONNECTED:
+        return False
+    if len(node.subnode_array) == 0:
+        return False
+    sn = node.subnode_array[-1]
+    if sn.type != BuiltinOperator.TRANSPOSE:
+        return False
+    return list(sn.TransposeOptions.permutation) == [0, 2, 1]
 
 
 """
@@ -446,16 +489,24 @@ def min_output_tile(node):
 
     elif e == BuiltinOperator.FULLY_CONNECTED:
         output_depth, accum_depth = node.FullyConnectedOptions.filter_shape_dims
+        transpose_injected = node.FullyConnectedOptions.adj_c
 
         def x(tile):
             batch, imaps, irows, icols, maps, rows, cols = tile
+            if transpose_injected:
+                # FIA emits C x A; the node produces the transposed (C x A)
+                # layout that the injected TRANSPOSE subnode later flips back to
+                # A x C. Report rows/cols swapped so the composed walk matches.
+                return np.asarray([batch, imaps, irows, icols, maps, cols, rows])
             return np.asarray([batch, imaps, irows, icols, maps, rows, irows])
 
         return x
-    elif e == BuiltinOperator.BATCH_MATMUL:
-
+    elif e in [BuiltinOperator.BATCH_MATMUL]:
+        adj_c = node.BatchMatMulOptions.adj_c
         def x(tile):
             batch, imaps, irows, icols, maps, rows, cols = tile
+            if adj_c:
+                return np.asarray([batch, imaps, irows, icols, maps, cols, rows])
             return np.asarray([batch, imaps, irows, icols, maps, rows, cols])
 
         return x
@@ -494,6 +545,22 @@ def min_output_tile(node):
                 return np.asarray([batch, imaps, irows, icols, 0, orows, ocols])
             return np.asarray([batch, imaps, irows, icols, omaps, orows, ocols])
 
+        return x
+
+    elif e in [VNNXOperator.NORM]:
+        def x(tile):
+            batch, imaps, irows, icols, maps, rows, cols = tile
+            if cols != node.tensor_array[0].shape[-1]:
+                return np.asarray([batch, imaps, irows, icols, maps, rows, 0])
+            return np.asarray([batch, imaps, irows, icols, maps, rows, cols])
+        return x
+
+    elif e in [VNNXOperator.WPACK]:
+        def x(tile):
+            batch, imaps, irows, icols, maps, rows, cols = tile
+            if cols != node.WeightPackOptions.k:
+                return np.asarray([batch, imaps, irows, icols, maps, rows, 0])
+            return np.asarray([batch, imaps, irows, icols, maps, rows, cols])
         return x
 
     elif e in [BuiltinOperator.AVERAGE_POOL_2D]:
@@ -721,11 +788,44 @@ def min_output_tile(node):
                 pass
             elif mode == 3:
                 pass
+            elif mode == 4 + 3:
+                if maps < node.tensor_array[0].shape[-3]:
+                    return np.asarray([batch, imaps, irows, icols, 0, rows, cols])
             elif mode == 12 + 1:
                 if cols < node.tensor_array[0].shape[-1]:
                     return np.asarray([batch, imaps, irows, icols, maps, rows, 0])
                 elif maps < node.tensor_array[0].shape[-3]:
                     return np.asarray([batch, imaps, irows, icols, 0, rows, cols])
+            elif mode == 20:
+                channels = node.tensor_array[0].shape[-3]
+                if maps < channels:
+                    return np.asarray([batch, imaps, irows, icols, 0, rows, cols])
+                return np.asarray([batch, imaps, irows, icols, 1, rows, cols * channels])
+            elif mode == 21:
+                width = node.tensor_array[0].shape[-1]
+                channels = node.tensor_array[0].shape[-3]
+                if node.tensor_array[0].shape[-4] == 1 and maps < channels:
+                    # The B=1 output is spatial-major and needs every input map.
+                    return np.asarray([batch, imaps, irows, icols, 0, rows, cols])
+                if rows > 1 and cols < width:
+                    return np.asarray([batch, imaps, irows, icols, maps, 0, cols])
+                if node.tensor_array[0].shape[-4] == 1:
+                    return np.asarray([batch, imaps, irows, icols, 1, rows * cols, channels])
+                return np.asarray([batch, imaps, irows, icols, maps, 1, rows * cols])
+            elif mode == 22:
+                group = node.tensor_array[-1].shape[-1]
+                if maps != 1 or rows != group:
+                    return np.asarray([batch, imaps, irows, icols, maps, 0, cols])
+                return np.asarray([batch, imaps, irows, icols, cols, 1, group])
+            elif mode == 23:
+                channels = node.tensor_array[0].shape[-3]
+                width = node.tensor_array[0].shape[-1]
+                if maps < channels or cols < width:
+                    return np.asarray([batch, imaps, irows, icols,
+                                       0 if maps < channels else 1, rows,
+                                       0 if cols < width else cols])
+                return np.asarray([batch, imaps, irows, icols, 1, 1,
+                                   rows * width * channels])
             return np.asarray([batch, imaps, irows, icols, maps, rows, cols])
 
         return x
@@ -834,14 +934,10 @@ def min_output_tile(node):
 
                 else:
                     if temp_col != int(temp_col) and temp_col <= out_cols:
-                        return np.asarray(
-                            [batch, imaps, irows, icols, maps, rows, 0]
-                        )
+                        return np.asarray([batch, imaps, irows, icols, maps, rows, 0])
 
                     if temp_row != int(temp_row) and temp_row <= out_rows:
-                        return np.asarray(
-                            [batch, imaps, irows, icols, maps, 0, cols]
-                        )
+                        return np.asarray([batch, imaps, irows, icols, maps, 0, cols])
             else:
 
                 if temp_col != int(temp_col)  and temp_col <= out_cols:
@@ -861,25 +957,25 @@ def min_output_tile(node):
         BuiltinOperator.SUB,
     ]:
 
+        ishape = node.tensor_array[0].shape
+        filter_dim = node.broadcast8.filter_shape_dims
+        filter_channels, filter_rows, filter_columns = (
+            filter_dim[1], filter_dim[2], filter_dim[3],
+        )
+
         def x(tile):
             batch, imaps, irows, icols, maps, rows, cols = tile
-            filter_dim = node.broadcast8.filter_shape_dims
-            filter_channels, filter_rows, filter_columns = (
-                filter_dim[1],
-                filter_dim[2],
-                filter_dim[3],
-            )
 
             omaps = maps
-            if node.tensor_array[0].shape[-3] == maps and filter_channels > maps:
+            if len(ishape) > 3 and ishape[-3] == maps and filter_channels > maps:
                 omaps = filter_channels
 
-            if e == BuiltinOperator.MUL:
+            if e == BuiltinOperator.MUL and node.broadcast8.broadcast == 3:
                 if (
-                    filter_rows == node.tensor_array[0].shape[-2]
-                    and filter_columns == node.tensor_array[0].shape[-1]
+                    filter_rows == ishape[-2]
+                    and filter_columns == ishape[-1]
                 ):
-                    if cols != node.tensor_array[0].shape[-1]:
+                    if cols != ishape[-1]:
                         return np.asarray([batch, imaps, irows, icols, omaps, rows, 0])
 
             return np.asarray([batch, imaps, irows, icols, omaps, rows, cols])
@@ -1197,7 +1293,7 @@ def max_sp_tile(node, preset, sp=None):
             def x(tile):
                 batch, imaps, irows, icols, maps, rows, cols = tile
 
-                v_tmp = aligned(batch * imaps * (icols + icols + irows * 4 + irows * 4))
+                v_tmp = aligned(batch * imaps * (icols + icols + (irows * 4) + (irows * 4)))
                 v_out = aligned(batch * maps * irows)
 
                 return [v_out, v_tmp]
@@ -1207,19 +1303,63 @@ def max_sp_tile(node, preset, sp=None):
 
             def x(tile):
                 batch, imaps, irows, icols, maps, rows, cols = tile
-                v_out = aligned(batch * maps * icols * cols * rows)
-
+                v_out = aligned(batch * maps * cols * rows)
                 return [v_out, 0]
 
             return x
-    elif e == BuiltinOperator.BATCH_MATMUL:
+
+    elif e in [VNNXOperator.NORM]:
+        def x(tile):
+            batch, imaps, irows, icols, maps, rows, cols = tile
+            v_out = aligned(batch * maps * rows * cols)
+            v_tmp = aligned(batch * maps * rows * cols)#v_in
+            v_tmp += aligned(batch * maps * rows * cols * 2)#v_in16
+            v_tmp += aligned(batch * maps * rows * 4 * 4) #v_rsqrt, v_tmp, vsum, vsum2
+            v_tmp += aligned(batch * maps * rows * 1 * 3) #v_flag, v_zero
+            v_tmp += aligned(batch * maps * cols * 4 * 4) #v_result, v_B, v_W, v_broad
+
+            return [v_out, v_tmp]
+
+        return x
+
+    elif e in [VNNXOperator.WPACK]:
+        def x(tile):
+            batch, imaps, irows, icols, maps, rows, cols = tile
+            v_out = aligned(batch * maps * rows * cols)
+            v_tmp = 0
+
+            return [v_out, v_tmp]
+
+        return x
+
+    elif e in [BuiltinOperator.BATCH_MATMUL]:
+        filter = node.BatchMatMulOptions.filter
+        size_x = node.BatchMatMulOptions.size_x
+
+        zp0 = node.tensor_array[0].zero
+        zp1 = node.tensor_array[0].zero
+        sym = 0 and zp0 == 0 and zp1 == 0
 
         def x(tile):
             batch, imaps, irows, icols, maps, rows, cols = tile
 
-            v_tmp = aligned(batch * maps * rows * cols)
-            v_tmp += aligned(batch * maps * rows * cols)
             v_out = aligned(batch * maps * rows * cols)
+            if size_x > 0:
+                v_tmp = aligned(batch * maps * size_x * filter) # LHS
+                v_tmp += aligned(batch * maps * size_x * filter) # DB LHS
+                v_tmp += aligned(batch * maps * filter * cols) # RHS
+                v_tmp += 4*aligned(batch * maps * size_x * cols) # v_acc
+                if not sym:
+                    v_tmp += 2*aligned(batch * maps * size_x * filter)
+                    v_tmp += 2*aligned(batch * maps * filter * cols)
+                return [v_out, v_tmp]
+
+            v_tmp = aligned(batch * maps * rows * filter) # LHS
+            v_tmp += aligned(batch * maps * filter * cols) # RHS
+            v_tmp += 4*aligned(batch * maps * rows * cols) # acc
+            if not sym:
+                v_tmp += 4*aligned(batch * maps * rows * filter) #TODO
+                v_tmp += 4*aligned(batch * maps * filter * cols)
 
             return [v_out, v_tmp]
 
@@ -1444,13 +1584,11 @@ def max_sp_tile(node, preset, sp=None):
                 inner_size = 1
                 outer_size = rows * maps * batch  # #[1, 1, 400, 1]
 
-            v_tmp = aligned(inner_size * depth * 4)  # v_exp
-            v_tmp += aligned(inner_size * 4)  # v_sum
-            v_tmp += aligned(inner_size * 4)  # v_inv_sum
-            v_tmp += aligned(inner_size * 4)  # v_tmp
-            v_out = aligned(
-                batch * maps * rows * cols
-            )  # byte size vector( same as input tile size)
+            v_tmp = aligned(vector_lanes * inner_size * depth * 4)  # v_exp
+            v_tmp += aligned(vector_lanes * inner_size * 4)  # v_sum
+            v_tmp += aligned(vector_lanes * inner_size * 4)  # v_inv_sum
+            v_tmp += aligned(vector_lanes * inner_size * 4)  # v_tmp
+            v_out = aligned(batch * maps * rows * cols)  # byte size vector( same as input tile size)
 
             return [v_out, v_tmp]
 
@@ -1539,17 +1677,16 @@ def max_sp_tile(node, preset, sp=None):
         BuiltinOperator.SQUARED_DIFFERENCE,
     ]:
 
+        ishape = node.tensor_array[0].shape
+        filter_dim = node.broadcast8.filter_shape_dims
+        filter_channels, filter_rows, filter_columns = (
+            filter_dim[1], filter_dim[2], filter_dim[3],
+        )
         def x(tile):
             batch, imaps, irows, icols, maps, rows, cols = tile
-            filter_dim = node.broadcast8.filter_shape_dims
-            filter_channels, filter_rows, filter_columns = (
-                filter_dim[1],
-                filter_dim[2],
-                filter_dim[3],
-            )
 
             omaps = maps
-            if node.tensor_array[0].shape[-3] == maps and filter_channels > maps:
+            if len(ishape) > 3 and ishape[-3] == maps and filter_channels > maps:
                 omaps = filter_channels
 
             if node.broadcast8.optimized:
@@ -1580,6 +1717,7 @@ def max_sp_tile(node, preset, sp=None):
         def x(tile):
             batch, imaps, irows, icols, maps, rows, cols = tile
             v_tmp = aligned(batch * maps * rows * cols)
+            v_tmp = 0 #TODO won't work for all... do in place where possible
             v_out = aligned(batch * maps * rows * cols)
 
             return [v_out, v_tmp]
@@ -1753,11 +1891,6 @@ def max_sp_tile(node, preset, sp=None):
             v_tmp = 0
             if node.eltwise8.optimized == 1:
                 isize = batch * maps * rows * cols
-                # if node.eltwise8.type in [eltwise_type.ELTWISE_ADD, eltwise_type.ELTWISE_SUB]:
-                # sf = 8
-                # if maps*rows > sf:
-                #     isize = (batch*maps*rows*cols+(sf-1)) // sf
-                #     isize = min(8*cols, isize)
                 node.eltwise8.isize = isize
 
                 v_tmp += aligned(isize * 2)  # v_tmp
@@ -2020,8 +2153,23 @@ def set_tile_attr(node, preset, sp, tile, cores=1, sparse=None):
     o_step_idx, b_step_idx, maps_idx, rows_idx, cols_idx = 5, 6, 7, 8, 9
     outer_idx, batches_idx, channels_idx, y_idx, x_idx = 10, 11, 12, 13, 14
 
-    y, r, oy = get_tile_steps(fx, y_idx, rows_idx, m_idx, y_start, y_stop, rows)
-    x, c, ox = get_tile_steps(fx, x_idx, cols_idx, n_idx, x_start, x_stop, cols)
+    # A node carrying a trailing FC input-transpose TRANSPOSE [0,2,1] subnode (either
+    # a producer that absorbed it, or the dedicated injected IDENTITY) swaps rows/cols,
+    # so composing it into fx makes get_tile_steps measure the row walk through the
+    # swap and collapse it to a single row. Walk the row/col tiles in the node's own
+    # (pre-transpose) output space instead.
+    # Spatial reshapes also turn input rows into different output axes. For mode 23,
+    # [C=7, H=1024, W=7] -> [50176]: input rows 0..330 become output bytes
+    # 0..16218, while rows 331..661 become bytes 16219..32437. Walk input rows
+    # here; adjust_tile still maps each tile to its flattened output position.
+    spatial_join = any(
+        sn.type == BuiltinOperator.RESHAPE and sn.ReshapeOptions.mode in (21, 22, 23)
+        for sn in node.subnode_array
+    ) or (e == BuiltinOperator.RESHAPE and node.ReshapeOptions.mode in (21, 22, 23))
+    walk_fx = (lambda t: t) if has_trailing_input_transpose(node) or spatial_join else fx
+
+    y, r, oy = get_tile_steps(walk_fx, y_idx, rows_idx, m_idx, y_start, y_stop, rows)
+    x, c, ox = get_tile_steps(walk_fx, x_idx, cols_idx, n_idx, x_start, x_stop, cols)
    
 
     # print match input tiles to output size
@@ -2164,6 +2312,8 @@ def adjust_tile(node):
         BuiltinOperator.SPACE_TO_DEPTH,
         BuiltinOperator.BATCH_TO_SPACE_ND,
         BuiltinOperator.SPACE_TO_BATCH_ND,
+        VNNXOperator.NORM,
+        VNNXOperator.WPACK,
     ]
 
     e = node.type
@@ -2243,6 +2393,7 @@ def adjust_tile(node):
         return adjust
     elif e == BuiltinOperator.FULLY_CONNECTED:
         output_depth, accum_depth = node.FullyConnectedOptions.filter_shape_dims
+        transpose_injected = node.FullyConnectedOptions.adj_c
 
         def adjust(layer):
             (
@@ -2265,6 +2416,28 @@ def adjust_tile(node):
 
             n = output_depth
 
+            if transpose_injected:
+                # Pre-swap rows/cols (and their offsets) so that composing this
+                # transform with the injected TRANSPOSE [0,2,1] subnode restores
+                # the correct A x C output walk. Mirrors the BMM adj_c path.
+                return (
+                    o,
+                    b,
+                    c,
+                    n,
+                    m,
+                    o_step,
+                    b_step,
+                    maps,
+                    col,
+                    r,
+                    outer,
+                    batches,
+                    channels,
+                    x,
+                    y,
+                )
+
             return (
                 o,
                 b,
@@ -2284,45 +2457,14 @@ def adjust_tile(node):
             )
 
         return adjust
-    elif e == BuiltinOperator.BATCH_MATMUL:
+    elif e in [BuiltinOperator.BATCH_MATMUL]:
+        adj_c = node.BatchMatMulOptions.adj_c
 
         def adjust(layer):
-            (
-                o,
-                b,
-                c,
-                m,
-                n,
-                o_step,
-                b_step,
-                maps,
-                r,
-                col,
-                outer,
-                batches,
-                channels,
-                y,
-                x,
-            ) = layer
-
-            return (
-                o,
-                b,
-                c,
-                m,
-                n,
-                o_step,
-                b_step,
-                maps,
-                r,
-                col,
-                outer,
-                batches,
-                channels,
-                y,
-                x,
-            )
-
+            (o, b, c, m, n, o_step, b_step, maps, r, col, outer, batches, channels, y, x,) = layer
+            if adj_c:
+                return (o, b, c, n, m, o_step, b_step, maps, col, r, outer, batches, channels, x, y,)
+            return (o, b, c, m, n, o_step, b_step, maps, r, col, outer, batches, channels, y, x,)
         return adjust
     elif e in [
         BuiltinOperator.MUL,
@@ -2330,6 +2472,12 @@ def adjust_tile(node):
         BuiltinOperator.SUB,
     ]:
 
+        ishape = node.tensor_array[0].shape
+        filter_dim = node.broadcast8.filter_shape_dims
+        filter_channels, filter_rows, filter_columns = (
+            filter_dim[1], filter_dim[2], filter_dim[3],
+        )
+
         def adjust(layer):
             (
                 o,
@@ -2349,14 +2497,7 @@ def adjust_tile(node):
                 x,
             ) = layer
 
-            filter_dim = node.broadcast8.filter_shape_dims
-            filter_channels, filter_rows, filter_columns = (
-                filter_dim[1],
-                filter_dim[2],
-                filter_dim[3],
-            )
-
-            if node.tensor_array[0].shape[-3] == maps and filter_channels > maps:
+            if len(ishape) > 3 and ishape[-3] == maps and filter_channels > maps:
                 maps = filter_channels
                 c = filter_channels
 
@@ -2658,10 +2799,9 @@ def adjust_tile(node):
                     out_y = floor(y * sh)
                     out_x = floor(x * sw)
 
-
-                # Output size depends on whether this tile reaches the input edge
-                # For non-edge tiles, use (r-1)*scale because the last input row
-                # needs its neighbor from the next tile for bilinear interpolation
+                    # Output size depends on whether this tile reaches the input edge
+                    # For non-edge tiles, use (r-1)*scale because the last input row
+                    # needs its neighbor from the next tile for bilinear interpolation
                     if is_last_row_tile:
                         out_r = out_m - out_y  # Fill to output boundary
                     else:
@@ -3037,6 +3177,42 @@ def adjust_tile(node):
                 pass
             elif mode == 3:  # n,c,h*w -> n,c,h,w
                 pass
+            elif mode == 20:
+                channels_in = node.tensor_array[0].shape[-3]
+                return (
+                    o, b, 0, m, n * channels_in, o_step, b_step,
+                    1, r, col * channels_in, outer, batches, 1, y, x * channels_in,
+                )
+            elif mode == 21:
+                width = node.tensor_array[0].shape[-1]
+                height = node.tensor_array[0].shape[-2]
+                if node.tensor_array[0].shape[-4] == 1:
+                    return (
+                        o, 0, 0, height * width, channels, o_step, b_step,
+                        1, r * width if col == width else col, channels,
+                        outer, batches, 1, y * width + x, 0,
+                    )
+                return (
+                    o, 0, c, node.tensor_array[0].shape[-4], height * width, o_step, b_step,
+                    maps, 1, r * width if col == width else col,
+                    outer, 1, channels, b, y * width + x,
+                )
+            elif mode == 22:
+                group = node.tensor_array[-1].shape[-1]
+                width = node.tensor_array[0].shape[-1]
+                return (
+                    o, 0, x, node.tensor_array[-1].shape[-2], group, o_step, b_step,
+                    col, 1, group, outer, batches, width, y // group, 0,
+                )
+            elif mode == 23:
+                width = node.tensor_array[0].shape[-1]
+                height = node.tensor_array[0].shape[-2]
+                channels = node.tensor_array[0].shape[-3]
+                return (
+                    o, b, 0, 1, height * width * channels, o_step, b_step,
+                    1, 1, r * width * channels, outer, batches, 1,
+                    0, y * width * channels,
+                )
 
             return (
                 o,
@@ -3185,36 +3361,54 @@ def adjust_tile(node):
     return None
 
 
-def valid_fia_fc(accum_depth, rows, cols, preset, sparse=None, no_sublayers=True):
+def valid_fia_fc(accum_depth, rows, cols, preset, sparse=None):
     filter_copies = preset_select["FILTER_COPIES"][preset]
     parallel_output_maps = preset_select["PARALLEL_OUTPUT_MAPS"][preset]
     sp = preset_select["SCRATCHPAD_KB"][preset] * 1024 - 256  # TODO get exact indirect
 
-    osh = rows
-    osw = cols  # output_depth
-    iw = accum_depth
+    input_depth = rows
+    output_depth = cols
 
-    # Get the input and weight shaper sizes
-    # using a single bank for FC, so measure against bank sizes
-    input_shaper_size, weight_shaper_size = _get_input_and_weight_shaper_bank_sizes(
-        filter_copies, parallel_output_maps, sparse
-    )
-    input_shaper_buffer_size = iw * rows
-    weight_shaper_buffer_size = accum_depth * cols
+    input_shaper_size, weight_shaper_size = _get_input_and_weight_shaper_sizes(filter_copies, parallel_output_maps, sparse)
+    input_shaper_bank_size, weight_shaper_bank_size = _get_input_and_weight_shaper_bank_sizes(filter_copies, parallel_output_maps, sparse)
+
+    # double-buffered so shaper/bank sizes are halved per buffer
+    input_shaper_size //= 2
+    weight_shaper_size //= 2
+    input_shaper_bank_size //= 2
+    weight_shaper_bank_size //= 2
+
+    # measure against the full (both-bank) capacity
+    input_shaper_buffer_size = input_depth * accum_depth
+
     # account for padded weights for alignment
-    weight_shaper_buffer_size += (
-        (parallel_output_maps - (weight_shaper_buffer_size % parallel_output_maps))
-        if (weight_shaper_buffer_size % parallel_output_maps)
+    padded_output_depth = output_depth
+    padded_output_depth += (
+        (parallel_output_maps - (output_depth % parallel_output_maps))
+        if (output_depth % parallel_output_maps)
         else 0
     )
+    weight_shaper_buffer_size = accum_depth * padded_output_depth    
 
     if input_shaper_buffer_size > input_shaper_size:
         return False
     if weight_shaper_buffer_size > weight_shaper_size:
         return False
-    if cols * QUANTIZATION_RECORD_WIDTH_BYTES > (
-        fia_quantization_shaper_size_kb() * 1024
-    ):  # cols*sizeof(quantization_record)
+    if output_depth * QUANTIZATION_RECORD_WIDTH_BYTES > (fia_quantization_shaper_size_kb() * 1024):
+        return False
+
+    # measure against bank split
+    # Each bank individually must be able to hold its portion of the resident buffer.
+    input_shaper_banks = get_input_shaper_banks(sparse)
+    accum_depth_per_bank = accum_depth // input_shaper_banks
+    if accum_depth_per_bank * input_shaper_banks != accum_depth:
+        accum_depth_per_bank += 1 
+        # if accum_depth not evenly split, round up
+        # in practice, we will splat the activation during runtime for both FC and Matmul
+
+    if input_depth * accum_depth_per_bank > input_shaper_bank_size:
+        return False
+    if padded_output_depth * accum_depth_per_bank > weight_shaper_bank_size:
         return False
 
     return True
@@ -3235,7 +3429,6 @@ def valid_fia(
     filter_copies = preset_select["FILTER_COPIES"][preset]
     parallel_output_maps = preset_select["PARALLEL_OUTPUT_MAPS"][preset]
     sp = preset_select["SCRATCHPAD_KB"][preset] * 1024 - 256  # TODO get exact indirect
-    no_sublayers = len(node.subnode_array) == 0 and node.output_strides == [1, 1]
 
     k, c, kh, kw = node.Conv2DOptions.filter_shape_dims
     sh, sw = node.Conv2DOptions.stride_height, node.Conv2DOptions.stride_width
@@ -3810,6 +4003,144 @@ def usage(node, tile, preset, verbose=False, sparse=None):
     node.Conv2DOptions.sp_used = sp_used
 
 
+def fia_fc_dma_cost(full_rows, full_accum_depth, full_output_depth, rows, accum_depth, cols, preset):
+    """Cost of an FC FIA tile in DDR reads plus compute instructions.
+
+    A closed form, in three terms:
+
+      activations  one short strided read per accumulation element per bank. The
+                   same rows serve every output-column tile, so while the
+                   accumulation dimension is split no more ways than the read-DMA
+                   history can hold the fetches are shared across those tiles;
+                   past that nothing is reused and every pass group refetches.
+      weights      pre-packed into one contiguous slab per column tile, so a
+                   fetch is one long burst per bank rather than many short reads.
+      compute      one instruction per output pass per accumulation chunk.
+
+    The read counts here are approximations of what the kernel really issues.
+    """
+    
+    filter_copies = preset_select["FILTER_COPIES"][preset]
+    parallel_output_maps = preset_select["PARALLEL_OUTPUT_MAPS"][preset]
+    input_shaper_banks = get_input_shaper_banks(None)
+
+    row_tiles = ceil(full_rows / rows)
+    col_tiles = ceil(full_output_depth / cols)
+    passes = ceil(rows / filter_copies) * ceil(cols / parallel_output_maps)
+    pass_groups = ceil(passes / FIA_ACCUMULATORS)
+
+    stride_per_bank = ceil(accum_depth / input_shaper_banks)
+    chunks = ceil(ceil(full_accum_depth / input_shaper_banks) / stride_per_bank)
+    reads_per_fetch = stride_per_bank * input_shaper_banks
+
+    resident = chunks <= FIA_DMA_HISTORY_SIZE
+    tiles = row_tiles * col_tiles
+    activation_fetches = (
+        row_tiles * chunks if resident else tiles * pass_groups * chunks
+    )
+    weight_fetches = tiles * chunks if resident else tiles * pass_groups * chunks
+
+    return (
+        activation_fetches * reads_per_fetch
+        + weight_fetches * WEIGHT_SHAPER_DATA_BANKS
+        + tiles * passes * chunks
+    )
+
+
+def fc_tile_bisect(node, preset, sp, fx, tile, accum_depth, output_depth, sparse=None):
+    """Pick an FC FIA tile by bisecting the accumulation depth.
+
+    Halves the accumulation depth from its full extent downwards and, for each
+    candidate, grows the other two dimensions to fit using the same
+    decrement-until-valid idiom we use in conv_tile, then keeps whichever combination
+    scores best. Both growth orders are tried, keeps the one needing the fewest tiles.
+    
+    What is scored as "best" or needing the fewest tiles is determined from the cost function
+    fia_fc_dma_cost which assigns a cost to a tile based on an estimation of DMAs and compute.
+
+    Returns the chosen tile, or None if nothing valid was found.
+    """
+
+    BATCH, IMAPS, IROWS, ICOLUMNS, MAPS, ROWS, COLUMNS = 0, 1, 2, 3, 4, 5, 6
+    parallel_output_maps = preset_select["PARALLEL_OUTPUT_MAPS"][preset]
+    round_down = lambda x, y: ((x - 1) // y) * y
+
+    def is_valid(accum, rows, cols):
+        """Accept a candidate only if the FIA *and* the scratchpad can hold it."""
+        if not valid_fia_fc(accum, rows, cols, preset):
+            return False
+        trial = tile.copy()
+        trial[ICOLUMNS] = accum
+        trial[ROWS] = rows
+        trial[COLUMNS] = cols
+        if is_sp_invalid(node, preset, sp, trial, sparse):
+            return False
+        return bool(np.all(fx(trial) >= 1))
+
+    def grow_rows(accum, cols):
+        """Largest row extent that fits, never smaller than the minimum tile."""
+        rows = node.m
+        while rows > tile[ROWS] and not is_valid(accum, rows, cols):
+            rows -= 1
+        return rows
+
+    def grow_cols(accum, rows):
+        """Largest column extent that fits, never smaller than the minimum tile.
+
+        Decrements to multiples of PARALLEL_OUTPUT_MAPS.
+        """
+        cols = output_depth
+        while cols > tile[COLUMNS] and not is_valid(accum, rows, cols):
+            cols = round_down(cols, parallel_output_maps)
+        return max(cols, tile[COLUMNS])
+
+    def rows_then_cols(accum):
+        rows = grow_rows(accum, tile[COLUMNS])
+        return rows, grow_cols(accum, rows)
+
+    def cols_then_rows(accum):
+        cols = grow_cols(accum, tile[ROWS])
+        return grow_rows(accum, cols), cols
+
+    best_tile = None
+    best_key = None
+    raw_accum = accum_depth
+    while raw_accum >= 1:
+        # ensure that partial accumulation accum_depth tiles are bank-aligned
+        # (else the runtime splat will zero out valid values)
+        accum = raw_accum
+        if accum < accum_depth:
+            banks = get_input_shaper_banks(sparse)
+            if accum % banks:
+                accum += banks - (accum % banks)
+                accum = min(accum, accum_depth)
+
+        for grow in (rows_then_cols, cols_then_rows):
+            rows, cols = grow(accum)
+            if not is_valid(accum, rows, cols):
+                # Growth bottomed out without finding anything
+                continue
+
+            trial = tile.copy()
+            trial[ICOLUMNS] = accum
+            trial[ROWS] = rows
+            trial[COLUMNS] = cols
+
+            cost = fia_fc_dma_cost(
+                node.m, accum_depth, output_depth, rows, accum, cols, preset
+            )
+            tiles = ceil(node.m / rows) * ceil(output_depth / cols)
+            key = (cost, tiles)
+            if best_key is None or key < best_key:
+                best_key = key
+                best_tile = trial
+        if raw_accum == 1:
+            break
+        raw_accum //= 2
+
+    return best_tile
+
+
 """
 start w/ minimum viable tile size (produces some valid output)
 maximize (up to a limit), as specific tile dimension
@@ -3832,31 +4163,6 @@ def tile_subgraph(
 
     BATCH, IMAPS, IROWS, ICOLUMNS, MAPS, ROWS, COLUMNS = 0, 1, 2, 3, 4, 5, 6
 
-    if not node.offloaded:
-        for idx in range(len(node.tensor_array)):
-            t = node.tensor_array[idx]
-            if t.external_producer or t.external_consumer:
-                shape = list(t.shape)
-                if shape[-1] % 16 != 0:
-                    node.sync_offset = int(shape[-1] % 16)
-                    shape[-1] = ceil(shape[-1] / 16) * 16
-                    t.shape = tuple(shape)
-                    if node.type == BuiltinOperator.FULLY_CONNECTED:
-                        node.m = shape[-1]
-                    else:
-                        node.n = shape[-1]
-        for i in range(len(node.subnode_array)):
-            sn = node.subnode_array[i]
-            for idx in range(len(sn.tensor_array)):
-                t = sn.tensor_array[idx]
-                if t.external_producer or t.external_consumer:
-                    shape = list(t.shape)
-                    if shape[-1] % 16 != 0:
-                        node.sync_offset = int(shape[-1] % 16)
-                        shape[-1] = ceil(shape[-1] / 16) * 16
-                        t.shape = tuple(shape)
-                        node.n = shape[-1]
-
     # STEP 1: get minimum tile (that produces a viable output)
     fx = compose_subgraph(node, min_output_tile)
     # tile = minimum_tile_subgraph(node, fx)
@@ -3875,6 +4181,11 @@ def tile_subgraph(
         tmp_dir_obj=tmp_dir_obj,
     )
     if not allocation_succeed:
+        if any(sn.type == BuiltinOperator.RESHAPE and sn.ReshapeOptions.mode == 22
+               for sn in node.subnode_array):
+            group = next(sn.tensor_array[-1].shape[-1] for sn in node.subnode_array
+                         if sn.type == BuiltinOperator.RESHAPE and sn.ReshapeOptions.mode == 22)
+            print(f"reshape mode 22: aligned input and output buffers for a K={group} by 1 tile exceed scratchpad capacity ({sp} bytes), or the minimum tile is invalid")
         return tile, False
 
     # Verify the adjusted tile still fits in scratchpad
@@ -3944,57 +4255,11 @@ def tile_subgraph(
         output_depth, accum_depth = node.FullyConnectedOptions.filter_shape_dims
 
         if node.FullyConnectedOptions.use_fia:  #
-            v = lambda a, r, c: valid_fia_fc(
-                a,
-                r,
-                c,
-                preset,
-                (len(node.subnode_array) == 0 and node.output_strides == [1, 1]),
+            best_tile = fc_tile_bisect(
+                node, preset, sp, fx, tile, accum_depth, output_depth, sparse=sparse
             )
-
-            # maximize accum depth (input width, filter rows)
-            limit_accum_depth = accum_depth
-            while limit_accum_depth > tile[ICOLUMNS] and not v(
-                limit_accum_depth, tile[ROWS], tile[COLUMNS]
-            ):
-                limit_accum_depth -= 1
-            tile = increment_tile(
-                node,
-                preset,
-                sp,
-                fx,
-                tile,
-                ICOLUMNS,
-                limit=limit_accum_depth,
-                sparse=sparse,
-            )
-
-            # maximize output depth (filter columns, output columns)
-            limit_output_depth = output_depth
-            while limit_output_depth > tile[COLUMNS] and not v(
-                tile[ICOLUMNS], tile[ROWS], limit_output_depth
-            ):
-                limit_output_depth -= 1
-            tile = increment_tile(
-                node,
-                preset,
-                sp,
-                fx,
-                tile,
-                COLUMNS,
-                limit=limit_output_depth,
-                sparse=sparse,
-            )
-
-            # maximize input rows (output rows)
-            limit_rows = node.m
-            while limit_rows > tile[ROWS] and not v(
-                tile[ICOLUMNS], limit_rows, tile[COLUMNS]
-            ):
-                limit_rows -= 1
-            tile = increment_tile(
-                node, preset, sp, fx, tile, ROWS, limit=limit_rows, sparse=sparse
-            )
+            if best_tile is not None:
+                tile = best_tile
         else:
             tile = increment_tile(
                 node, preset, sp, fx, tile, ICOLUMNS, limit=accum_depth, sparse=sparse
@@ -4033,6 +4298,16 @@ def tile_subgraph(
                 use_db=1,
                 db_rows=0,
                 split_weights=0,
+                sparse=sparse,
+            ):
+                return tile, False
+
+        if e == BuiltinOperator.FULLY_CONNECTED and node.FullyConnectedOptions.use_fia:
+            if not valid_fia_fc(
+                tile[ICOLUMNS],
+                tile[ROWS],
+                tile[COLUMNS],
+                preset,
                 sparse=sparse,
             ):
                 return tile, False

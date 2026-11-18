@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1.1                                                 #
+# v3.2                                                   #
 #                                                        #
 ##########################################################
 
@@ -37,13 +37,6 @@ if [ ! -f lpr_eu_v3.tflite ]; then
    [ -f lpr_eu_v3.onnx ] || wget -q --no-check-certificate https://github.com/Microchip-Vectorblox/assets/releases/download/assets/lpr_eu_v3.onnx
 fi
 
-
-if [ -f lpr_eu_v3.onnx ]; then
-   if ! echo "d462388d2501b21072424fed7047051f lpr_eu_v3.onnx" | md5sum -c; then
-       echo -e "\n There is an issue with the lpr_eu_v3 model file as the expected checksum does not match.\n The model source can be found at: pytorch/lpr_eu_v3/README.md.\n If the model information has changed, please update this script and re-run the tutorial."
-       exit 1
-   fi
-fi
 
 if [ ! -f lpr_eu_v3.tflite ]; then
    echo "Running Model Optimizer..."

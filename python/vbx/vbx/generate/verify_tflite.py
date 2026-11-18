@@ -6,6 +6,132 @@ from contextlib import contextmanager
 
 from .utils import existing_file, existing_dir, generate_inputs_outputs
 from .transform_tflite import load_graph, save_graph, transform_graph, is_multi_input
+from .transform_tflite import graph_pattern
+
+
+def verify_batch_one_activations(graph, transformed=False):
+    subgraph = graph['subgraphs'][0]
+    tensors = subgraph['tensors']
+    buffers = graph['buffers']
+    operators = subgraph['operators']
+    codes = [code['builtin_code'] for code in graph['operator_codes']]
+    valid_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'supported_ops.json')
+    with open(valid_path) as f:
+        supported_ops = json.load(f)
+
+    # retun activations ops
+    # control inputs is added in supported_ops for that purpose
+    # For example, STRIDED_SLICE has four tensor inputs. Input 0 is the data being sliced; inputs 1, 2, and 3 specify begin, end, and strides
+    def control_inputs(opcode):
+        return supported_ops.get(opcode, {}).get('control_inputs', ())
+
+    #check if a tensor’s buffer contains data, such as stored weights. It returns True when there is no populated constant buffer, 
+    # so the tensor’s value must be supplied or produced while the model runs.
+    def is_runtime(index):
+        tensor = tensors[index]
+        return 'buffer' not in tensor or 'data' not in buffers[tensor['buffer']]
+
+    def data_inputs(op, opcode):
+        return [index for position, index in enumerate(op['inputs'])
+                if index != -1 and position not in control_inputs(opcode)
+                and is_runtime(index)]
+
+    # SHAPE and chains whose data operands all carry shape metadata produce
+    # metadata too. A later use as model data is still validated below.
+    metadata = set()
+    batch_matmul_failures = []
+    runtime_weight_fc_failures = []
+    for number, op in enumerate(operators):
+        opcode = codes[op['opcode_index']]
+        if transformed and opcode == 'BATCH_MATMUL':
+            for role, index in zip(('Input 1', 'Input 2', 'output'), op['inputs'] + op['outputs']):
+                shape = tensors[index].get('shape') if index != -1 else None
+                if shape is None or len(shape) != 3 or shape[0] != 1:
+                    name = tensors[index].get('name', '<unnamed>') if index != -1 else '<missing>'
+                    batch_matmul_failures.append((number, role, name, shape))
+        elif opcode == 'FULLY_CONNECTED' and len(op['inputs']) > 1:
+            weight_index = op['inputs'][1]
+            if weight_index != -1:
+                buffer_index = tensors[weight_index].get('buffer', -1)
+                buffer = buffers[buffer_index] if 0 <= buffer_index < len(buffers) else {}
+                if 'data' not in buffer:
+                    name = tensors[weight_index].get('name', '<unnamed>')
+                    shape = tensors[weight_index].get('shape')
+                    runtime_weight_fc_failures.append((number, name, shape))
+        inputs = data_inputs(op, opcode)
+        if opcode == 'SHAPE' or (inputs and all(index in metadata for index in inputs)):
+            metadata.update(index for index in op['outputs'] if index != -1)
+
+    if batch_matmul_failures:
+        sys.stderr.write('\n' + '=' * 75 + '\n')
+        sys.stderr.write('CRITICAL ERROR: Unsupported BATCH_MATMUL Shape\n')
+        sys.stderr.write('Issue: BATCH_MATMUL operands and output must have shape [1, N, M].\n')
+        for op_index, role, name, shape in batch_matmul_failures:
+            sys.stderr.write('  Op {} {} {!r}: shape {}\n'.format(op_index, role, name, shape))
+        sys.stderr.write('=' * 75 + '\n')
+        return False
+
+    if runtime_weight_fc_failures:
+        sys.stderr.write('\n' + '=' * 75 + '\n')
+        sys.stderr.write('CRITICAL ERROR: Unsupported FULLY_CONNECTED Inputs\n')
+        sys.stderr.write('Issue: FULLY_CONNECTED requires constant weights; runtime weights are unsupported.\n')
+        for op_index, name, shape in runtime_weight_fc_failures:
+            sys.stderr.write('  Op {} weights tensor {!r}: shape {}\n'.format(op_index, name, shape))
+        sys.stderr.write('=' * 75 + '\n')
+        return False
+
+    activations = {}
+
+    def add_activation(index, context):
+        activations.setdefault(index, [])
+        if context not in activations[index]:
+            activations[index].append(context)
+
+    used_inputs = {index for op in operators for index in op['inputs'] if index != -1}
+    for index in subgraph.get('inputs', []):
+        if index != -1 and (index not in used_inputs or index in subgraph.get('outputs', [])):
+            add_activation(index, 'graph input')
+    for index in subgraph.get('outputs', []):
+        if index != -1:
+            add_activation(index, 'graph output')
+
+    for number, op in enumerate(operators):
+        opcode = codes[op['opcode_index']]
+        context = 'op {} {}'.format(number, opcode)
+        inputs = data_inputs(op, opcode)
+        metadata_op = opcode == 'SHAPE' or (inputs and all(index in metadata for index in inputs))
+        for position, index in enumerate(op['inputs']):
+            if index != -1 and position not in control_inputs(opcode):
+                if not (metadata_op and index in metadata):
+                    add_activation(index, '{} input {}'.format(context, position))
+        if not metadata_op:
+            for index in op['outputs']:
+                if index != -1:
+                    add_activation(index, '{} output'.format(context))
+
+    failures = []
+    for index, contexts in activations.items():
+        if not is_runtime(index):
+            continue
+        tensor = tensors[index]
+        shape = tensor.get('shape')
+        if shape is None or (len(shape) >= 3 and shape[0] != 1):
+            failures.append((index, tensor.get('name', '<unnamed>'), shape, ', '.join(contexts)))
+
+    if failures:
+        stage = 'after' if transformed else 'before'
+        sys.stderr.write('\n' + '=' * 75 + '\n')
+        sys.stderr.write('CRITICAL ERROR: Unsupported Batch Shape\n')
+        sys.stderr.write('Stage: {} graph transformation\n'.format(stage))
+        sys.stderr.write('Issue: Activation tensors with rank 3 or higher must have a '
+                         'concrete batch dimension of 1. Missing shapes are unsupported.\n')
+        sys.stderr.write('Unsupported Activations:\n')
+        for index, name, shape, context in failures:
+            sys.stderr.write('  Tensor {} ({!r}), shape {}: {}\n'.format(index, name, shape, context))
+        sys.stderr.write('Supported: rank 0-2 (no batch axis), or rank 3+ with shape[0] == 1.\n')
+        sys.stderr.write('=' * 75 + '\n')
+        return False
+    return True
 
 
 @contextmanager
@@ -162,12 +288,16 @@ def verify_graph(graph, core, accel, debug, transformed=False):
     buffers, opcodes = graph['buffers'], graph['operator_codes']
     builtin_codes = [_['builtin_code'] for _ in opcodes]
 
+    if not verify_batch_one_activations(graph, transformed):
+        return False
+
     if not transformed:
         id_count = 0
         pattern_count = 0
         i = 0
         while i < len(operators): 
             op = operators[i]
+
             opts = None
             if 'builtin_options' in op:
                 opts = op['builtin_options']
@@ -200,6 +330,13 @@ def verify_graph(graph, core, accel, debug, transformed=False):
 
         i = 0
         while i < len(operators): 
+
+            pattern_type, pattern = graph_pattern(operators[i:], builtin_codes, tensors, buffers) # skip selected graph patterns
+            if len(pattern):
+                if pattern_type in ["NORM"]:
+                    i += len(pattern)
+                    continue
+
             op = operators[i]
             if 'builtin_options' in op:
                 opts = op['builtin_options']

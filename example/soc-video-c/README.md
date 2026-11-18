@@ -2,11 +2,10 @@
 
 ## Pre-requisites
 
-- Follow steps on [VectorBlox SoC Demo Design](https://github.com/Microchip-Vectorblox/VectorBlox-SoC-Video-Kit-Demo), including the step to build the demo.
+- Follow the steps on [VectorBlox SoC Demo Design](https://github.com/Microchip-Vectorblox/VectorBlox-SoC-Video-Kit-Demo), including the step to build the demo.
 
 ## Starting the VectorBlox demo on the PolarFire SoC Video Kit
 
-Getting Started with the VectorBlox Demo on the PolarFire SoC Video Kit  
 Once you have logged in, navigate to the soc-video-c directory that matches your release version number.  
 
 - Run `make overlay` to add the VectorBlox instance to the device tree (required every boot). If make overlay reports error `Overlay mpfs_vbx.dtbo already exists`, this can be ignored.
@@ -23,4 +22,8 @@ To interact with the VectorBlox video demo:
   - Entering `d` lists the indices and names of the embeddings. Enter the desired index to delete the specified embedding from the database (or press `ENTER` to skip deletion).
 - Entering `b` on any model that uses Pose Estimation for post-processing toggles the blackout options for the image output.
 
+### Sample Videos
+
 Sample videos for input to the Face Recognition mode are available [here](https://github.com/Microchip-Vectorblox/assets/releases/download/assets/SampleFaces.mp4).
+
+A sample video for yolo-spn demo input is available [here](https://github.com/Microchip-Vectorblox/assets/releases/download/assets/SampleSatellite.mp4).

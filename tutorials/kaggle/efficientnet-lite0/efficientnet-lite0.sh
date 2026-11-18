@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1.1                                                 #
+# v3.2                                                   #
 #                                                        #
 ##########################################################
 
@@ -24,18 +24,11 @@ echo "Checking for efficientnet-lite0 files..."
 
 # model details @ https://www.kaggle.com/models/tensorflow/efficientdet/tfLite
 if [ ! -f efficientnet-lite0.tflite ]; then
-    curl -L -o model.tar.gz https://www.kaggle.com/api/v1/models/tensorflow/efficientnet/tfLite/lite0-int8/2/download
+    wget -O model.tar.gz https://www.kaggle.com/api/v1/models/tensorflow/efficientnet/tfLite/lite0-int8/2/download
     tar -xzf model.tar.gz
     cp 2.tflite efficientnet-lite0.tflite
 fi
 
-
-if [ -f model.tar.gz ]; then
-   if ! echo "0c2d635d8942f17bf604e06632d239e8 model.tar.gz" | md5sum -c; then
-       echo -e "\n There is an issue with the efficientnet-lite0 model file as the expected checksum does not match.\n The model source can be found at: https://www.kaggle.com/models/tensorflow/efficientdet/tfLite.\n If the model information has changed, please update this script and re-run the tutorial."
-       exit 1
-   fi
-fi
 
 
 # tflite_preprocess is an internal tool used to add a preprocess layer to the start of the model

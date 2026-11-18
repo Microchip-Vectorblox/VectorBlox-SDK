@@ -1,0 +1,49 @@
+diff --git a/model/attn.py b/model/attn.py
+--- a/model/attn.py
++++ b/model/attn.py
+@@ -26,10 +26,11 @@
+         self.output_attention = output_attention
+         self.dropout = nn.Dropout(attention_dropout)
+         window_size = win_size
+-        self.distances = torch.zeros((window_size, window_size)).cuda()
++        distances = torch.zeros((window_size, window_size))
+         for i in range(window_size):
+             for j in range(window_size):
+-                self.distances[i][j] = abs(i - j)
++                distances[i][j] = abs(i - j)
++        self.register_buffer("distances", distances)
+ 
+     def forward(self, queries, keys, values, sigma, attn_mask):
+         B, L, H, E = queries.shape
+@@ -48,7 +49,7 @@
+         sigma = torch.sigmoid(sigma * 5) + 1e-5
+         sigma = torch.pow(3, sigma) - 1
+         sigma = sigma.unsqueeze(-1).repeat(1, 1, 1, window_size)  # B H L L
+-        prior = self.distances.unsqueeze(0).unsqueeze(0).repeat(sigma.shape[0], sigma.shape[1], 1, 1).cuda()
++        prior = self.distances.unsqueeze(0).unsqueeze(0).repeat(sigma.shape[0], sigma.shape[1], 1, 1).to(queries.device)
+         prior = 1.0 / (math.sqrt(2 * math.pi) * sigma) * torch.exp(-prior ** 2 / 2 / (sigma ** 2))
+ 
+         series = self.dropout(torch.softmax(attn, dim=-1))
+diff --git a/model/embed.py b/model/embed.py
+--- a/model/embed.py
++++ b/model/embed.py
+@@ -28,15 +28,16 @@
+ class TokenEmbedding(nn.Module):
+     def __init__(self, c_in, d_model):
+         super(TokenEmbedding, self).__init__()
+-        padding = 1 if torch.__version__ >= '1.5.0' else 2
+         self.tokenConv = nn.Conv1d(in_channels=c_in, out_channels=d_model,
+-                                   kernel_size=3, padding=padding, padding_mode='circular', bias=False)
++                                   kernel_size=3, padding=0, bias=False)
+         for m in self.modules():
+             if isinstance(m, nn.Conv1d):
+                 nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='leaky_relu')
+ 
+     def forward(self, x):
+-        x = self.tokenConv(x.permute(0, 2, 1)).transpose(1, 2)
++        x = x.permute(0, 2, 1)  # [B, C, L]
++        x = torch.cat([x[:, :, -1:], x, x[:, :, :1]], dim=2)  # circular pad
++        x = self.tokenConv(x).transpose(1, 2)
+         return x
+ 
+ 

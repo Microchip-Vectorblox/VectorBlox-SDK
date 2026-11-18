@@ -5,7 +5,7 @@ import time
 import os
 import json
 import pprint
-
+from . import model_run as c_py
 
 def Fletcher32(data):
     data_bytes = data.tobytes()
@@ -144,7 +144,7 @@ class Model:
 def main(model_file,expected_checksum,debug=False,verbose=True):
 
     try:
-        model_bytes = open(model_file, 'rb').read()
+        model_bytes = open(model_file.replace('.ucomp','.vnnx'), 'rb').read()
         m = Model(model_bytes)
     except Exception as e:
         print(e)
@@ -154,14 +154,19 @@ def main(model_file,expected_checksum,debug=False,verbose=True):
         print("DATA_BYTES = {:3.2f} MB".format(len(model_bytes)/(2**20)))
         print("ALLOCATE_BYTES = {:3.2f} MB".format(len(m.model_bytes)/(2**20)))
     # c.vbxsim_reset_stats()
-    odata = m.run(m.test_input)
+    if '.ucomp' in model_file:
+        outputs, _ = c_py.model_run(None, model_file, apply_sc_and_mean=False)
+        odata = np.array(outputs)
+    else:
+        odata = m.run(m.test_input)
     checksum = 0
     for o, od in enumerate(odata):
         if o == 0:
             checksum = Fletcher32(odata[0])
         else:
             checksum = checksum ^ Fletcher32(od)
-    if verbose:
+    
+    if verbose and '.ucomp' not in model_file:
         print("DMA_BYTES = {}".format(m.get_bandwidth_per_run()))
         print("INSTR_CYCLES = {}".format(m.get_estimated_runtime()))
         print("CHECKSUM = {:08x}".format(checksum))
@@ -178,7 +183,7 @@ def main(model_file,expected_checksum,debug=False,verbose=True):
             data['test_outputs'].append({'data': test_arr.tolist(), 'shape': shape, 'zero': zero, 'scale': scale, 'dtype': dtype.name.upper()})
             try:
                 heat = arr.reshape(shape) - test_arr.reshape(shape)
-                while len(heat.shape) < 3:
+                while len(heat.shape) < 4:
                     heat = np.expand_dims(heat, axis=0)
                 np.save("heatmap.{}.npy".format(o), heat)
 

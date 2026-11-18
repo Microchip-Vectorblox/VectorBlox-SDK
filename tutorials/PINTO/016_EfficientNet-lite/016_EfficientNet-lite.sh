@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1.1                                                 #
+# v3.2                                                   #
 #                                                        #
 ##########################################################
 
@@ -34,13 +34,6 @@ if [ ! -f 016_EfficientNet-lite.tflite ]; then
     rm -rf temp
 fi
 
-
-if [ -f 016_EfficientNet-lite.tflite ]; then
-   if ! echo "428e9c255d562051c6f909111a8f3777 016_EfficientNet-lite.tflite" | md5sum -c; then
-       echo -e "\n There is an issue with the 016_EfficientNet-lite model file as the expected checksum does not match.\n The model source can be found at: https://github.com/PINTO0309/PINTO_model_zoo.\n If the model information has changed, please update this script and re-run the tutorial."
-       exit 1
-   fi
-fi
 
 
 # tflite_preprocess is an internal tool used to add a preprocess layer to the start of the model

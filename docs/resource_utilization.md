@@ -1,7 +1,21 @@
 
 # Resource Utilization For VectorBlox Core
 
-Numbers measured with Libero using the PolarFire SoC Video Kit Demo. To find resource utilization metrics in Libero, view the reports tab after completing synthesis. **Please note that VBX 3.1.1 uses the 3.1 VBX Core**.
+Numbers measured with Libero using the PolarFire SoC Video Kit Demo. To find resource utilization metrics in Libero, view the reports tab after completing synthesis. 
+
+## Resource Utilization For VectorBlox 3.2 Core
+
+| IP | Fabric 4LUT | Fabric DFF | Interface 4LUT | Interface DFF | Total 4LUT | Total DFF | uSRAM | LSRAM | MATH |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| VBx V1000 No Compression | 50551 | 51186 | 22728 | 22728 | 73279 | 73914 | 529 | 151 | 304 |
+| VBx V1000 With Compression | 63422 | 61986 | 24168 | 24168 | 87590 | 86154 | 529 | 191 | 304 |
+| VBx V1000 With Unstructured Compression | 43968 | 68640 | 29736 | 29736 | 73704 | 98376 | 516 | 323 | 311 |
+| VBx V500 No Compression | 31889 | 30673 | 12036 | 12036 | 43925 | 42709 | 295 | 84 | 152 |
+| VBx V500 With Compression | 37906 | 36405 | 12900 | 12900 | 50806 | 49305 | 295 | 108 | 152 |
+| VBx V500 With Unstructured Compression | 33484 | 44640 | 17640 | 17640 | 51124 | 62280 | 342 | 205 | 171 |
+| VBx V250 No Compression | 22833 | 21493 | 7260 | 7260 | 30093 | 28753 | 185 | 56 | 84 |
+| VBx V250 With Compression | 26893 | 24954 | 8016 | 8016 | 34909 | 32970 | 185 | 77 | 84 |
+
 
 ## Resource Utilization For VectorBlox 3.1 Core
 

@@ -181,10 +181,13 @@ void fix16_sort_boxes(fix16_box *boxes, poses_t *poses, int total);
 void privacy_draw(int split);
 void pixel_draw(model_t *model, vbx_cnn_io_ptr_t* o_buffers, vbx_cnn_t *the_vbx_cnn);
 int post_process_blazeface(object_t faces[],fix16_t* scores,fix16_t* points,int scoresLength,int max_faces, fix16_t anchorsScale);
+
 int post_process_retinaface(object_t faces[],int max_faces, fix16_t *network_outputs[9],int image_width,int image_height,
                             fix16_t confidence_threshold, fix16_t nms_threshold);
+
 int post_process_scrfd(object_t faces[], int max_faces, fix16_t *network_outputs[9], int image_width, int image_height, 
                             fix16_t confidence_threshold, fix16_t nms_threshold);
+
 /**
  * @brief Postprocessing on detected objects that stores bounding box and keypoints within the face object
  * 
@@ -202,6 +205,43 @@ int post_process_scrfd(object_t faces[], int max_faces, fix16_t *network_outputs
  */
 int post_process_scrfd_int8(object_t faces[],int max_faces, int8_t *network_outputs[9],int zero_points[], fix16_t scale_outs[], 
                             int image_width, int image_height,fix16_t confidence_threshold, fix16_t nms_threshold, model_t *model);
+
+
+/**
+ * @brief Postprocessing on detected objects that stores bounding box and keypoints within the face object
+ * 
+ * @param faces  Array of faces found, one per detection
+ * @param max_faces Max number of faces that can be found in a model
+ * @param network_outputs Output buffers obtained from VectorBlox
+ * @param zero_points Mean offset for int8
+ * @param scale_outs fix16 scaling multiplier for int8
+ * @param image_width Width of input image sent to the network
+ * @param image_height eight of input image sent to the network
+ * @param confidence_threshold Confidence threshold, ranged from 0-1.0
+ * @param nms_threshold Non-max suppression for overlapping detectiongs, ranged from 0-1.0
+ * @return * int Number of detected objects
+ */
+int post_process_yunet_int8(object_t faces[],int max_faces, int8_t *network_outputs[12],int zero_points[], fix16_t scale_outs[],
+                            int image_width, int image_height,fix16_t confidence_threshold, fix16_t nms_threshold);
+                            
+/**
+ * @brief Post-processing for the Qualcomm Lightweight-Face-Detection (face_det_lite) model.
+ *        Decodes heatmap/bbox/landmark maps (single stride 8) into face bounding boxes and
+ *        5 landmark points. network_outputs order: [0]=heatmap(1ch), [1]=bbox(4ch), [2]=landmark(10ch).
+ *
+ * @param faces Array of faces found, one per detection
+ * @param max_faces Max number of faces that can be found
+ * @param network_outputs Output buffers obtained from VectorBlox ([heatmap, bbox, landmark])
+ * @param zero_points Mean offset for int8
+ * @param scale_outs fix16 scaling multiplier for int8
+ * @param image_width Width of input image sent to the network
+ * @param image_height Height of input image sent to the network
+ * @param confidence_threshold Confidence threshold, ranged from 0-1.0
+ * @param nms_threshold Non-max suppression IoU threshold (use -fix16_one to disable)
+ * @return int Number of detected faces
+ */                          
+ int post_process_facedetlite_int8(object_t faces[], int max_faces, int8_t *network_outputs[3], int zero_points[], fix16_t scale_outs[],
+    int image_width, int image_height, fix16_t confidence_threshold, fix16_t nms_threshold);                               
 int post_process_lpd_int8(object_t objects[],int max_objects, int8_t *detectOutputs[9], int image_width, int image_height,
 					fix16_t confidence_threshold, fix16_t nms_threshold,int detectNumOutputs, int zero_points[], fix16_t scale_outs[]);
 int post_process_lpd(object_t plates[],int max_plates, fix16_t *detectOutputs[9], int image_width, int image_height,

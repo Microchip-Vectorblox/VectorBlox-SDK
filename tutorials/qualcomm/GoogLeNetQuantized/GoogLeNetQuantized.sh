@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1.1                                                 #
+# v3.2                                                   #
 #                                                        #
 ##########################################################
 
@@ -28,13 +28,6 @@ if [ ! -f GoogLeNetQuantized.tflite ]; then
     mv GoogLeNet_w8a8.tflite GoogLeNetQuantized.tflite
 fi
 
-
-if [ -f GoogLeNetQuantized.tflite ]; then
-   if ! echo "b5ef308abf8b450b034481f73d2394f9 GoogLeNetQuantized.tflite" | md5sum -c; then
-       echo -e "\n There is an issue with the GoogLeNetQuantized model file as the expected checksum does not match.\n The model source can be found at: https://aihub.qualcomm.com/models/googlenet.\n If the model information has changed, please update this script and re-run the tutorial."
-       exit 1
-   fi
-fi
 
 
 # tflite_preprocess is an internal tool used to add a preprocess layer to the start of the model

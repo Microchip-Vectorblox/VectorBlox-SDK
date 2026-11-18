@@ -1,46 +1,85 @@
 import sys
 sys.path.append('.')
 import common.internal_representation as internal_representation
-from common.hw_config import GRID_CONFIGS, AMM_HEIGHT, TFLITE_REQUANT
+from common.hw_config import MAX_GRID_WIDTH, MAX_GRID_HEIGHT, OpType
 import math
 import numpy as np
 import numeric_simulator.neuronix_ops as neuronix_ops
-import pickle
 from numeric_simulator.defs import qTensor
 import os
-from common.debug_flags import DEBUG_CREATE_ORDERING_CONV, DEBUG_SIMULATE_FOLDING, DEBUG_SIMULATE_CONCAT_REQUANT, DEBUG_OPTIMIZE_DMA_TRANSACTIONS, NODES_LIST
+from common.debug_flags import DEBUG_SIMULATE_FOLDING, DEBUG_OPTIMIZE_DMA_TRANSACTIONS, NODES_LIST
 from common.ddr_ir import create_tsnp_tensor_byte_array
 import compiler.folding_algo as folding_algo
 from typing import Tuple
-from tqdm import tqdm
-import json
 import argparse
-import time
 import struct
 import mmap
 import posix_ipc
 from numpy.random import RandomState
 import re
 import tempfile
+import contextlib
 
-DEBUG_PRINT = False
-sync_dir = None
+# Two independent channels, one per direction: sharing one full/empty pair would let
+# NX's own send_sync() immediately followed by wait_for_sync() consume the token it
+# just posted itself, instead of MXP's reply.
+SHM_NAME_H2D = "/shm_tsnp_mxp_h2d"  # NX -> MXP (send_sync)
+SEM_EMPTY_NAME_H2D = "/sem_empty_h2d"
+SEM_FULL_NAME_H2D = "/sem_full_h2d"
+SHM_NAME_D2H = "/shm_tsnp_mxp_d2h"  # MXP -> NX (wait_for_sync)
+SEM_EMPTY_NAME_D2H = "/sem_empty_d2h"
+SEM_FULL_NAME_D2H = "/sem_full_d2h"
 
-sync_name = "/sync_shared_memory"
-sync_semaphore = "/sync_semaphore"
 
-try:
-    # Attempt to create the semaphore, raise exception if it exists
-    semaphore = posix_ipc.Semaphore(sync_semaphore, posix_ipc.O_CREX, initial_value=1)
-except posix_ipc.ExistentialError:
-    # semaphore exists, get a handle to it
-    semaphore = posix_ipc.Semaphore(sync_semaphore)
-    
+def _set_ipc_names(run_id):
+    """Append a per-run suffix to the POSIX shared-memory / semaphore names.
+
+    The shared memory segment and the sem_empty/sem_full semaphores live in a
+    system-wide namespace, so running several simulations concurrently with the
+    fixed default names makes them clobber each other's data and mispair their
+    syncs. Giving each run a unique id isolates them. The MXP peer that creates
+    these objects must use the same names. A falsy run_id keeps the original
+    names for backward compatibility."""
+    global SHM_NAME_H2D, SEM_EMPTY_NAME_H2D, SEM_FULL_NAME_H2D
+    global SHM_NAME_D2H, SEM_EMPTY_NAME_D2H, SEM_FULL_NAME_D2H
+    if not run_id:
+        return
+    SHM_NAME_H2D = f"/shm_tsnp_mxp_h2d_{run_id}"
+    SEM_EMPTY_NAME_H2D = f"/sem_empty_h2d_{run_id}"
+    SEM_FULL_NAME_H2D = f"/sem_full_h2d_{run_id}"
+    SHM_NAME_D2H = f"/shm_tsnp_mxp_d2h_{run_id}"
+    SEM_EMPTY_NAME_D2H = f"/sem_empty_d2h_{run_id}"
+    SEM_FULL_NAME_D2H = f"/sem_full_d2h_{run_id}"
+
+
+def _round_up_to_pow2_mult(value, base):
+    if value <= base:
+        return base
+    ratio = value / base
+    exp = math.ceil(math.log2(ratio))
+    return base << exp
+
+
+def _write_nxo(debug_dir, name, data):
+    output_filename = os.path.join(debug_dir, name + '.nxo')
+    with open(output_filename, 'wb') as bin_file:
+        bin_file.write(data)
+
+
+def _unlink_sem(name):
+    try:
+        posix_ipc.unlink_semaphore(name)
+        print(f"Semaphore '{name}' unlinked successfully.")
+    except posix_ipc.ExistentialError:
+        print(f"Semaphore '{name}' does not exist, cannot unlink.")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+
 def read_array_from_csv(input_file: str) -> np.array:
     with open(input_file, 'r') as file:
-        content = file.read().strip()
-    if content[-1] == ',':
-        content = content[:-1]
+        content = file.read()
+    content = content.strip().rstrip(',')
     return np.array(content.split(','), dtype=int)
 
 # Read inputs from .csv file or sent from MXP
@@ -61,9 +100,6 @@ def get_model_inputs(ir: internal_representation.IR, read_from_mxp, input_file, 
         else:
             if input_file != None:
                 input = read_array_from_csv(input_file).reshape(input_shape)
-                if not TFLITE_REQUANT:
-                    # Add 128 because TFLite is int8, ONNX is uint8
-                    input = input + 128
             else:
                 if os.path.exists(model_bin):
                     with open(model_bin, 'rb') as mf:
@@ -78,50 +114,21 @@ def get_model_inputs(ir: internal_representation.IR, read_from_mxp, input_file, 
                         input_data = mf.read(input_size)
                         input = np.frombuffer(input_data, dtype=np.int8)
                         input = input.reshape(input_shape)
-                    
-                    if (input.shape[3] % 16 != 0):
-                        with open(model_bin, 'r+b') as mf:
-                            header_size = struct.unpack('i', mf.read(4))[0]         
-                            padding_width = math.ceil(input.shape[3]/16)*16 - input.shape[3]
-                            input = np.pad(input, ((0, 0), (0, 0), (0, 0), (0, padding_width)), mode="constant", constant_values=0)
-                            input_size_offset = 20
-                            input_size = int(np.prod(input.shape))
-                            mf.seek(input_size_offset, 0)
-                            mf.write(input_size.to_bytes(4, 'little'))    
-                            input_bytearray = bytearray(input.astype(np.int8))
-                            input_address_offset = 24
-                            mf.seek(input_address_offset, 0)
-                            input_address = header_size + struct.unpack('i', mf.read(4))[0]
-                            mf.seek(input_address, 0)
-                            mf.write(input_bytearray)
-                            print(f"Successfully modified {len(input_bytearray)} bytes at {hex(input_address)} offset in {model_bin}")
                 else:
                     prng = RandomState(5095)
-                    if not TFLITE_REQUANT:
-                        float_input = prng.uniform(size=input_shape,low=0,high=1).astype(np.float32)
-                        input = np.round(float_input/input_scale)+zero_point
-                        input = np.clip(input,0,255)
-                    else:
-                        input = prng.randint(size=input_shape,low=-128,high=127)
-        input = input.astype(np.float32)
+                    input = prng.randint(size=input_shape,low=-128,high=127)
         input_tensor = qTensor(input,input_scale,zero_point)
         inputs[graph_input] = input_tensor
         # Pad to nearest grid size
         if pad_to_gridsize and len(input_shape)==4:
             # The below handles case where we need to pad x axis original tensor to fit grid width once folded.
             # This is not needed in y axis?
-            current_input_width=input_shape[3]
+            current_input_width = input_shape[3]
             current_input_height = input_shape[2]
-            for minimal_grid_width,gridmode in GRID_CONFIGS.items():
-                if current_input_width<=minimal_grid_width:
-                    break
-            minimal_grid_width_mult_factor = math.ceil(max(0,math.log2(current_input_width/minimal_grid_width)))
-            padded_width = int(math.pow(2,minimal_grid_width_mult_factor)*minimal_grid_width)
-            x_padding = padded_width-current_input_width
-            minimal_grid_height = AMM_HEIGHT
-            minimal_grid_height_mult_factor = math.ceil(max(0,math.log2(current_input_height/minimal_grid_height)))
-            padded_height = int(math.pow(2,minimal_grid_height_mult_factor)*minimal_grid_height)
-            y_padding = padded_height-current_input_height
+            padded_width = _round_up_to_pow2_mult(current_input_width, MAX_GRID_WIDTH)
+            x_padding = padded_width - current_input_width
+            padded_height = _round_up_to_pow2_mult(current_input_height, ir.amm_height)
+            y_padding = padded_height - current_input_height
             padded_input=np.pad(input,[(0,0),(0,0),(0,y_padding),(0,x_padding)], mode='constant', constant_values=0)
             padded_input_tensor = qTensor(padded_input,input_scale,zero_point)
             padded_inputs[graph_input] = padded_input_tensor
@@ -129,73 +136,46 @@ def get_model_inputs(ir: internal_representation.IR, read_from_mxp, input_file, 
             padded_inputs = inputs
     return padded_inputs, input
 
-# Compare to an expected output tensor
-def compare_to_expected(nx_output, expected_output, output_num, zero_point, output_dir):
+# Compare to an expected output tensor. Returns True on pass, False on fail.
+def compare_to_expected(nx_output, expected_output, zero_point):
     # Comparison threshold (for int8 quantized outputs)
     THRESHOLD = 1
 
-    if not TFLITE_REQUANT:
-        # Add 128 because TFLite is int8, ONNX is uint8
-        expected_output = expected_output + 128
-    # this is Alex patch to have the same shape for my test case    
     if nx_output.shape[2] > expected_output.shape[2] or nx_output.shape[3] > expected_output.shape[3]:
-        # padding_height = nx_output.shape[2] - expected_output.shape[2]
-        # padding_width = nx_output.shape[3] - expected_output.shape[3]
-        # expected_output = np.pad(expected_output, ((0, 0), (0, 0), (0, padding_height), (0, padding_width)), mode="constant", constant_values=zero_point)
         nx_output = nx_output[:,:,:expected_output.shape[2],:expected_output.shape[3]]
 
-    # Find where the arrays differ
     mismatches = np.where(abs(nx_output - expected_output) > THRESHOLD)
-    '''
-    if len(mismatches[0]) > 0:
-        print("Mismatched indices:")
-        for mismatch in zip(*mismatches):
-            diff = nx_output[mismatch] - expected_output[mismatch]
-            print(f"{mismatch}\tNX: {nx_output[mismatch]}, TFLite: {expected_output[mismatch]}, Diff: {diff}")
-        print("\n")
-    '''
-
-    # Find where the arrays match
     matches = np.where(abs(nx_output - expected_output) <= THRESHOLD)
-    '''
-    print("Matched indices:")
-    for match in zip(*matches):
-        print(f"{match}\tValue: {nx_output[match]}")
-    '''
-    
-    # Summary: Total number of mismatches and matches
-    total_mismatches = len(mismatches[0])
-    print(f"Total mismatches: {total_mismatches}")
-    total_matches = len(matches[0])
-    print(f"Total matches: {total_matches}")
     max_diff = int(np.abs(nx_output - expected_output).max())
     print(f"Max Difference: {max_diff}")
-    
-    # with open(os.path.join(output_dir, "results_"+str(output_num)+".txt"), "w") as file:
-    #     file.write("Total mismatches: " + str(total_mismatches) + "\n")
-    #     file.write("Total matches: " + str(total_matches) + "\n")
-    #     file.write("max_diff: " + str(max_diff) + "\n")
+
+    if (len(mismatches[0]) > 0):
+        total_mismatches = len(mismatches[0])
+        print(f"Total mismatches: {total_mismatches}")
+        total_matches = len(matches[0])
+        print(f"Total matches: {total_matches}")
+        return False
+    else:
+        return True
 
 # Send sync to MXP
 def send_sync(tensor_data):
     data = tensor_data.flatten()
-    if not TFLITE_REQUANT:
-        # Add 128 because TFLite is int8, ONNX is uint8
-        data = data - 128
     data = data.astype(np.int8)
     data_bytes = data.tobytes()
     size_in_bytes = len(data_bytes)
+    sem_shm_empty = posix_ipc.Semaphore(SEM_EMPTY_NAME_H2D)
+    sem_shm_full = posix_ipc.Semaphore(SEM_FULL_NAME_H2D)
+
     print('send_sync: Acquire Semaphore')
-    while True:
-        try:
-            shm = posix_ipc.SharedMemory(sync_name, flags=posix_ipc.O_CREX, size=size_in_bytes)
-            semaphore.acquire()
-        except posix_ipc.ExistentialError:
-            continue
-        else:
-            break
-            
+    sem_shm_empty.acquire()
     try:
+        # Unlink any existing shared memory (from prior syncs in multi-split scenarios)
+        try:
+            posix_ipc.unlink_shared_memory(SHM_NAME_H2D)
+        except:
+            pass
+        shm = posix_ipc.SharedMemory(SHM_NAME_H2D, flags=posix_ipc.O_CREX, size=size_in_bytes)
         # Map the shared memory block into process's address space
         mapfile = mmap.mmap(shm.fd, shm.size)
         # Write data to shared memory
@@ -203,59 +183,69 @@ def send_sync(tensor_data):
         mapfile.write(data_bytes)
         mapfile.flush()
     finally:
-        semaphore.release()
+        sem_shm_full.release()
         print('send_sync: Release Semaphore')
-    
+
 # Wait for sync from MXP
-def wait_for_sync(return_tensor = False, tensor_shape = None):
+def wait_for_sync(return_tensor = False, tensor_shape = None, sync_count = 1):
     tensor_size = tensor_shape[0] * tensor_shape[1] * tensor_shape[2] * tensor_shape[3]
-    print("Wating for shared memory creation ......")
-    while True:
+    sem_shm_empty = posix_ipc.Semaphore(SEM_EMPTY_NAME_D2H)
+    sem_shm_full = posix_ipc.Semaphore(SEM_FULL_NAME_D2H)
+
+    # MXP receives N syncs (one per input). Only read data once (on first sync).
+    # If the C side was compiled expecting only 1 sync but we're sending N, it will
+    # call wait_for_sync once and then the extra syncs hang. This fallback detects
+    # that and absorbs the extra syncs on the Python side.
+    tensor = None
+    syncs_received = 0
+    while syncs_received < sync_count:
+        print('wait_for_sync: Acquire Semaphore (sync %d/%d)' % (syncs_received + 1, sync_count))
+        sem_shm_full.acquire()
         try:
-            memory = posix_ipc.SharedMemory(sync_name)
-            if (tensor_size == memory.size):
-                break
-            else:
-                os.close(memory.fd)
-        except:
-            continue
-    
-    print('wait_for_sync: Acquire Semaphore')
-    semaphore.acquire()
-    
-    try:
-        # Map the shared memory block into process's address space
-        memory_map = mmap.mmap(memory.fd, memory.size)
-        os.close(memory.fd)    
-        # Read data from shared memory (in another process)
-        data = memory_map.read()
-        tensor = np.frombuffer(data, dtype=np.int8)
-        if not TFLITE_REQUANT:
-            # Add 128 because TFLite is int8, ONNX is uint8
-            tensor = (tensor + 128).astype(np.uint8)
-        # Clean up
-        memory_map.close()
-        posix_ipc.unlink_shared_memory(sync_name)
-    finally:
-        semaphore.release()
-        print('wait_for_sync: Release Semaphore')
-    
+            memory = posix_ipc.SharedMemory(SHM_NAME_D2H)
+            if (tensor_size != memory.size):
+                raise ValueError('TENSOR from MXP: SIZE MISMATCHED')
+            # Map the shared memory block into process's address space
+            memory_map = mmap.mmap(memory.fd, memory.size)
+            os.close(memory.fd)
+            # Read data from shared memory (in another process) - only on first sync
+            if syncs_received == 0:
+                data = memory_map.read()
+                tensor = np.frombuffer(data, dtype=np.int8)
+            # Clean up
+            memory_map.close()
+        finally:
+            sem_shm_empty.release()
+            print('wait_for_sync: Release Semaphore (sync %d/%d)' % (syncs_received + 1, sync_count))
+        syncs_received += 1
+
+    # Unlink shared memory once after all syncs are received
+    posix_ipc.unlink_shared_memory(SHM_NAME_D2H)
+
     return tensor
 
 # Function which simulates the Sync node
-def nx_sync(node_name,model_inputs:dict,intermediate_tensors: dict,node, is_intermediate_node, debug_dir = None):
+def nx_sync(node_name,model_inputs:dict,intermediate_tensors: dict,node, is_intermediate_node, debug_dir = None,amm_height=MAX_GRID_HEIGHT,tensors_to_mxp=None,split_tensor_to_original_tensor_map=None,original_tensor_to_split_tensor_map=None):
 
-    assert len(node['inputs']) == 1
     assert len(node['outputs']) == 1
+    # Sync nodes can have multiple inputs when they coordinate between channel-split pieces.
+    # Use the first input as the representative for send_sync.
+    assert len(node['inputs']) >= 1
 
 
-    # Send the sync by creating a file
-    # Also write node['inputs'] to a file
-    sync_input = intermediate_tensors[node['inputs'][0]]
-    send_sync(sync_input.data)
+    # Send one sync for each input tensor. MXP receives N syncs before proceeding.
+    for input_name in node['inputs']:
+        sync_input_name = input_name
+        while split_tensor_to_original_tensor_map and sync_input_name in split_tensor_to_original_tensor_map:
+            sync_input_name = split_tensor_to_original_tensor_map[sync_input_name]
+        if sync_input_name not in intermediate_tensors and original_tensor_to_split_tensor_map:
+            neuronix_ops._reassemble_split_tensor(sync_input_name, intermediate_tensors, original_tensor_to_split_tensor_map)
+        sync_input = intermediate_tensors[sync_input_name]
+        send_sync(sync_input.data)
 
-    # Now, wait for the response
-    output_data = wait_for_sync(return_tensor = True, tensor_shape=node['frontend']['output_tensor'].shape)
+    # Now, wait for the response. MXP processes all N inputs and sends back 1 output.
+    # Always wait for 1 sync (the output), regardless of number of inputs.
+    output_data = wait_for_sync(return_tensor = True, tensor_shape=node['frontend']['output_tensor'].shape, sync_count=1)
 
     # Read the mxp output to the tensor
     output_data = output_data.reshape(node['frontend']['output_tensor'].shape)
@@ -265,11 +255,8 @@ def nx_sync(node_name,model_inputs:dict,intermediate_tensors: dict,node, is_inte
     output_folding_factor_y = node['frontend']['output_tensor'].folding_factor_y
     output_x_slices = node['frontend']['output_tensor'].x_slices
 
-    #output_tensor_bytearray = create_tsnp_tensor_byte_array(output_data, is_intermediate_node=is_intermediate_node, num_xslices=output_x_slices, pad_value=output_zero_point)
     output_tensor_bytearray = create_tsnp_tensor_byte_array(output_data)
-    output_filename = os.path.join(debug_dir,(node_name+'_output_tensor.nxo'))
-    with open(output_filename,'wb') as bin_file:
-        bin_file.write(output_tensor_bytearray)
+    _write_nxo(debug_dir, node_name + '_output_tensor', output_tensor_bytearray)
 
     output_tensor = qTensor(output_data, scale=output_scale, zero_point=output_zero_point, folding_factor_x=output_folding_factor_x, folding_factor_y=output_folding_factor_y, x_slices=output_x_slices)
     output_name = node['outputs'][0]
@@ -277,55 +264,76 @@ def nx_sync(node_name,model_inputs:dict,intermediate_tensors: dict,node, is_inte
 
     return [output_tensor]
 
-def get_nx_sync_function(node_name, execution_order_sorted_graph):
-    if node_name == execution_order_sorted_graph[0]:
-        # If at the start, no need to write, just wait
-        assert False, "Need to add function for Sync at start"
-    if node_name == execution_order_sorted_graph[-1]:
-        # If at the end, no need to wait, just write
-        assert False, "Need to add function for Sync at end"
-
-    return nx_sync # Defined in this file currently
-
 # This is based on simulate from simulator.py.
 def simulate(ir: internal_representation.IR, model_inputs: dict, intermediate_nodes:list, debug_dir:str, sync_with_mxp: bool) -> Tuple[list,dict]:
     intermediate_tensors = {}
+    output_split_reconstruction_buffers = {}
     current_op_outputs = []
     model_outputs = []
     execution_order_sorted_graph = ir.lexicographical_topological_sorted_graph
+    neuronix_ops.set_current_graph_nodes(ir.graph.nodes)
 
     # Simulate each node
     for node_name in execution_order_sorted_graph:
         node = ir.graph.nodes[node_name]
         current_op_type = node['op_type']
-        
+
         is_intermediate_node = False
         if (intermediate_nodes != None):
             if (node_name in intermediate_nodes):
                 is_intermediate_node = True
-        
+            # Resize splits into '_x'/'_y' nodes; '_y' does the AMM->DDR write and lands in
+            # intermediate_nodes, but '_x' is the one that exports the .nxo/.nxd (nx_resize returns
+            # early for '_y'). Let '_x' inherit its '_y' sibling's intermediate status.
+            elif current_op_type == OpType.RESIZE and node_name.endswith('_x') \
+                    and (node_name[:-2] + '_y') in intermediate_nodes:
+                is_intermediate_node = True
+
+        output_tensors = ir.tensors_to_mxp.copy()
+        output_tensors.update(ir.outputs)
+
         if 'output_reorder_node' in node:
             continue
         if current_op_type in neuronix_ops.ops_directory:
             neuronix_op = neuronix_ops.ops_directory[current_op_type]
-        elif current_op_type == "Sync":
-            neuronix_op = get_nx_sync_function(node_name, execution_order_sorted_graph)
+        elif current_op_type == OpType.SYNC:
+            assert node_name != execution_order_sorted_graph[0], "Need to add function for Sync at start"
+            assert node_name != execution_order_sorted_graph[-1], "Need to add function for Sync at end"
+            neuronix_op = nx_sync
         else:
             raise ValueError('Op type: %s not supported by nx compiler' % current_op_type)
-        current_op_outputs = neuronix_op(node_name,model_inputs,intermediate_tensors,node,is_intermediate_node=is_intermediate_node,debug_dir=debug_dir)
-        
-        if 'split' in node_name and current_op_type != "Resize":
-            output_name = node['outputs'][0]
-            prev_split_output_name = output_name[:-1] + str(int(output_name[-1]) - 1)
-            original_output_name = output_name.split('_split')[0]
-            if original_output_name not in intermediate_tensors:
-                output_tensor = intermediate_tensors[prev_split_output_name]
-                original_tensor = qTensor(output_tensor.data, scale = output_tensor.scale, zero_point = output_tensor.zero_point, \
-                                        folding_factor_x = output_tensor.folding_factor_x,folding_factor_y=output_tensor.folding_factor_y, x_slices=output_tensor.x_slices)
-                intermediate_tensors[original_output_name] = original_tensor
-            intermediate_tensors[original_output_name].data = \
-                np.concatenate((intermediate_tensors[original_output_name].data, intermediate_tensors[output_name].data), axis = 1)
-            
+        current_op_outputs = neuronix_op(node_name,model_inputs,intermediate_tensors,node,is_intermediate_node=is_intermediate_node,debug_dir=debug_dir,amm_height=ir.amm_height,tensors_to_mxp=output_tensors,split_tensor_to_original_tensor_map=ir.split_tensor_to_original_tensor_map,original_tensor_to_split_tensor_map=ir.original_tensor_to_split_tensor_map)
+
+        # OUTPUT-channel split reconstruction: pieces '<orig>_split0'..'_splitN' (registered by
+        # split_node_out_channels_in_n) are concatenated back into <orig> along channels as each
+        # piece finishes. Use split_tensor_to_original_tensor_map as the authoritative signal rather
+        # than name-substring heuristics: a node can be both an input-channel-split recombine Add
+        # (not concatenated) and an outer output-channel-split piece producer (must be concatenated),
+        # and no name-based rule distinguishes the two.
+        _split_recombine_output_name = node['outputs'][0]
+        original_output_name = ir.split_tensor_to_original_tensor_map.get(_split_recombine_output_name)
+        if (original_output_name is not None and original_output_name != _split_recombine_output_name
+                and current_op_type != OpType.RESIZE):
+            output_name = _split_recombine_output_name
+            # Pieces don't necessarily finish in channel order, so buffer by split_channel_lo and
+            # only concatenate once every piece covering the full channel range has arrived.
+            lo = ir.tensors[output_name].split_channel_lo
+            output_split_reconstruction_buffers.setdefault(original_output_name, {})[lo] = intermediate_tensors[output_name]
+            buffered = output_split_reconstruction_buffers[original_output_name]
+            full_channels = ir.tensors[original_output_name].shape[1]
+            # Compare REAL (unfolded) channel counts, not raw .data.shape[1]: a folded piece's raw
+            # count is real_count * 2**(folding_factor_x+folding_factor_y), so summing raw counts can
+            # spuriously match full_channels early, firing the merge before all pieces arrive.
+            buffered_channels = sum(
+                t.data.shape[1] // (2 ** (t.folding_factor_x + t.folding_factor_y)) for t in buffered.values())
+            if buffered_channels == full_channels:
+                ordered_pieces = [buffered[lo] for lo in sorted(buffered.keys())]
+                first_piece = ordered_pieces[0]
+                merged_data = neuronix_ops._merge_split_pieces_data(ordered_pieces)
+                intermediate_tensors[original_output_name] = qTensor(merged_data, scale = first_piece.scale, zero_point = first_piece.zero_point, \
+                                        folding_factor_x = first_piece.folding_factor_x, folding_factor_y = first_piece.folding_factor_y, x_slices = first_piece.x_slices)
+                del output_split_reconstruction_buffers[original_output_name]
+
     for output_name in ir.outputs:
         intermediate_tensor_name = 'pre_ordering_'+output_name
         if intermediate_tensor_name not in intermediate_tensors:
@@ -339,6 +347,19 @@ def simulate(ir: internal_representation.IR, model_inputs: dict, intermediate_no
 
     return model_outputs,intermediate_tensors
 
+
+# Return the MXP's NX->MXP sync wait order (ordered list of NX tensor ids, duplicates included),
+# or None when absent so the caller falls back to legacy behaviour. Persisted into the numsim
+# .nxir at compile time (write_mxp_sync_order / parse_mxp_sync_order).
+def read_mxp_sync_order(ir):
+    return getattr(ir, 'mxp_sync_order', None)
+
+
+# Map an NX IR output name ('T<tflite_tensor_id>') to its integer tensor id.
+def nx_ir_output_id(name):
+    m = re.match(r'T(\d+)', str(name))
+    return int(m.group(1)) if m is not None else None
+
 def main():
     parser = argparse.ArgumentParser(description='VBX 3.0 numeric simulator')
 
@@ -350,14 +371,17 @@ def main():
     parser.add_argument('-i','--input_file', default=None, help='Input csv file with tensor data (int8).', required=False)
     parser.add_argument('-t','--tflite', default=None, help='Path to .tflite file to calculate expected (int8) output.', required=False)
     parser.add_argument('--no_mxp', action="store_true", help='Simulate TFLite standalone (no syncing with MXP).')
-    parser.add_argument('-r','--output_order', default=None, help='Specify the output order for vectorblox outputs.', required=False)
-    
-    global args
+    parser.add_argument('--run_id', default=os.environ.get('SIM_RUN_ID'),
+                        help='Unique suffix for the POSIX shared-memory/semaphore names so multiple '
+                             'simulations can sync with the MXP in parallel without colliding. The MXP '
+                             'peer must create objects with matching names. Defaults to the SIM_RUN_ID '
+                             'environment variable when set, otherwise the original fixed names are used.')
+
     args = parser.parse_args()
 
-    sync_with_mxp = True
-    if args.no_mxp:
-        sync_with_mxp = False
+    _set_ipc_names(args.run_id)
+
+    sync_with_mxp = not args.no_mxp
 
     model_name = args.model
     output_dir = args.output_dir
@@ -368,45 +392,41 @@ def main():
     ir_filename = os.path.join(output_dir,(model_name+'_numsim.nxir'))
     ir = ir.load(ir_filename)
 
-    if ir.debug:
-        debug_dir = os.path.join(output_dir, 'temp', 'debug')
-        if not os.path.exists(debug_dir):
-            os.makedirs(debug_dir)
-    else:
-        tmp_dir_obj = tempfile.TemporaryDirectory()
-        debug_dir = tmp_dir_obj.name
-    
+    with contextlib.ExitStack() as stack:
+        if ir.debug:
+            debug_dir = os.path.join(output_dir, 'temp', 'debug')
+            if not os.path.exists(debug_dir):
+                os.makedirs(debug_dir)
+        else:
+            debug_dir = stack.enter_context(tempfile.TemporaryDirectory())
 
-    model_bin = os.path.join(output_dir, model_name+'.ucomp')
-    if not os.path.exists(model_bin):
-        print("Please generate combined binary file .ucomp before running the numeric simulator")
-        sys.exit(0)
-    
-    # List to store extracted data
-    intermediate_nodes = []    
-    if DEBUG_OPTIMIZE_DMA_TRANSACTIONS:
-        ddr_file_path = os.path.join(output_dir, model_name + '_ddr_info.txt')
-        # Pattern to extract relevant data
-        pattern = re.compile(
-            r"Address: .*?Description:.*?Blob.*?producer node: (\S+), folded shape: \[(\d+), (\d+), (\d+), (\d+)\]"
-        )
-        with open(ddr_file_path, "r") as file:
-            for line in file:
-                match = pattern.search(line)
-                if match:
-                    producer_node = match.groups()[0]
 
-                    # MXP/TSNP Sync nodes aren't intermediate nodes
-                    if 'Sync_' in producer_node:
-                        continue
+        model_bin = os.path.join(output_dir, model_name+'.ucomp')
+        if not os.path.exists(model_bin):
+            print("Please generate combined binary file .ucomp before running the numeric simulator")
+            sys.exit(0)
 
-                    x = int(match.groups()[4])
-                    intermediate_nodes.append(producer_node)
-    
-    tests_to_run=1
-    #tqdm_iterator = tqdm(range(tests_to_run))
-    #for image_idx in tqdm_iterator:
-    for image_idx in range(tests_to_run):
+        # List to store extracted data
+        intermediate_nodes = []
+        if DEBUG_OPTIMIZE_DMA_TRANSACTIONS:
+            ddr_file_path = os.path.join(output_dir, model_name + '_ddr_info.txt')
+            # Pattern to extract relevant data
+            pattern = re.compile(
+                r"Address: .*?Description:.*?Blob.*?producer node: (\S+), folded shape: \[(\d+), (\d+), (\d+), (\d+)\]"
+            )
+            with open(ddr_file_path, "r") as file:
+                for line in file:
+                    match = pattern.search(line)
+                    if match:
+                        producer_node = match.groups()[0]
+
+                        # MXP/TSNP Sync nodes aren't intermediate nodes
+                        if 'Sync_' in producer_node:
+                            continue
+
+                        x = int(match.groups()[4])
+                        intermediate_nodes.append(producer_node)
+
         #padded_inputs are used for neuronix model
         # e.g. width7 is padded to 14(minimal width) 27 will be padded to 28 etc
         # we always pad to 14*2^X
@@ -418,8 +438,6 @@ def main():
 
         nx_outputs, _ = simulate(ir, padded_inputs, intermediate_nodes, debug_dir, sync_with_mxp)
 
-        input_name = ir.inputs[0]
-        input_tensor = ir.tensors[input_name]
         input_tensor = list(padded_inputs.values())[0].data
         input_tensor_bytearray = bytearray(input_tensor.astype(np.int8))
         input_filename = os.path.join(debug_dir,(model_name+'_input.nxi'))
@@ -440,31 +458,49 @@ def main():
         # Note: This is done here to include the final reordering
         if sync_with_mxp:
             if (len(nx_ordered_outputs) > 1):
-                vnnx_order = json.loads(args.output_order)
-                vnnx_ordered_outputs = []
-                vnnx_ordered_output_zps = []
-                vnnx_folded_ordered_outputs = []
-                used_idx = []
-                for i in range(len(nx_ordered_outputs)):
-                    for j in range(len(nx_ordered_outputs)):
-                        channels = len(nx_ordered_outputs[i][0])
-                        rows = len(nx_ordered_outputs[i][0][0])
-                        cols = len(nx_ordered_outputs[i][0][0][0])
-                        if (channels == int(vnnx_order[j][1])) and (rows == int(vnnx_order[j][2])) and (cols == int(vnnx_order[j][3])) and \
-                            (j not in used_idx):
-                            used_idx.append(j)
-                            break
-                    vnnx_ordered_outputs.append(nx_ordered_outputs[j])
-                    vnnx_ordered_output_zps.append(nx_ordered_output_zps[j])
-                    vnnx_folded_ordered_outputs.append(nx_folded_ordered_outputs[j])
+                # The NX->MXP sync channel is an ordered, depth-1 FIFO with no tensor keying, so
+                # sends must arrive in exactly the order MXP waits - generally NOT the model's
+                # declared output order (mid-graph tensors like score maps are waited on before
+                # final outputs; MXP-produced outputs are never synced). ir.mxp_sync_order carries
+                # that exact order from the compiler.
+                sync_order_ids = read_mxp_sync_order(ir)
+                assert sync_order_ids is not None, (
+                    "ir.mxp_sync_order not found in the numsim .nxir; recompile the model with a "
+                    "current vnnx_compile so the MXP<->NX sync order is emitted.")
+                # nx_ordered_outputs[i] corresponds to ir.outputs[i] (see simulate()); map each
+                # NX output's tensor id to its index so we can emit the MXP wait order.
+                nx_id_to_idx = {}
+                output_tensor_aliases = getattr(ir, 'output_tensor_aliases', {})
+                for i, oname in enumerate(ir.outputs):
+                    tid = nx_ir_output_id(oname)
+                    if tid is not None:
+                        nx_id_to_idx[tid] = i
+                    # oname may be renamed from the true tflite output (e.g. fused SiLU/Requant);
+                    # mxp_sync_order still refers to the original id, so map that too.
+                    alias_name = output_tensor_aliases.get(oname)
+                    if alias_name is not None:
+                        alias_tid = nx_ir_output_id(alias_name)
+                        if alias_tid is not None:
+                            nx_id_to_idx[alias_tid] = i
+                missing = sorted({tid for tid in sync_order_ids if tid not in nx_id_to_idx})
+                assert not missing, (
+                    f"MXP sync order references tensor id(s) {missing} not produced by the "
+                    f"NX engine (ir.outputs={list(ir.outputs)})")
+                order = [nx_id_to_idx[tid] for tid in sync_order_ids]
+                vnnx_ordered_outputs = [nx_ordered_outputs[i] for i in order]
+                vnnx_ordered_output_zps = [nx_ordered_output_zps[i] for i in order]
+                vnnx_folded_ordered_outputs = [nx_folded_ordered_outputs[i] for i in order]
             else:
                 vnnx_ordered_outputs = nx_ordered_outputs
+                vnnx_ordered_output_zps = nx_ordered_output_zps
+                vnnx_folded_ordered_outputs = nx_folded_ordered_outputs
             for output in vnnx_ordered_outputs:
                 send_sync(output)
         else:
             vnnx_folded_ordered_outputs = nx_folded_ordered_outputs
             vnnx_ordered_outputs = nx_ordered_outputs
-                
+            vnnx_ordered_output_zps = nx_ordered_output_zps
+
             input_tensor_bytearray = None
             output_tensor_bytearray = None
             if NODES_LIST['Start']:
@@ -491,7 +527,7 @@ def main():
                     input_address_offset = 24
                     output_size_offset = 28
                     output_address_offset = 32
-                    
+
                     if input_tensor_bytearray != None:
                         # Overwrite number of inputs
                         mf.seek(num_inputs_offset, 0)
@@ -503,14 +539,13 @@ def main():
                         # Overwrite input address
                         mf.seek(input_address_offset, 0)
                         input_address = list(ir.input_ddr_offset)[0]
-                        input_address = math.ceil(input_address/16)*16
                         mf.write(input_address.to_bytes(4, 'little'))
                         # Overwrite input data
                         mf.seek(header_size+input_address, 0)
                         mf.write(input_tensor_bytearray)
                         print(f"Successfully written Output {len(input_tensor_bytearray)} bytes at {hex(input_address)} offset in {model_bin}")
 
-                    if input_tensor_bytearray != None:
+                    if output_tensor_bytearray != None:
                         # Overwrite number of outputs
                         mf.seek(num_outputs_offset, 0)
                         num_outputs = int(1)
@@ -521,20 +556,19 @@ def main():
                         # Overwrite output address
                         mf.seek(output_address_offset, 0)
                         output_address = list(ir.output_ddr_offset)[0]
-                        output_address = math.ceil(output_address/16)*16
                         mf.write(output_address.to_bytes(4, 'little'))
                         # Overwrite output data
                         mf.seek(header_size+output_address, 0)
                         mf.write(output_tensor_bytearray)
                         print(f"Successfully written Output {len(output_tensor_bytearray)} bytes at {hex(output_address)} offset in {model_bin}")
-            else:           
+            else:
                 # writing folded_output of VBX3.0 simulator to the .ucomp and .nxo file
                 with open(model_bin, 'r+b') as mf:
                     header_size = struct.unpack('i', mf.read(4))[0]
                     num_output_offset = 16
                     mf.seek(num_output_offset, 0)
                     num_outputs = struct.unpack('i', mf.read(4))[0]
-                    used_idx = []
+                    used_idx = set()
                     for o, output in enumerate(vnnx_ordered_outputs):
                         output_bytearray = bytearray(output.astype(np.int8))
                         output_size = len(output_bytearray)
@@ -543,7 +577,7 @@ def main():
                             mf.seek(output_size_offset, 0)
                             out_size = struct.unpack('i', mf.read(4))[0]
                             if (output_size == out_size) and (out_idx not in used_idx):
-                                used_idx.append(out_idx)
+                                used_idx.add(out_idx)
                                 break
                         # Writing the test output to .ucomp file
                         output_address_offset = 32 + (8 * out_idx)
@@ -552,13 +586,11 @@ def main():
                         mf.seek(output_address, 0)
                         mf.write(output_bytearray)
                         print(f"Successfully written Output #{o} {len(output_bytearray)} bytes at {hex(output_address)} offset in {model_bin}")
-        
+
         # writing the .nxo file
         for o, output in enumerate(vnnx_ordered_outputs):
             output_bytearray = bytearray(output.astype(np.int8))
-            output_filename = os.path.join(debug_dir,(model_name+'_output_'+str(o)+'.nxo'))
-            with open(output_filename,'wb') as bin_file:
-                bin_file.write(output_bytearray)
+            _write_nxo(debug_dir, model_name + '_output_' + str(o), output_bytearray)
 
         # Compare to either the result from running TFLite, or tflite/vnnx output files
         expected_outputs = []
@@ -570,16 +602,19 @@ def main():
             input_details = interpreter.get_input_details()
             output_details = interpreter.get_output_details()
 
-            input = input_data.astype(np.int8)
-            if ir.uint8_int8_lut is not None:
-                input = np.where(input >= 0, input-128, np.where((input < 0), input+128, input))
-                input = input.astype(np.int8)
+            # Feed the reference tflite in ITS OWN input dtype: uint8-input references need the raw
+            # uint8 sample, int8-input ones need the sign-flip. input_data (int8) holds the uint8
+            # sample shifted by -128 arithmetically; verified against QUANTIZECONV_0 (+128 matches
+            # exactly, a plain astype(uint8) byte-reinterpret is off by 128).
+            if input_details[0]['dtype'] == np.uint8:
+                input = (input_data.astype(np.int64) + 128).astype(np.uint8)
+            else:
+                input = input_data.astype(np.int8)
             batch_size, height, width, channels = input_details[0]['shape']
-            new_width = math.ceil(width/16)*16
-            input = input.reshape(channels, height, new_width).transpose(1, 2, 0)
-            input = input[np.newaxis, :, :width, :]
+            input = input.reshape(channels, height, width).transpose(1, 2, 0)
+            input = input[np.newaxis, :, :, :]
 
-            interpreter.set_tensor(input_details[0]['index'], input)    # Keep as int8
+            interpreter.set_tensor(input_details[0]['index'], input)    # dtype matches the reference tflite
             interpreter.invoke()
             outputs = []
             for i in range(len(output_details)):
@@ -587,47 +622,44 @@ def main():
                 if len(output_data.shape) == 4:
                     output_data = output_data.transpose((0,3,1,2))
                 outputs.append(output_data)    # Keep as int8
-            
-            used_idx = []
+
+            used_idx = set()
             for i in range(len(vnnx_ordered_outputs)):
-                channels = len(vnnx_ordered_outputs[i][0])
-                rows = len(vnnx_ordered_outputs[i][0][0])
-                cols = len(vnnx_ordered_outputs[i][0][0][0])
-                for j in range(len(outputs)):                    
-                    ref_ch = len(outputs[j][0])
-                    ref_r = len(outputs[j][0][0])
-                    ref_c = len(outputs[j][0][0][0])    
-                    if (j not in used_idx) and (channels == ref_ch) and (rows == ref_r) and ((cols == ref_c) or (cols == math.ceil(ref_c/16)*16)):
-                        used_idx.append(j)
+                channels, rows, cols = vnnx_ordered_outputs[i].shape[1:4]
+                matched = None
+                for j in range(len(outputs)):
+                    if j in used_idx:
+                        continue
+                    ref_ch, ref_r, ref_c = outputs[j].shape[1:4]
+                    # cols may be padded up to a multiple of 16 (grid width); accept either exact or padded match.
+                    if (channels == ref_ch) and (rows == ref_r) and ((cols == ref_c) or (cols == math.ceil(ref_c/16)*16)):
+                        matched = j
+                        used_idx.add(j)
                         break
-                expected_outputs.append(outputs[j])
-            
+                if matched is None:
+                    raise ValueError(f"No tflite reference output matches vnnx output {i} shape {(channels, rows, cols)}")
+                expected_outputs.append(outputs[matched])
+
+        all_passed = True
         if expected_outputs:
             assert len(vnnx_ordered_outputs) == len(expected_outputs)
             expected_tensor_bytearray = bytearray(expected_outputs[0].astype(np.int8))
-            filename = os.path.join(debug_dir,(model_name+'_expected.nxo'))
-            with open(filename,'wb') as bin_file:
-                bin_file.write(expected_tensor_bytearray)
+            _write_nxo(debug_dir, model_name + '_expected', expected_tensor_bytearray)
             for i in range(len(vnnx_ordered_outputs)):
-                if sync_with_mxp:
-                    compare_to_expected(vnnx_ordered_outputs[i], expected_outputs[i], i, vnnx_ordered_output_zps[i], output_dir)
-                else:
-                    compare_to_expected(vnnx_ordered_outputs[i], expected_outputs[i], i, nx_ordered_output_zps[i], output_dir)
+                passed = compare_to_expected(vnnx_ordered_outputs[i], expected_outputs[i], vnnx_ordered_output_zps[i])
+                if not passed:
+                    all_passed = False
+
+        _unlink_sem(SEM_EMPTY_NAME_H2D)
+        _unlink_sem(SEM_FULL_NAME_H2D)
+        _unlink_sem(SEM_EMPTY_NAME_D2H)
+        _unlink_sem(SEM_FULL_NAME_D2H)
+
+    if all_passed:
+        print("!!! TEST PASSED !!!")
+    else:
+        print("!!! TEST FAILED !!!")
         
-        time.sleep(10)
-
-        try:
-            # Attempt to unlink (delete) the semaphore by its name
-            posix_ipc.unlink_semaphore(sync_semaphore)
-            print(f"Semaphore '{sync_semaphore}' unlinked successfully.")
-        except posix_ipc.ExistentialError:
-            # This error occurs if the semaphore does not exist
-            print(f"Semaphore '{sync_semaphore}' does not exist, cannot unlink.")
-        except Exception as e:
-            print(f"An error occurred: {e}")
-
-    if not ir.debug:
-        tmp_dir_obj.cleanup() 
 
 if __name__ == "__main__":
     main()

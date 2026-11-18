@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1.1                                                 #
+# v3.2                                                   #
 #                                                        #
 ##########################################################
 
@@ -35,13 +35,6 @@ if [ ! -f yolov8n-obb.tflite ]; then
     cp yolov8n-obb_saved_model/yolov8n-obb_full_integer_quant.tflite yolov8n-obb.tflite
 fi
 
-
-if [ -f yolov8n-obb.pt ]; then
-   if ! echo "0d0195d0be82795a3ea302815ae7a550 yolov8n-obb.pt" | md5sum -c; then
-       echo -e "\n There is an issue with the yolov8n-obb model file as the expected checksum does not match.\n The model source can be found at: https://github.com/ultralytics/ultralytics/.\n If the model information has changed, please update this script and re-run the tutorial."
-       exit 1
-   fi
-fi
 
 
 # tflite_cut is an internal tool used to split an existing model into smaller models

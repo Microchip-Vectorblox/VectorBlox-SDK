@@ -2758,7 +2758,84 @@ int pprint_post_process(const char *name, const char *pptype, model_t *model, fi
 						fix16_to_float(face->points[l][0]),
 						fix16_to_float(face->points[l][1]));
 				fflush(stdout);
-			}printf("\n");	
+			}printf("\n");
+#endif
+
+		}
+	} else if (!strcmp(pptype,"YUNET")) {
+		// Note: this is copied in recognitionDemo.c
+		int facesLength = 0;
+		const int MAX_FACES=24;
+		object_t faces[MAX_FACES];
+		fix16_t confidence_threshold=F16(0.72);
+		fix16_t nms_threshold=F16(0.45);
+
+		fix16_t* fix16_buffers[12];
+		int8_t* output_buffer_int8[12];
+		int zero_points[12];
+		fix16_t scale_outs[12];
+
+		int clsSeen[3] = {0,0,0};
+		for(int o = 0; o < num_outputs; o++) {
+
+			int *output_shape = model_get_output_shape(model,o);
+			int channels = output_shape[1];
+			int height = output_shape[2];
+
+			int mapNum = 0; 								// stride=8
+			if(height == input_h/16) mapNum = 1; 			// stride=16
+			else if(height == input_h/32) mapNum = 2;	 	// stride=32
+
+			// Find index to arrange outputs into output_buffer_int8 before passing to post_process_yunet_int8
+			int ind = 6 + mapNum; 							// objectness score
+			if(channels == 4){ 
+				ind = 3 + mapNum;							// box location
+			}else if(channels == 10){
+				ind = 9 + mapNum;							// landmarks
+			}else if(!clsSeen[mapNum]) { 
+				ind = mapNum; 								// class score
+				clsSeen[mapNum] = 1; 
+			} 
+
+			//fix16_buffers[ind]=(fix16_t*)(uintptr_t)o_buffers[o];
+			output_buffer_int8[ind]= (int8_t*)(uintptr_t)o_buffers[o];
+			zero_points[ind] = model_get_output_zeropoint(model,o);
+			scale_outs[ind] = model_get_output_scale_fix16_value(model,o);
+		}
+
+		facesLength = post_process_yunet_int8(faces, MAX_FACES, output_buffer_int8, zero_points, scale_outs, input_w, input_h, confidence_threshold, nms_threshold);
+	
+		for (int f = 0; f < facesLength; f++) {
+			object_t* face = faces+f;
+			fix16_t x = face->box[0];
+			fix16_t y = face->box[1];
+			fix16_t w = face->box[2] - face->box[0];
+			fix16_t h = face->box[3] - face->box[1];
+#ifdef HARDWARE_DRAW
+			if( x > 0 &&  y > 0 && w > 0 && h > 0) {
+				x = fix16_mul(x, wratio);
+				y = fix16_mul(y, hratio);
+				w = fix16_mul(w, wratio);
+				h = fix16_mul(h, hratio);
+				draw_box(fix16_to_int(x),
+						fix16_to_int(y),
+						fix16_to_int(w),
+						fix16_to_int(h),
+						5,
+						get_colour_modulo(0),
+						overlay_draw_frame,2048,1080);
+			}
+#else
+			printf("face %d found at (x,y,w,h) %3.1f %3.1f %3.1f %3.1f w/ conf: %3.4f\n",f,
+					fix16_to_float(x), fix16_to_float(y),
+					fix16_to_float(w), fix16_to_float(h),fix16_to_float(face->detect_score));
+			printf("landmarks: ");
+			for(int l =0;l<5;++l){
+				printf("%3.1f,%3.1f ",
+						fix16_to_float(face->points[l][0]),
+						fix16_to_float(face->points[l][1]));
+				fflush(stdout);
+			}printf("\n");
 #endif
 
 		}
@@ -2838,9 +2915,6 @@ int pprint_post_process(const char *name, const char *pptype, model_t *model, fi
 		fix16_t max_val = post_process_space_int8(points2D, output_buffers_int8, model, transpose_first);
 #ifdef HARDWARE_DRAW
 		if (max_val > F16(0)) {
-			for (int p=0; p < 12; p++) {
-				points2D[12+p] *= 1080./1200;
-			}
 			int color, x0, y0, x1, y1;
 			
 			color = GET_COLOUR(0, 255, 0, 255); // front face - green (1,2),(2,3),(3,4),(4,1)

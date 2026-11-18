@@ -2,8 +2,7 @@ import common.internal_representation as internal_representation
 from common.ddr_ir import DDREntry
 from common.enums import DDREntryType
 from common.debug_flags import DEBUG_PRINT_CBC, DEBUG_GENERATE_DDR_HEX
-from common.hw_config import GRID_OPS, PER_TILE_CBC_OPS, WLOCS_PER_GRID, GridConfig, TFLITE_REQUANT
-from collections import OrderedDict
+from common.hw_config import GRID_OPS, PER_TILE_CBC_OPS, WLOCS_PER_GRID, OpType
 import struct
 from datetime import datetime
 import os
@@ -15,10 +14,6 @@ def prepare_wloc_ir(node):
     if node['op_type'] in PER_TILE_CBC_OPS:
         grids_wloc_splits = node['backend']['grids_cbc'][0].wlocs
     else:
-
-        # alex ph2 del 
-        #grids_wloc_splits = node['backend']['grids_cbc'].wlocs
-        #put this
         current_tile_num =0
         grids_wloc_splits = node['backend']['grids_cbc'].alex_wlocs[current_tile_num]
 
@@ -131,9 +126,7 @@ def prepare_rqloc_ir(node):
                 rqloc_128bit_hex_words.append(rqloc_128bit_hex)
                 rqloc_file_word=''
             if len(rqloc_file_word) > 120:
-                # alex ph2 del
-                #raise ValueError ('Something went wrong, got a word longer than 120 bits')
-                pass
+                raise ValueError('Something went wrong, got a word longer than 120 bits')
         if len (rqloc_file_word) > 0: # Align last word to 32 hex digits (128 bits)
             rqloc_file_word = rqloc_file_word.zfill(128)
             rqloc_128bit_hex = hex(int('0b'+rqloc_file_word,2))[2:].zfill(32)
@@ -173,26 +166,14 @@ def prepare_rqparams_ir(node):
     rqparams_file_word = ''
     for current_rqparams in rqparams:
         current_rqparams_bin = current_rqparams.to_bits()
-        if TFLITE_REQUANT:
-            # This used to be packed 3 x 36 into 128 bit words
-            # Now it packs 2 x 64
-            rqparams_file_word = current_rqparams_bin[2:] + rqparams_file_word
-            if len(rqparams_file_word) == 128: # We pack all rqparams entries in 128 bits words => 32 hex digits
-                rqparams_128bit_hex = hex(int('0b'+rqparams_file_word, 2))[2:].zfill(32)
-                rqparams_128bit_hex_words.append(rqparams_128bit_hex)
-                rqparams_file_word=''
-            if len(rqparams_file_word) > 128:
-                raise ValueError ('Something went wrong, got a word longer than 128 bits')
-        else:
-            rqparams_file_word = current_rqparams_bin[2:].zfill(36) + rqparams_file_word
-            if len(rqparams_file_word) == 108: # We pack all rqparams entries in 128 bits words => 32 hex digits
-                rqparams_128bit_hex = hex(int('0b'+rqparams_file_word, 2))[2:].zfill(32)
-                rqparams_128bit_hex_words.append(rqparams_128bit_hex)
-                rqparams_file_word=''
-            if len(rqparams_file_word) > 108:
-                # alex ph2 del
-                #raise ValueError ('Something went wrong, got a word longer than 108 bits')
-                pass
+        # Packs 2 x 64 into 128 bit words
+        rqparams_file_word = current_rqparams_bin[2:] + rqparams_file_word
+        if len(rqparams_file_word) == 128: # We pack all rqparams entries in 128 bits words => 32 hex digits
+            rqparams_128bit_hex = hex(int('0b'+rqparams_file_word, 2))[2:].zfill(32)
+            rqparams_128bit_hex_words.append(rqparams_128bit_hex)
+            rqparams_file_word=''
+        if len(rqparams_file_word) > 128:
+            raise ValueError ('Something went wrong, got a word longer than 128 bits')
     if len (rqparams_file_word) > 0: # Align last word to 32 hex digits (128 bits)
         rqparams_file_word = rqparams_file_word.zfill(128)
         rqparams_128bit_hex = hex(int('0b'+rqparams_file_word,2))[2:].zfill(32)
@@ -250,7 +231,7 @@ def create_ddr_entries_from_ir_alex(ir: internal_representation.IR):
     ddr = ir.ddr
     for node_name,node in ir.graph.nodes.items():
         #concate is not conv comand
-        if node['op_type'] == 'Concat':
+        if (node['op_type'] == OpType.CONCAT) or ((node['op_type'] == OpType.RESIZE) and ('_y' in node_name)):
             continue
 
         grids_cbc      = node['backend']['grids_cbc'] 
@@ -345,24 +326,11 @@ def create_sequencer_ddr_entry_from_ir(ir: internal_representation.IR):
     for output_index,output_name in enumerate(ir.outputs):
         output_tensor = ir.tensors[output_name]
         output_tensor_shape = output_tensor.get_original_shape()
-        output_producing_node_name = output_tensor.producer
-        output_producing_node = ir.graph.nodes[output_producing_node_name]
-        tensor_gridmode = output_producing_node['backend']['gridmode']
-        if tensor_gridmode == GridConfig.H28xW28:
-            mode_param = 0
-        elif tensor_gridmode == GridConfig.H14xW14:
-            mode_param = 1
-        elif tensor_gridmode == GridConfig.H7xW7:
-            mode_param = 2
-        elif tensor_gridmode == GridConfig.H14xW8:
-            mode_param = 3
-        elif tensor_gridmode == GridConfig.H14xW16:
-            mode_param = 4
-        elif tensor_gridmode == GridConfig.H14xW32:
-            mode_param = 5
-        else:
-            raise ValueError ('Gridmode %s not supported for register page output. Please check...' % (str(tensor_gridmode)))
+        # (the producing node was looked up here but never used; an output may also have no in-graph
+        # producer - e.g. an MXP/passthrough output - which made ir.graph.nodes[None] raise. Dropped.)
 
+        mode_param = 4
+        
         register_page_bytes.extend((output_tensor.ddr_entry.address).to_bytes(4,'little'))
         register_page_bytes.extend((output_tensor.ddr_entry.num_of_blocks).to_bytes(2,'little'))
         register_page_bytes.extend((mode_param).to_bytes(2,'little'))
@@ -370,7 +338,7 @@ def create_sequencer_ddr_entry_from_ir(ir: internal_representation.IR):
         register_page_bytes.extend((output_tensor_shape[1]).to_bytes(2,'little'))
         register_page_bytes.extend((output_tensor_shape[2]).to_bytes(2,'little'))
         register_page_bytes.extend((output_tensor_shape[3]).to_bytes(2,'little'))
-        register_page_bytes.extend(int(output_tensor.zero_point).to_bytes(1,'little', signed=TFLITE_REQUANT))
+        register_page_bytes.extend(int(output_tensor.zero_point).to_bytes(1,'little', signed=True))
         register_page_bytes.extend((0).to_bytes(1,'little')) # 1 byte reserved
         register_page_bytes.extend((output_tensor.folding_factor_y).to_bytes(1,'little'))
         register_page_bytes.extend((output_tensor.folding_factor_x).to_bytes(1,'little'))
@@ -388,9 +356,9 @@ def create_sequencer_ddr_entry_from_ir(ir: internal_representation.IR):
 
 def create_snp_host_cfg(snp_hos_cfg_filename,sequencer_program_ddr_address,sequencer_program_size):
     with open(snp_hos_cfg_filename,'w') as snp_host_cfg_file:
-        program_adress = sequencer_program_ddr_address.to_bytes(8,'big')
-        program_address_32bitlsb=program_adress.hex()[8:16]
-        program_address_32bitmsb=program_adress.hex()[0:8]
+        program_address = sequencer_program_ddr_address.to_bytes(8,'big')
+        program_address_32bitlsb=program_address.hex()[8:16]
+        program_address_32bitmsb=program_address.hex()[0:8]
         program_size = sequencer_program_size.to_bytes(4,'big').hex()
         line = '20 %s\n24 %s\n28 %s\n00 00000001\n00 00000000' % (program_address_32bitlsb,program_address_32bitmsb,program_size)
         snp_host_cfg_file.write(line)

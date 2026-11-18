@@ -1,0 +1,12 @@
+[project]
+name = "yo-onnx2tf"
+version = "0.1.0"
+description = "YOLO INT8 TFLite export via onnx2tf per-channel pipeline (ultralytics 8.4.82)"
+requires-python = ">=3.10.12,<3.11"
+dependencies = [
+    "onnx2tf==1.29.24",
+    "onnx-graphsurgeon>=0.5.8",
+    "tensorflow>=2.19.0",
+    "tf-keras>=2.19.0",
+    "ultralytics==8.4.82",
+]

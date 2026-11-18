@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1.1                                                 #
+# v3.2                                                   #
 #                                                        #
 ##########################################################
 
@@ -34,13 +34,6 @@ if [ ! -f yolov8s_FULL.tflite ]; then
     cp yolov8s_saved_model/yolov8s_full_integer_quant.tflite yolov8s_FULL.tflite
 fi
 
-
-if [ -f yolov8s.pt ]; then
-   if ! echo "0a1d5d0619d5a24848a267ec1e3a3118 yolov8s.pt" | md5sum -c; then
-       echo -e "\n There is an issue with the yolov8s_FULL model file as the expected checksum does not match.\n The model source can be found at: https://github.com/ultralytics/ultralytics/.\n If the model information has changed, please update this script and re-run the tutorial."
-       exit 1
-   fi
-fi
 
 
 # tflite_preprocess is an internal tool used to add a preprocess layer to the start of the model

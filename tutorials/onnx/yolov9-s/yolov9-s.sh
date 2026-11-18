@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1.1                                                 #
+# v3.2                                                   #
 #                                                        #
 ##########################################################
 
@@ -37,10 +37,9 @@ echo "Checking for yolov9-s files..."
 if [ ! -f v9-s.onnx ]; then
     [ -d YOLO ] || git clone https://github.com/MultimediaTechLab/YOLO
     if [ -d YOLO ]; then
-       python3 -m venv yolo_venv
+       uv venv yolo_venv --python 3.10
        source yolo_venv/bin/activate
-       pip install torch==2.8.0 torchvision==0.23 typing_extensions==4.15.0 --index-url https://download.pytorch.org/whl/cpu
-       pip install lightning hydra-core requests rich pillow einops wandb pycocotools onnx onnxscript
+       uv pip install -r requirements.txt
        cd YOLO
        echo "task: export" > yolo/config/task/export.yaml
        git apply ../lazy.export.diff
@@ -70,6 +69,7 @@ fi
     if [ ! -f calibration_image_sample_data_20x128x128x3_float32.npy ]; then
         wget -q --no-check-certificate https://github.com/Microchip-Vectorblox/assets/raw/refs/heads/main/npy_files/calibration_image_sample_data_20x128x128x3_float32.npy
     fi
+
 
 
 # onnx2tf is an external model conversion tool to convert an onnx model to int8 tflite

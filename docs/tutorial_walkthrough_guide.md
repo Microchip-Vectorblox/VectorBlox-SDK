@@ -80,7 +80,7 @@ Output file: `efficientnet_lite0.pre.tflite`
 vnnx_compile -s V1000 -c ncomp -t efficientnet_lite0.pre.tflite -o efficientnet_lite0_V1000_ncomp.vnnx
 ```
 
-`vnnx_compile` is the compilation step that converts the INT8 TFLite graph into a VectorBlox binary (`.vnnx`) or (`.ucomp` for unstructured compression) that can be executed on physical hardware. It also outputs a (`.hex`) file that can be used with the Non SoC demo.  
+`vnnx_compile` is the compilation step that converts the INT8 TFLite graph into a VectorBlox binary (`.vnnx`) or (`.ucomp` for unstructured compression) that can be executed on physical hardware. It also outputs a (`.hex`) file that can be used with the non-SoC demo.  
 
 The `-s V1000` flag selects the V1000 hardware size configuration, and `-c ncomp` selects the `no compression` configuration.
 
@@ -116,7 +116,7 @@ MobileNet-v2 is an image classifier published in OpenVINO's model zoo in Caffe f
 
 Post-training quantization (converting a float32 or float16 model to INT8) requires a representative sample of real input data called a **calibration dataset**.  
 
-The SDK comes with a pre-collected calibration dataset `imagenetv2_rgb_20x224x224x3.npy`  
+The SDK comes with a pre-collected calibration dataset `imagenetv2_rgb_20x224x224x3.npy`.  
 
 `generate_npy` reformats this array for use with `openvino2tensorflow`. The `-b` flag converts from RGB to BGR channel order, since OpenVINO uses BGR. It saves the reformatted result to `imagenetv2_20x224x224x3.npy`.
 
@@ -270,4 +270,3 @@ Refer to step 3 of the mediapipe/efficientnet_lite0 tutorial for more informatio
 ```
 
 Refer to step 4 of the mediapipe/efficientnet_lite0 tutorial for more information.
-

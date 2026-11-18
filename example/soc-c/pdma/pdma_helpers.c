@@ -47,7 +47,7 @@ int32_t pdma_ch_cpy(uint64_t destbuf,  uint64_t srcbuf, size_t n, int32_t chn_fd
     }
 
     if (ioctl(chn_fd, MPFS_DMA_PROXY_FINISH_XFER, &proxy_status_e) != 0) {
-        printf("transfer not finixhed");
+        printf("transfer not finished");
 		return -1;
     }
 

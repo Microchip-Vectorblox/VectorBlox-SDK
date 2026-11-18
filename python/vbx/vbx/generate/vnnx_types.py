@@ -183,19 +183,40 @@ Node_struct = [
                 ("int32_t[2]", "filter_shape_dims"),
                 ("int32_t", "input_stride"),
                 ("int32_t", "use_fia"),
+                ("int32_t", "is_ucomp"),
                 ("int32_t", "first_fia"),
                 ("int32_t", "last_fia"),
                 ("int32_t", "fia_collision"),
                 ("int32_t", "mxp_double_buffer"),
+                ("int32_t", "adj_x"),
+                ("int32_t", "adj_y"),
+                ("int32_t", "adj_c"),
+                ("int32_t", "live_weights"),
                 ("offset", "filter_data"),
                 ("offset", "bias_data"),
                 ("offset", "quantization_records"),
                 ("offset", "nlf_data"),
             ],
             "BatchMatMulOptions": [
+                ("int32_t", "filter"),
+                ("int32_t", "use_fia"),
+                ("int32_t", "first_fia"),
+                ("int32_t", "last_fia"),
+                ("int32_t", "fia_collision"),
+                ("int32_t", "optimized"),
+                ("int32_t", "size_x"),
+                ("int32_t", "adj_c"),
                 ("int32_t", "adj_x"),
                 ("int32_t", "adj_y"),
                 ("int32_t", "asym"),
+            ],
+            "NormOptions": [
+                ("float", "bias"),
+                ("int32_t", "scale"),
+                ("offset", "W32"),
+                ("offset", "B32"),
+                ("offset", "W"),
+                ("offset", "B"),
             ],
             "ConcatOptions": [("int32_t", "axis")],
             "PackOptions": [
@@ -430,6 +451,10 @@ Subnode_struct = [
                 ("int32_t", "axis"),
                 ("int32_t", "count"),
                 ("int32_t", "dims"),
+            ],
+            "WeightPackOptions": [
+                ("int32_t", "k"),
+                ("int32_t", "n"),
             ],
             "ResizeOptions": [
                 ("float[2]", "scale"),
@@ -823,7 +848,9 @@ class VNNXOperator(enum.IntEnum):
     LUT = 303
     PIXEL_SHUFFLE = 304
     OUTPUT_SHAPER = 305
-    UNKNOWN = 306
+    NORM = 306
+    WPACK = 307
+    UNKNOWN = 308
 
     def from_str(e):
         e = e.upper()
@@ -839,6 +866,10 @@ class VNNXOperator(enum.IntEnum):
             return VNNXOperator.PIXEL_SHUFFLE
         if e == "OUTPUT_SHAPER":
             return VNNXOperator.OUTPUT_SHAPER
+        if e == "NORM":
+            return VNNXOperator.NORM
+        if e == "WPACK":
+            return VNNXOperator.WPACK
         return VNNXOperator.UNKNOWN
 
 
@@ -1097,6 +1128,8 @@ def enum_to_union_name(e):
         (BuiltinOperator.CONV_2D, "Conv2DOptions"),
         (BuiltinOperator.FULLY_CONNECTED, "FullyConnectedOptions"),
         (BuiltinOperator.BATCH_MATMUL, "BatchMatMulOptions"),
+        (VNNXOperator.NORM, "NormOptions"),
+        (VNNXOperator.WPACK, "WeightPackOptions"),
         (BuiltinOperator.CONCATENATION, "ConcatOptions"),
         (VNNXOperator.ELTWISE, "eltwise8"),
         (VNNXOperator.PIXEL_SHUFFLE, "PixelShuffleOptions"),

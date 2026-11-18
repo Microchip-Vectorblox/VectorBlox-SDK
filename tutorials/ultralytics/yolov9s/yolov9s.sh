@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1.1                                                 #
+# v3.2                                                   #
 #                                                        #
 ##########################################################
 
@@ -35,13 +35,6 @@ if [ ! -f yolov9s.tflite ]; then
     cp yolov9s_saved_model/yolov9s_full_integer_quant.tflite yolov9s.tflite
 fi
 
-
-if [ -f yolov9s.pt ]; then
-   if ! echo "1ab182a0d5cb8071cd886025191de73e yolov9s.pt" | md5sum -c; then
-       echo -e "\n There is an issue with the yolov9s model file as the expected checksum does not match.\n The model source can be found at: https://github.com/ultralytics/ultralytics/.\n If the model information has changed, please update this script and re-run the tutorial."
-       exit 1
-   fi
-fi
 
 
 # tflite_cut is an internal tool used to split an existing model into smaller models

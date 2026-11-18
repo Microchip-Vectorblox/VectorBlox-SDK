@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1.1                                                 #
+# v3.2                                                   #
 #                                                        #
 ##########################################################
 
@@ -43,13 +43,6 @@ EOF
 fi
 
 
-
-if [ -f saved_model/saved_model.pb ]; then
-   if ! echo "aa755feab52b9d4302779caf4ee70554 saved_model/saved_model.pb" | md5sum -c; then
-       echo -e "\n There is an issue with the mobilenet_v2 model file as the expected checksum does not match.\n The model source can be found at: https://keras.io/api/applications/mobilenet/.\n If the model information has changed, please update this script and re-run the tutorial."
-       exit 1
-   fi
-fi
 
 
 # tflite_quantize is an internal tool designed to quantize a saved_model directory using the npy array

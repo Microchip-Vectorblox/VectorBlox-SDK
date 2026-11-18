@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1.1                                                 #
+# v3.2                                                   #
 #                                                        #
 ##########################################################
 
@@ -61,13 +61,6 @@ fi
         wget -q --no-check-certificate https://github.com/Microchip-Vectorblox/assets/raw/refs/heads/main/npy_files/calibration_image_sample_data_20x128x128x3_float32.npy
     fi
 
-
-if [ -f DeepLabV3-Plus-MobileNet.onnx ]; then
-   if ! echo "192e1e451be90dfa1b71e42717db6f47 DeepLabV3-Plus-MobileNet.onnx" | md5sum -c; then
-       echo -e "\n There is an issue with the DeepLabV3-Plus-MobileNet-Quantized model file as the expected checksum does not match.\n The model source can be found at: https://aihub.qualcomm.com/mobile/models/deeplabv3_plus_mobilenet.\n If the model information has changed, please update this script and re-run the tutorial."
-       exit 1
-   fi
-fi
 
 
 # onnx2tf is an external model conversion tool to convert an onnx model to int8 tflite

@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1.1                                                 #
+# v3.2                                                   #
 #                                                        #
 ##########################################################
 
@@ -37,13 +37,6 @@ if [ ! -f squeezenet1.0.tflite ]; then
 omz_downloader --name squeezenet1.0
 fi
 
-
-if [ -f public/squeezenet1.0/squeezenet1.0.caffemodel ]; then
-   if ! echo "bb9a2fd4be158e5b1e58a5cdc2b4aaa8 public/squeezenet1.0/squeezenet1.0.caffemodel" | md5sum -c; then
-       echo -e "\n There is an issue with the squeezenet1.0 model file as the expected checksum does not match.\n The model source can be found at: https://github.com/openvinotoolkit/open_model_zoo/tree/2021.4.2/models/public/squeezenet1.0/.\n If the model information has changed, please update this script and re-run the tutorial."
-       exit 1
-   fi
-fi
 
 if [ ! -f squeezenet1.0.tflite ]; then
    echo "Running Model Optimizer..."

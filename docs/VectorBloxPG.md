@@ -43,11 +43,11 @@ The user must be aware of a few things while using Windows Subsystem for Linux:
 
 ## Flow Diagram—SDK
 
-The flow diagram below shows how the SDK converts a Convolutional Neural Network (CNN) model into a VectorBlox binary file (.vnnx)
+The flow diagram below shows how the SDK converts a Convolutional Neural Network (CNN) model into a VectorBlox binary file (.vnnx).
 
-The five starting paths, represented by the white nodes, depend on the model source (PyTorch, OpenVINO, ONNX, TensorFlow, and TensorFlow Lite). Models downloaded with OpenVINO are processed through OpenVINO's model optimizer and PINTO's openvino2tensorflow tool to create a TFLite model. PINTO converts models in ONNX or PyTorch format to TFLite using the onnx2tf tool. TensorFlow models can be converted directly to TFLite. Models already in quantized INT8 TFLite format proceed directly to the vnnx_compile step.**
+The five starting paths, represented by the white nodes, depend on the model source (PyTorch, OpenVINO, ONNX, TensorFlow, and TensorFlow Lite). Models downloaded with OpenVINO are processed through OpenVINO's model optimizer and PINTO's openvino2tensorflow tool to create a TFLite model. PINTO converts models in ONNX or PyTorch format to TFLite using the onnx2tf tool. TensorFlow models can be converted directly to TFLite. Models already in quantized INT8 TFLite format proceed directly to the vnnx_compile step.
 
-As mentioned with PyTorch, we can go straight to TFLite with onnx2tf, or we can use the [VectorBlox Compression Library](https://github.com/Microchip-Vectorblox/VectorBlox-Compression) GitHub repository to retrain for compression. Please note that this is an advanced tactic used to increase model performance. When producing a compressed model from the compression library, please vnnx compile with COMP or UCOMP.
+As mentioned with PyTorch, we can go straight to TFLite with onnx2tf, or we can use the [VectorBlox Compression Library](https://github.com/Microchip-Vectorblox/VectorBlox-Compression) GitHub repository to retrain for compression. Please note that this is an advanced tactic used to increase model performance. When producing a compressed model from the compression library, please run vnnx_compile with COMP or UCOMP.
 
 #### VectorBlox SDK Flow Diagram  
 
@@ -58,8 +58,8 @@ As mentioned with PyTorch, we can go straight to TFLite with onnx2tf, or we can 
 The SDK is available as a GitHub repository or a downloadable ZIP file containing everything needed to produce and test neural networks. The neural networks are ready for deployment on any PolarFire® FPGA with a CoreVectorBlox IP instantiated. The layout of the archive is as follows:  
 
 ```text
-├── app_notes
 ├── docs
+│    └── app_notes
 ├── drivers
 │    └── vectorblox
 ├── example
@@ -147,13 +147,13 @@ The OpenVINO mo command converts and optimizes models for inference. It converts
 - Convert and optimize a Caffe model without scale and mean values.
 
     ```bash
-    (vbx_env)~/sdk$ mo –framework caffe --input_model MODEL_NAME.caffe
+    (vbx_env)~/sdk$ mo --framework caffe --input_model MODEL_NAME.caffe
     ```
 
 - Convert and optimize a Caffe model with scale and mean values.
 
     ```bash
-    (vbx_env)~/sdk$ mo –framework caffe --input_model MODEL_NAME.caffe \
+    (vbx_env)~/sdk$ mo --framework caffe --input_model MODEL_NAME.caffe \
     --scale_values [127., 127., 127] --mean_values [64., 64., 64.]
     ```
 
@@ -180,7 +180,7 @@ PINTO’s onnx2tf tool converts models in ONNX format into a TF Lite model. Simi
 
 **VectorBlox SDK generate_npy**
 
-```generate_npy``` generates a numpy calibration file using sample images, for tflite calibration. The image directory needs to be specified. If using dimensions other than 224 x 224 in height and width, shape needs to be specified. The following is an example of the tool's usage.
+```generate_npy``` generates a NumPy calibration file using sample images, for TF Lite calibration. The image directory needs to be specified. If using dimensions other than 224 x 224 in height and width, shape needs to be specified. The following is an example of the tool's usage.
 
 ```bash
 (vbx_env)~/sdk$ generate_npy sample_images/ --output_name OUTPUT_NAME --shape HEIGHT WIDTH --count 20
@@ -234,7 +234,7 @@ You may embed a test image in the model to quickly test inference and post-proce
 
 The VectorBlox binary file generation tool processes the TF Lite model and produces a quantized binary file that runs on both hardware and the simulator. To use the tool, provide the input TF Lite model and hardware size configuration (V250, V500, or V1000). If you use custom pre-processing or post-processing code, you can specify the starting and ending nodes for the VNNX graph. By default, tutorials use V1000 with no compression.
 
->Note: Please make sure the core configuration matches the compression and size config used in vnnx_compile. For example, if you use a no-compression VectorBlox core with hardware size V1000. Please run vnnx_compile with the -s V1000 and -c ncomp arguments.
+>Note: Please make sure the core configuration matches the compression and size config used in vnnx_compile. For example, if you use a no-compression VectorBlox core with hardware size V1000, please run vnnx_compile with the -s V1000 and -c ncomp arguments.
 
 <details>
 
@@ -274,9 +274,11 @@ The following example shows how to generate a binary file from a TF Lite model f
 
 ```vnnx_compile  -s  V1000  -c ncomp  -t  MODEL_NAME.tflite```
 
-The binary output file name for V1000 with no compression will be ```MODEL_NAME_ V1000_ncomp.vnnx```
+The binary output file name for V1000 with no compression will be ```MODEL_NAME_V1000_ncomp.vnnx```
 
 **Compression (COMP)**
+
+>Note: Please visit [VectorBlox Compression](./vectorblox_compression.md) before compiling a model with compression.
 
 The following example shows how to generate a binary file from a TF Lite model for the V1000 with the compression configuration:
 
@@ -286,7 +288,9 @@ The binary output file name for V1000 with compression will be ```MODEL_NAME_V10
 
 **Unstructured Compression (UCOMP)**
 
-For unstructured compression, V1000 is the only supported size configuration. Provide the input TF Lite model with -t; pass the --uint8 flag to convert to signed int8 if needed; and use```-c ucomp``` to specify unstructured compression.
+>Note: Please visit [VectorBlox Compression](./vectorblox_compression.md) before compiling a model with unstructured compression.
+
+For unstructured compression, V1000 and V500 are the supported size configurations. Provide the input TF Lite model with -t; pass the --uint8 flag to convert to signed int8 if needed; and use ```-c ucomp``` to specify unstructured compression.
 
 **Note:** The --uint8 flag can only be used when generating a binary file with unstructured compression.
 
@@ -294,11 +298,11 @@ The following example demonstrates how to generate a binary file from a TF Lite 
 
 ```vnnx_compile -s  V1000 -c ucomp  -t  MODEL_NAME.tflite  --uint8```
 
-The binary output file name for V1000 with compression will be ```MODEL_NAME.ucomp```
+The binary output file name for V1000 with unstructured compression will be ```MODEL_NAME.ucomp```
 
 ## TFLite Layers
 
-VectorBlox aims to support all TFLITE INT8 layers described in the [TFLite INT8 quantization spec](https://ai.google.dev/edge/litert/conversion/tensorflow/quantization/quantization_spec#int8_quantized_operator_specifications).
+VectorBlox aims to support all TFLite INT8 layers described in the [TFLite INT8 quantization spec](https://ai.google.dev/edge/litert/conversion/tensorflow/quantization/quantization_spec#int8_quantized_operator_specifications).
 
 For the list of currently supported operators and their restrictions, see the [OPS.md file](./OPS.md).
 

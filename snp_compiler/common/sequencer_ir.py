@@ -1,6 +1,6 @@
-from common.enums import SequencerOPCode, EngineOpCode, DDRCommandDstSrcType, CustomeOpCode, PadMode, ScalingMode, DDRReadOffsetType, DDRWriteOffsetType
+from common.enums import SequencerOPCode, EngineOpCode, DDRCommandDstSrcType, CustomeOpCode,  ScalingMode, DDRReadOffsetType, DDRWriteOffsetType
 from common.hw_config import BYTES_IN_SEQUENCER_COMMAND,  DMR_TABLE_LENGTH_BYTES, NLTABLE_HALF_LENGTH, RQPARAMS_INPUT_MEM_DEPTH, RQPARAMS_OUTPUT_MEM_DEPTH, \
-      RTABLE_INPUT_MEM_DEPTH, RTABLE_OUTPUT_MEM_DEPTH, RTABLE_START_ADD_RESOLUTION, WLOC_INPUT_MEM_DEPTH, WLOC_OUTPUT_MEM_DEPTH, TFLITE_REQUANT, WLOC_OUTPUT_MEM_WIDTH, NO_NEIGHBOR_SLICE
+      RTABLE_INPUT_MEM_DEPTH, RTABLE_OUTPUT_MEM_DEPTH, RTABLE_START_ADD_RESOLUTION, WLOC_INPUT_MEM_DEPTH, WLOC_OUTPUT_MEM_DEPTH, NO_NEIGHBOR_SLICE
 from common.utils import bin2c
 import math
 FIRST_AMM_ADDR_MSB_BIT = 4
@@ -24,7 +24,7 @@ class DDRReadDstInfoAMM:
 class DDRReadDstInfoWLOC:
     def __init__(self,wloc_mask,wloc_buffer_id):
         if wloc_mask & 0b1010101 and wloc_mask & 0b10101010:
-            raise ValueError ('Cant write wloc simultneously to even and odd grids since they use different axi ports')
+            raise ValueError ('Cant write wloc simultaneously to even and odd grids since they use different axi ports')
         self.wloc_mask = wloc_mask #8 bits
         self.wloc_buffer_id = wloc_buffer_id # 1 bit , bit8
         
@@ -80,9 +80,9 @@ class SequencerEntry:
 
 
 class SequencerDDRReadEntry(SequencerEntry):
-    def __init__(self, src_address=0, length = 0, input_x = 0, ddr_read_offset_type = DDRReadOffsetType.MODEL_MEM, input_y = 0, input_z = 0, nlines_to_read = 0, amm_nchannels = 0, 
-                 amm_mask = 0, amm_start_address = 0, amm_write_mode = 0, y_folding = 0, x_wrapping = 0, dst_info = None, set_flags = 0,wait_flags = 0,
-                 dst_type = DDRCommandDstSrcType.AMM, buffer_id = 0, write_mask_alex = 0):
+    def __init__(self, src_address=0, length = 0, input_x = 0, ddr_read_offset_type = DDRReadOffsetType.MODEL_MEM, input_y = 0, input_z = 0, nlines_to_read = 0, 
+                 input_pad_val = 0, amm_start_address = 0, amm_write_mode = 0, y_folding = 0, x_wrapping = 0, dst_info = None, set_flags = 0,wait_flags = 0,
+                 dst_type = DDRCommandDstSrcType.AMM, buffer_id = 0, write_mask_alex = 0, amm_folding_mode = 0, last_valid_bytes = 0):
         if (dst_type == DDRCommandDstSrcType.AMM):
             super().__init__(opcode=SequencerOPCode.DMR_AMM, set_flags = set_flags, wait_flags=wait_flags)
         else:
@@ -94,20 +94,20 @@ class SequencerDDRReadEntry(SequencerEntry):
         self.input_y = input_y # 12 bits
         self.input_z = input_z # 12 bits
         self.nlines_to_read = nlines_to_read # 5 bits
-        self.amm_nchannels = amm_nchannels # 12 bits
+        self.last_valid_bytes = last_valid_bytes #4 bits
+        self.input_pad_val = input_pad_val # 8 bits
         self.amm_start_address = amm_start_address # 12 bits
-        self.amm_mask = amm_mask # 4 bits
         self.amm_write_mode = amm_write_mode # 2 bits
         self.y_folding = y_folding # 4 bits
         self.x_wrapping = x_wrapping # 5 bits
-
+        self.amm_folding_mode = amm_folding_mode # 1 bit
+        
         self.dst_type = dst_type
         self.dst_info = dst_info 
         
         self.table_ddr_start_address = math.ceil(src_address/4096) # 24 bits
         self.table_length = math.ceil(length/DMR_TABLE_LENGTH_BYTES) * DMR_TABLE_LENGTH_BYTES # 24 bits
         self.table_type = dst_type # 4 bits
-        #self.table_start_address = buffer_id * 1024 #16 bits
 
         # Alex this was
         #self.table_start_address = buffer_id * 512 #16 bits
@@ -130,7 +130,7 @@ class SequencerDDRReadEntry(SequencerEntry):
         elif (dst_type == DDRCommandDstSrcType.PROGRAM):
             half_length = 0
         else:
-            raise ('Strange type of the Command. This is not a table at all')
+            raise ValueError('Strange type of the Command. This is not a table at all')
         self.table_start_address = buffer_id * half_length  
 
 
@@ -153,10 +153,11 @@ class SequencerDDRReadEntry(SequencerEntry):
             str_value = str_value+(',input_y:%d' % (self.input_y))
             str_value = str_value+(',input_z:%d' % (self.input_z))
             str_value = str_value+(',nlines_to_read:%d' % (self.nlines_to_read))
-            str_value = str_value+(',amm_nchannels:%d' % (self.amm_nchannels))
+            str_value = str_value+(',last_valid_bytes:%d' % (self.last_valid_bytes))
+            str_value = str_value+(',input_pad_val:%d' % (self.input_pad_val))
             str_value = str_value+(',amm_start_address:0x%x' % (self.amm_start_address))
-            str_value = str_value+(',amm_mask:%d' % (self.amm_mask))
             str_value = str_value+(',amm_write_mode:%d' % (self.amm_write_mode))
+            str_value = str_value+(',amm_folding_mode:%d' % (self.amm_folding_mode))
             str_value = str_value+(',y_folding:%d' % (self.y_folding))
             str_value = str_value+(',x_wrapping:%d' % (self.x_wrapping))
         else:
@@ -175,13 +176,13 @@ class SequencerDDRReadEntry(SequencerEntry):
                              DDRCommandDstSrcType.NONLINEARFUNCTION, DDRCommandDstSrcType.RESULTTABLE,
                              DDRCommandDstSrcType.PROGRAM]:
             str_name = self.dst_type.name
-            str_value += str_name + ', ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,0x%x, 0x%x, 0x%x, 0x%x' % (self.table_ddr_start_address, self.table_length, self.table_start_address, self.table_param)  
+            str_value += str_name + ', ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,0x%x, 0x%x, 0x%x, 0x%x' % (self.table_ddr_start_address, self.table_length, self.table_start_address, self.table_param)  
         
 
         elif self.dst_type == DDRCommandDstSrcType.AMM:
-            str_value += 'AMM,,0x%x,%d,%d,%d,%d,%d,,%d,0x%x,%d,%d,%d,%d,,,,,,,,,,,,,,,,,,,,' % (self.ddr_start_address, self.ddr_read_offset_type.value, self.input_x, self.input_y, self.input_z, \
-                                                          self.nlines_to_read, self.amm_nchannels, self.amm_start_address, self.amm_mask, self.amm_write_mode, \
-                                                          self.y_folding, self.x_wrapping)
+            str_value += 'AMM,,0x%x,%d,%d,%d,%d,%d,,0x%x,%d,%d,%d,,%d,%d,,%d,,,,,,,,,,,,,,,,,,,' % (self.ddr_start_address, self.ddr_read_offset_type.value, self.input_x, self.input_y, self.input_z, \
+                                                          self.nlines_to_read, self.amm_start_address, self.amm_write_mode, self.amm_folding_mode, self.last_valid_bytes,\
+                                                          self.y_folding, self.x_wrapping, self.input_pad_val)
         
         return str_value
     
@@ -192,12 +193,14 @@ class SequencerDDRReadEntry(SequencerEntry):
                         bin(self.opcode.value              )[2:].zfill(4 ) +
                         bin(self.set_flags                 )[2:].zfill(6 ) +
                         bin(self.wait_flags                )[2:].zfill(6 ) + 
+                        bin(self.amm_folding_mode          )[2:].zfill(1 ) +
+                        bin(0                              )[2:].zfill(3 ) +
                         bin(self.x_wrapping                )[2:].zfill(5 ) +
                         bin(self.y_folding                 )[2:].zfill(4 ) + 
                         bin(self.amm_write_mode            )[2:].zfill(2 ) + 
-                        bin(self.amm_mask                  )[2:].zfill(4 ) + 
                         bin(self.amm_start_address         )[2:].zfill(12) + 
-                        bin(self.amm_nchannels             )[2:].zfill(12) +
+                        bin2c(self.input_pad_val, 8)                       +
+                        bin(self.last_valid_bytes          )[2:].zfill(4)  +
                         bin(self.nlines_to_read            )[2:].zfill(5 ) + 
                         bin(self.input_z                   )[2:].zfill(12) +
                         bin(self.input_y                   )[2:].zfill(12) +
@@ -227,9 +230,9 @@ class SequencerDDRReadEntry(SequencerEntry):
         return hex_128bits
 
 class SequencerDDRWriteEntry(SequencerEntry):
-    def __init__(self, dst_address=0, length = 0, ddr_write_offset_type = DDRWriteOffsetType.MODEL_MEM, output_x = 0, output_y = 0, output_z = 0, nlines_to_write = 0, amm_nchannels = 0,
+    def __init__(self, dst_address=0, length = 0, ddr_write_offset_type = DDRWriteOffsetType.MODEL_MEM, output_x = 0, output_y = 0, output_z = 0, nlines_to_write = 0,
                  src_type = DDRCommandDstSrcType.AMM , amm_start_address = 0, amm_write_mode = 0,
-                 y_folding = 0, x_wrapping = 0, grid_start_line = 0, set_flags = 0,wait_flags = 0):
+                 y_folding = 0, x_wrapping = 0, grid_start_line = 0, set_flags = 0,wait_flags = 0, amm_wstrb_last = 0, amm_wstrb_mode = 1):
         super().__init__(opcode=SequencerOPCode.DMW_AMM, set_flags = set_flags, wait_flags=wait_flags)
         self.ddr_start_address = dst_address # 30 bits
         self.ddr_write_offset_type = ddr_write_offset_type # 2 bit
@@ -237,9 +240,10 @@ class SequencerDDRWriteEntry(SequencerEntry):
         self.output_y = output_y # 12 bits
         self.output_z = output_z # 12 bits
         self.nlines_to_write = nlines_to_write # 5 bits
-        self.amm_nchannels = amm_nchannels # 12 bits
         self.amm_start_address = amm_start_address # 12 bits
         self.amm_write_mode = amm_write_mode # 2 bits
+        self.amm_wstrb_mode = amm_wstrb_mode # 1 bit
+        self.amm_wstrb_last = amm_wstrb_last # 4 bits
         self.y_folding = y_folding # 4 bits
         self.x_wrapping = x_wrapping # 5 bits
         self.grid_start_line = grid_start_line # 4 bits
@@ -258,7 +262,8 @@ class SequencerDDRWriteEntry(SequencerEntry):
             str_value = str_value+(',output_y:%d' % (self.output_y))
             str_value = str_value+(',output_z:%d' % (self.output_z))
             str_value = str_value+(',nlines_to_write:%d' % (self.nlines_to_write))
-            str_value = str_value+(',amm_nchannels:%d' % (self.amm_nchannels))
+            str_value = str_value+(',amm_wstrb_last:%d' % (self.amm_wstrb_last))
+            str_value = str_value+(',amm_wstrb_mode:%d' % (self.amm_wstrb_mode))
             str_value = str_value+(',amm_start_address:%d' % (self.amm_start_address))
             str_value = str_value+(',amm_write_mode:%d' % (self.amm_write_mode))
             str_value = str_value+(',y_folding:%d' % (self.y_folding))
@@ -270,31 +275,52 @@ class SequencerDDRWriteEntry(SequencerEntry):
 
     def __repr__(self):
         str_value = super().__repr__().strip()
-        str_value += 'AMM,,0x%x,%d,%d,%d,%d,,%d,%d,0x%x,,%d,%d,%d,%d,,,,,,,,,,,,,,,,,,,' % (self.ddr_start_address, self.ddr_write_offset_type.value, self.output_x, self.output_y, self.output_z, \
-                                                          self.nlines_to_write, self.amm_nchannels, self.amm_start_address, self.amm_write_mode, \
+        str_value += 'AMM,,0x%x,%d,%d,%d,%d,,%d,0x%x,%d,,%d,%d,%d,%d,%d,,,,,,,,,,,,,,,,,,,,' % (self.ddr_start_address, self.ddr_write_offset_type.value, self.output_x, self.output_y, self.output_z, \
+                                                          self.nlines_to_write, self.amm_start_address, self.amm_write_mode, self.amm_wstrb_last, self.amm_wstrb_mode, \
                                                           self.y_folding, self.x_wrapping, self.grid_start_line)
         
         return str_value
     
     def to_hex(self):
-        flag_wait_bits_and_flag_set_hex = hex(int(bin(self.set_flags)[2:].zfill(6)+bin(self.wait_flags)[2:].zfill(6),2))[2:].zfill(3)
         if self.src_type == DDRCommandDstSrcType.AMM:
-            temp_bins = bin(self.x_wrapping)[2:].zfill(5) + bin(self.y_folding)[2:].zfill(4) + bin(self.amm_write_mode)[2:].zfill(2) \
-                        + bin(self.amm_start_address)[2:].zfill(12) + bin(self.amm_nchannels)[2:].zfill(12) \
-                        + bin(self.nlines_to_write)[2:].zfill(5)
-            temp_hex = hex(int(temp_bins, 2))[2:].zfill(10)
-            hex_128bits = '0x'+hex(self.opcode.value)[2:] + flag_wait_bits_and_flag_set_hex + hex(self.grid_start_line)[2:] + temp_hex \
-                            + hex(self.output_z)[2:].zfill(3) + hex(self.output_y)[2:].zfill(3) + hex(self.output_x)[2:].zfill(3) \
-                            + hex(int(bin(self.ddr_write_offset_type.value)[2:].zfill(2) + bin(self.ddr_start_address)[2:].zfill(30), 2))[2:].zfill(8)
+            bits   = ( '0b'                                                 +
+                        bin(self.opcode.value               )[2:].zfill(4 ) +
+                        bin(self.set_flags                  )[2:].zfill(6 ) +
+                        bin(self.wait_flags                 )[2:].zfill(6 ) + 
+                        bin(self.grid_start_line            )[2:].zfill(4 ) +
+                        bin(self.x_wrapping                 )[2:].zfill(5 ) +
+                        bin(self.y_folding                  )[2:].zfill(4 ) + 
+                        bin(self.amm_write_mode             )[2:].zfill(2 ) + 
+                        bin(self.amm_start_address          )[2:].zfill(12) + 
+                        bin(0                               )[2:].zfill(7 ) +
+                        bin(self.amm_wstrb_mode             )[2:].zfill(1 ) +
+                        bin(self.amm_wstrb_last             )[2:].zfill(4 ) +
+                        bin(self.nlines_to_write            )[2:].zfill(5 ) + 
+                        bin(self.output_z                   )[2:].zfill(12) +
+                        bin(self.output_y                   )[2:].zfill(12) +
+                        bin(self.output_x                   )[2:].zfill(12) +
+                        bin(self.ddr_write_offset_type.value)[2:].zfill(2 ) +
+                        bin(self.ddr_start_address          )[2:].zfill(30)
+                    )
         else:
-            hex_128bits = '0x'+hex(self.opcode.value)[2:] + flag_wait_bits_and_flag_set_hex \
-                            + hex(0)[2:].zfill(20) + hex(self.dst_address)[2:].zfill(8)
+            # DMR_TABLES command see doc
+            bits   = (  '0b'                                                + 
+                        bin(self.opcode.value              )[2:].zfill(4 )  +
+                        bin(self.set_flags                 )[2:].zfill(6 )  +
+                        bin(self.wait_flags                )[2:].zfill(6 )  + 
+                        bin(0                              )[2:].zfill(104) +
+                        bin(self.ddr_start_address         )[2:].zfill(8)
+                    )
+        if len(bits)!=(128+2):
+            raise ValueError('Command have to be 128  bits. Found %d bits' % (len(bits)-2))
+        
+        hex_128bits = hex(int(bits, 2))
         return hex_128bits
 
 class SequencerEngineOperationEntry(SequencerEntry):
     def __init__(self, operation = EngineOpCode.CONV, AMM_URAM_EVEN_GRID_src_addr = 0, AMM_URAM_EVEN_GRID_dst_addr = 0,
                 output_padding_start_x = 7, output_padding_start_y = 11, output_pad_value = 0, input_pad_value = 0, 
-                pad_mode = PadMode.GRIDH14XW8, wloc_buffer_id = 0, rt_buffer_id = 0, rqparams_buffer_id = 0, nlt_buffer_id = 0, scaling_mode=ScalingMode.RQDIRECT, 
+                pad_mode = 2, wloc_buffer_id = 0, rt_buffer_id = 0, rqparams_buffer_id = 0, nlt_buffer_id = 0, scaling_mode=ScalingMode.RQDIRECT, 
                 slice_backward_offset = NO_NEIGHBOR_SLICE, slice_forward_offset = NO_NEIGHBOR_SLICE, fold_left_right = 0,
                 reset_amm_address = 1, set_flags = 0, wait_flags = 0, description = ''):
         super().__init__(opcode=SequencerOPCode.ENGINE_OPERATION, set_flags = set_flags, wait_flags=wait_flags)
@@ -306,14 +332,11 @@ class SequencerEngineOperationEntry(SequencerEntry):
         self.output_pad_value = output_pad_value # 8 bits
         self.input_pad_value = input_pad_value # 8 bits
         self.pad_mode = pad_mode # 4 bits
-        #self.wloc_start_address = wloc_buffer_id * 1024 # 11 bits
-        #self.rt_start_address = rt_buffer_id * 1024 # 11 bits
-        #self.rqparams_start_address = rqparams_buffer_id * 1024 # 11 bits
         self.wloc_start_address     = wloc_buffer_id     * (WLOC_OUTPUT_MEM_DEPTH    //2)   # 11 bits
-        self.rqparams_start_address = rqparams_buffer_id * (RQPARAMS_OUTPUT_MEM_DEPTH//4)   # 11 bits
-        self.rt_start_address       = rt_buffer_id    * (RTABLE_OUTPUT_MEM_DEPTH  //4 //RTABLE_START_ADD_RESOLUTION) # 12 bits
+        self.rqparams_start_address = rqparams_buffer_id * (RQPARAMS_OUTPUT_MEM_DEPTH//2)   # 11 bits
+        self.rt_start_address       = rt_buffer_id    * (RTABLE_OUTPUT_MEM_DEPTH // 2 // RTABLE_START_ADD_RESOLUTION) # 11 bits
         
-        self.nlt_start_addr_flag    = nlt_buffer_id       # NLF is simle simaphore bit
+        self.nlt_start_addr_flag    = nlt_buffer_id       # NLF is non-linear LUT function
         self.scale_mode = scaling_mode # 2 bits , bits 110-111 , '00' RQ direct 1:1 ,'01' - Folding 2:1 , '10' - Resize 1:2, '11' - unfolding
         self.reset_amm_address = reset_amm_address # 1 bit        
 
@@ -323,6 +346,7 @@ class SequencerEngineOperationEntry(SequencerEntry):
         self.read_start_line=0 # This attribute is only used for enabling fpga simulator to generate intermediate nxo files
         self.write_start_line=0 # This attribute is only used for enabling fpga simulator to generate intermediate nxo files
         self.conv_input_channels=0 # This attribute is only used for enabling fpga simulator to generate intermediate nxo files for input
+        self.conv_output_channels=0 # This attribute is only used for enabling fpga simulator to generate intermediate nxo files for output
         
         self.slice_backward_offset= slice_backward_offset
         self.slice_forward_offset = slice_forward_offset
@@ -341,9 +365,10 @@ class SequencerEngineOperationEntry(SequencerEntry):
         str_value = str_value + (',out_pad:(%d,%d)' % (self.output_padding_start_y, self.output_padding_start_x))            
         str_value = str_value + (',rst_amm:%d' % self.reset_amm_address)
         str_value = str_value + (',AMM_Src:0x%x,AMM_Dst:0x%x' % (self.amm_src_address, self.amm_dst_address))
-        str_value = str_value + (',out_pad_val:%d,in_pad_val:%d,pad_mode:%d' % (self.output_pad_value, self.input_pad_value, self.pad_mode.value))
+        str_value = str_value + (',out_pad_val:%d,in_pad_val:%d,pad_mode:%d' % (self.output_pad_value, self.input_pad_value, 1))
         str_value = str_value + (',line num:%d,line start:%d' % (self.num_of_lines,(self.write_start_line-self.read_start_line)))
         str_value = str_value + (',input_channels:%d' % (self.conv_input_channels))
+        str_value = str_value + (',output_channels:%d' % (self.conv_output_channels))
         str_value = str_value + (',fold_left_right:%d, slice_backward_offset%d, slice_forward_offset%d' % 
                                  (self.fold_left_right, self.slice_backward_offset, self.slice_forward_offset))
         
@@ -351,12 +376,12 @@ class SequencerEngineOperationEntry(SequencerEntry):
     
     def __repr__(self):
         str_value = super().__repr__().strip()
-        str_value += ',%s,,,,,,,,,,,,,,, 0x%x, 0x%x, 0x%x, 0x%x, %d, %d, %d, %d, %d, %d, %d,0x%x,0x%x,0x%x,,,,' % (
-            self.description, 
+        str_value += ',%s,,,,,,,,,,,,,,,,, 0x%x, 0x%x, 0x%x, 0x%x, %d, %d, %d, %d, %d, %d, %d, %d,0x%x,0x%x,0x%x,,,,' % (
+            self.description,
             self.amm_src_address, self.amm_dst_address,
             self.slice_backward_offset, self.slice_forward_offset, self.scale_mode.value, self.fold_left_right,
-            (self.write_start_line-self.read_start_line), self.num_of_lines, 
-            self.output_padding_start_y, self.output_padding_start_x, self.conv_input_channels,
+            (self.write_start_line-self.read_start_line), self.num_of_lines,
+            self.output_padding_start_y, self.output_padding_start_x, self.conv_input_channels, self.conv_output_channels,
             self.wloc_start_address, self.rt_start_address, self.rqparams_start_address
             )
         return str_value
@@ -366,17 +391,16 @@ class SequencerEngineOperationEntry(SequencerEntry):
                    bin(self.opcode.value           )[2:].zfill(4 ) +
                    bin(self.set_flags              )[2:].zfill(6 ) +
                    bin(self.wait_flags             )[2:].zfill(6 ) +
-                   bin(0                           )[2:].zfill(1 ) + # reserved 1 bit
                    bin(self.nlt_start_addr_flag    )[2:].zfill(1)  +
                    bin(self.fold_left_right        )[2:].zfill(1)  +          
                    bin(self.scale_mode.value       )[2:].zfill(2 ) +
                    bin(self.rqparams_start_address )[2:].zfill(11) +
                    bin(self.rt_start_address       )[2:].zfill(11) +
                    bin(self.wloc_start_address     )[2:].zfill(11) +
-                   bin(self.pad_mode.value         )[2:].zfill(1 ) +
+                   bin(1                           )[2:].zfill(1 ) + # old param GRIDH14XW16 = 1 (have to be deleted)
                    bin2c(self.input_pad_value, 8)                  +
                    bin2c(self.output_pad_value, 8)                 +
-                   bin(self.output_padding_start_y )[2:].zfill(4 ) +
+                   bin(self.output_padding_start_y )[2:].zfill(5 ) +
                    bin(self.output_padding_start_x )[2:].zfill(4 ) +
                    bin(self.slice_backward_offset  )[2:].zfill(12) +
                    bin(self.slice_forward_offset   )[2:].zfill(12) +
@@ -389,8 +413,6 @@ class SequencerEngineOperationEntry(SequencerEntry):
             raise ValueError('Command have to be 128  bits. Found %d bits' % (len(bits)-2))
         
         hex_128bits = hex(int(bits, 2))
-        if  not TFLITE_REQUANT:
-            raise ('only tflite format is suported')
         return hex_128bits
 
 class SequencerCustomOperationEntry(SequencerEntry):
@@ -399,9 +421,19 @@ class SequencerCustomOperationEntry(SequencerEntry):
         self.operation = operation # 8 bits
 
     def to_hex(self):
-        flag_wait_bits_and_flag_set_hex = hex(int(bin(self.set_flags)[2:].zfill(6)+bin(self.wait_flags)[2:].zfill(6),2))[2:].zfill(3)
-        hex_128bits = '0x'+hex(self.opcode.value)[2:] + flag_wait_bits_and_flag_set_hex \
-                        + hex(0)[2:].zfill(26) + hex(self.operation.value)[2:].zfill(2)
+        # DMR_TABLES command see doc
+        bits   = (  '0b'                                                + 
+                    bin(self.opcode.value   )[2:].zfill(4  )  +
+                    bin(self.set_flags      )[2:].zfill(6  )  +
+                    bin(self.wait_flags     )[2:].zfill(6  )  + 
+                    bin(0                   )[2:].zfill(104)  +
+                    bin(self.operation.value)[2:].zfill(8  )
+                )
+        if len(bits)!=(128+2):
+            raise ValueError('Command have to be 128  bits. Found %d bits' % (len(bits)-2))
+        
+        hex_128bits = hex(int(bits, 2))
+    
         return hex_128bits
 
 class SequencerProgram:
@@ -426,8 +458,8 @@ class SequencerProgram:
         with open(csv_filename,'w') as sequencer_program_info_file:
             temp_str = 'PC,Operation,F5,F4,F3,F2,F1,F0,Type,Layer,'
             temp_str += 'ddr_start_address,ddr_offset,X,Y,Z,nlines_to_read,nlines_to_write,'
-            temp_str += 'amm_nchannels,amm_start_address,amm_mask,amm_write_mode,y_folding,x_wrapping,grid_start_line,'
-            temp_str += 'AMM Src,AMM Dst,back_X_offset,forw_X_offset,scale_mode,fold_left_right,1st line,#Lines,Pad Y,Pad X,Input Ch,wloc_addr,rt_addr,rqparams_addr,'
+            temp_str += 'amm_start_address,amm_write_mode,amm_folding_mode,last_valid_bytes,amm_wstrb_mode,y_folding,x_wrapping,grid_start_line,pad_val,'
+            temp_str += 'AMM Src,AMM Dst,back_X_offset,forw_X_offset,scale_mode,fold_left_right,1st line,#Lines,Pad Y,Pad X,Input Ch,Output Chan,wloc_addr,rt_addr,rqparams_addr,'
             temp_str += 'Table_ddr_start_address,Table_length,Table_start_address,Table_param \n'
             sequencer_program_info_file.write(temp_str)    
             for command_index,current_sequencer_command in enumerate(self.commands_list):
@@ -458,7 +490,7 @@ class SequencerProgram:
             sequencer_pointer=sequencer_pointer-1
         while sequencer_pointer>=0:
             last_table_read_pointer = sequencer_pointer
-            while self.is_table_read_command(self.commands_list[sequencer_pointer]) and sequencer_pointer>=0: # We find the 1st table read command
+            while sequencer_pointer>=0 and self.is_table_read_command(self.commands_list[sequencer_pointer]): # We find the 1st table read command
                 sequencer_pointer=sequencer_pointer-1
             first_table_read_pointer=sequencer_pointer+1
             op_found=False

@@ -2,10 +2,7 @@
 
 import textwrap
 from common.debug_flags import SHORT_PAIRING_USED
-from common.enums import RqDSPCommand, RqOP, AMMType
-# from common.hw_config import SHORT_ENTRY_JUMP_BITS, MAX_OFFSET_VALUE_FOR_SHORT_ENTRY, MAX_ADDRESS_VALUE_FOR_LONG_ENTRY, MAX_ADDRESS_VALUE_FOR_DEEP_CONV_LONG_ENTRY,\
-#                              LONG_ENTRY_BITS, MAX_WLOC_128BIT_ENTRIES, MAX_RQLOC_128BIT_ENTRIES, MAX_RQPARAMS_128BIT_ENTRIES,\
-#                              REDUCED_MAC_RESCALE_BUS_WIDTH, MCHP_NUMERICS
+from common.enums import  AMMType
 from common.hw_config import *
 from collections import OrderedDict
 from common.utils import bin2c
@@ -13,6 +10,12 @@ import math
 import copy
 from abc import ABC
 import numpy as np
+
+def _chunk_bits(binary_str, width):
+    # textwrap.wrap replacement: binary_str has no whitespace, so textwrap treats it as a
+    # single long "word" and just breaks it every `width` chars left-to-right - equivalent to
+    # fixed-stride slicing, but ~10x cheaper since it skips all the word-wrap tokenization logic.
+    return [binary_str[i:i + width] for i in range(0, len(binary_str), width)]
 
 """
 Function: create_mem
@@ -38,63 +41,6 @@ Returns:
 list of str
 A list containing the combined mem_input_width (now 256-bit) numbers in binary string format.
 """
-def create_mem_old(list_str_nummers, mem_input_width=256, mem_output_width=128):        
-    
-    # Temporary variables for accumulating sub-numbers
-    current_sub_bit = ""
-    sub_line = []
-    mem_created = []
-    sub_line_number = mem_input_width // mem_output_width
-    out_format_bit_length = mem_input_width//8
-
-    # Process the input list 'list_str_nummers'
-    for binary_str_cmd in list_str_nummers:
-
-        binary_str = binary_str_cmd.to_bits()[2:]
-
-
-        # Add the current binary string to the accumulator
-        current_sub_bit = binary_str+current_sub_bit
-
-        # Check if we have reached the length of mem_output_width
-        while len(current_sub_bit) >= mem_output_width:
-            # Extract the first mem_output_width (now 128) bits and add them to the sub-number list
-            sub_bit = current_sub_bit[-mem_output_width:]
-            sub_line.append(sub_bit)
-            
-            # Remove the added part from the accumulator
-            current_sub_bit = current_sub_bit[:-mem_output_width]
-            
-            # If we have accumulated the correct number of sub-numbers (sub_line_number), add them to the main list
-            if len(sub_line) == sub_line_number:
-                # Combine the sub-numbers into one 256-bit number
-                combined_256_bit_number = ''.join(sub_line[::-1])
-                # Add this 256-bit number to mem_created list
-                current_word_bytearray = int(combined_256_bit_number, 2).to_bytes(out_format_bit_length , byteorder='little')
-                mem_created.extend(current_word_bytearray)
-                # Clear the list of sub-numbers for the next 256-bit block
-                sub_line = []
-
-    # Process the remaining bits in the accumulator
-    if len(current_sub_bit) > 0:
-        # Pad the remaining bits to mem_output_width length with zeros
-        current_sub_bit = current_sub_bit.rjust(mem_output_width, '0')
-        sub_line.append(current_sub_bit)
-
-    # If there are any unprocessed sub-numbers, pad them and store
-    if len(sub_line) > 0:
-        # Pad the second sub-number with zeros to complete the 256-bit number
-        for i in range(sub_line_number - len(sub_line)):
-            sub_line.append('0' * mem_output_width)
-
-    # Add the final combined 256-bit number if available
-    if len(sub_line) == sub_line_number:
-        combined_256_bit_number = ''.join(sub_line[::-1])
-        current_word_bytearray = int(combined_256_bit_number, 2).to_bytes(out_format_bit_length , byteorder='little')
-        mem_created.extend(current_word_bytearray)
-
-    return mem_created
-
 def create_mem(list_str_nummers, mem_cmd_resolution, mem_input_width=256, mem_output_width=128):        
     
     # Temporary variables for accumulating sub-numbers
@@ -112,7 +58,7 @@ def create_mem(list_str_nummers, mem_cmd_resolution, mem_input_width=256, mem_ou
         if 'b' in binary_str:
             raise ValueError('string with b!')
 
-        binary_str_parts = textwrap.wrap(binary_str, width=mem_cmd_resolution)[::-1]
+        binary_str_parts = _chunk_bits(binary_str, mem_cmd_resolution)[::-1]
 
         for i_part in binary_str_parts:
             # Add the current binary string to the accumulator
@@ -158,10 +104,298 @@ def create_mem(list_str_nummers, mem_cmd_resolution, mem_input_width=256, mem_ou
         current_word_bytearray = int(combined_256_bit_number, 2).to_bytes(out_format_bit_length , byteorder='little')
         mem_created.extend(current_word_bytearray)
 
-    #debug 
+    #debug
     #      bin_line=''.join(f'{byte:08b}' for byte in mem_created)
     #      (bin_line[::-1])[-128:]
     return mem_created
+
+
+# Continuous CBC memory writing support (Alex + Claude, 2026-08-03): enables resuming
+# memory accumulation across multiple write phases instead of one full pass.
+class MemoryState:
+    """
+    Holds the current state of memory accumulation WITHOUT padding
+    This allows resuming writes later
+    """
+    def __init__(self, mem_cmd_resolution=14, mem_input_width=256, mem_output_width=128):
+        # Unfilled accumulator (< 128 bits, NO padding)
+        self.current_sub_bit = ""
+
+        # List of completed 128-bit blocks (NO padding, exact bit count)
+        # Each element: (bit_string, actual_length)
+        self.sub_line = []
+
+        # Finalized byte array (complete 256-bit words only)
+        self.mem_created = bytearray()
+
+        # Configuration
+        self.mem_cmd_resolution = mem_cmd_resolution
+        self.mem_input_width = mem_input_width
+        self.mem_output_width = mem_output_width
+
+    @property
+    def sub_line_number(self):
+        """Number of blocks per word (2 for 256/128)"""
+        return self.mem_input_width // self.mem_output_width
+
+    @property
+    def out_format_bit_length(self):
+        """Bytes per word (32 for 256 bits)"""
+        return self.mem_input_width // 8
+
+    def total_bits(self):
+        """Total bits accumulated (finalized + pending)"""
+        finalized_bits = len(self.mem_created) * 8
+        pending_block_bits = sum(length for _, length in self.sub_line)
+        current_bits = len(self.current_sub_bit)
+        return finalized_bits + pending_block_bits + current_bits
+
+    def clone(self):
+        """Create a copy of current state"""
+        new_state = MemoryState(
+            mem_cmd_resolution=self.mem_cmd_resolution,
+            mem_input_width=self.mem_input_width,
+            mem_output_width=self.mem_output_width
+        )
+        new_state.current_sub_bit = self.current_sub_bit
+        new_state.sub_line = list(self.sub_line)  # Shallow copy of list
+        new_state.mem_created = bytearray(self.mem_created)  # Copy bytearray
+        return new_state
+
+
+def _finalize_word(state):
+    """
+    Finalize a complete word (sub_line_number blocks) with padding
+    This is called when we have exactly sub_line_number blocks ready
+
+    Special case: when mem_input_width == mem_output_width, sub_line_number = 1,
+    so we don't reverse the blocks
+    """
+    # Apply padding to blocks if needed
+    padded_blocks = []
+    for bit_string, actual_length in state.sub_line:
+        # Pad to full block width (mem_output_width bits)
+        if actual_length < state.mem_output_width:
+            padded = bit_string.rjust(state.mem_output_width, '0')
+        else:
+            padded = bit_string
+        padded_blocks.append(padded)
+
+    # Combine blocks
+    # Special case: if sub_line_number == 1, don't reverse (no multi-block structure)
+    if state.sub_line_number == 1:
+        combined_bit_number = padded_blocks[0]
+    else:
+        # Reverse for multi-block words (e.g., 2x 128-bit blocks -> 256-bit word)
+        combined_bit_number = ''.join(padded_blocks[::-1])
+
+    # Convert to bytes (little-endian)
+    current_word_bytearray = int(combined_bit_number, 2).to_bytes(
+        state.out_format_bit_length,
+        byteorder='little'
+    )
+    state.mem_created.extend(current_word_bytearray)
+
+    # Clear sub_line for next word
+    state.sub_line = []
+
+
+def _finalize_remaining(state):
+    """
+    Finalize remaining bits with padding
+    Called when finalize=True
+    """
+    # Add current accumulator to sub_line if not empty
+    if len(state.current_sub_bit) > 0:
+        actual_length = len(state.current_sub_bit)
+        state.sub_line.append((state.current_sub_bit, actual_length))
+        state.current_sub_bit = ""
+
+    # If we have any incomplete word, pad and finalize it
+    if len(state.sub_line) > 0:
+        # Pad to complete word (add empty blocks)
+        while len(state.sub_line) < state.sub_line_number:
+            state.sub_line.append(('', 0))  # Empty block
+
+        # Finalize the word ONLY if we have exactly sub_line_number blocks
+        # (matches original create_mem behavior at lines 153-156)
+        if len(state.sub_line) == state.sub_line_number:
+            _finalize_word(state)
+
+
+def create_mem_updated(list_str_numbers, previous_state=None, finalize=False,
+                       mem_cmd_resolution=14, mem_input_width=256, mem_output_width=128):
+    """
+    Updated memory creation with state preservation
+
+    Args:
+        list_str_numbers: List of command objects with to_bits() method
+        previous_state: Previous MemoryState to continue from (optional)
+        finalize: If True, add padding and finalize remaining bits
+        mem_cmd_resolution: Command resolution (default 14)
+        mem_input_width: Word width (default 256)
+        mem_output_width: Block width (default 128)
+
+    Returns:
+        MemoryState object with current accumulation state
+
+    Usage:
+        # Phase 1: Add first batch of commands
+        state1 = create_mem_updated(commands_batch1)
+
+        # Phase 2: Add more commands (continues from state1)
+        state2 = create_mem_updated(commands_batch2, previous_state=state1)
+
+        # Phase 3: Finalize and get all bytes
+        final_state = create_mem_updated([], previous_state=state2, finalize=True)
+        bytes_array = final_state.mem_created
+    """
+
+    # Initialize or continue from previous state
+    if previous_state is None:
+        state = MemoryState(mem_cmd_resolution, mem_input_width, mem_output_width)
+    else:
+        state = previous_state.clone()
+
+    # Process each command
+    for inx, binary_str_cmd in enumerate(list_str_numbers):
+        binary_str = binary_str_cmd.to_bits()[2:]  # Remove '0b' prefix
+
+        if 'b' in binary_str:
+            raise ValueError('string with b!')
+
+        # Split into chunks and reverse
+        binary_str_parts = _chunk_bits(binary_str, state.mem_cmd_resolution)[::-1]
+
+        for i_part in binary_str_parts:
+            # Add to accumulator (grows LEFT)
+            candidate_current_sub_bit = i_part + state.current_sub_bit
+
+            # Check if block is full
+            if len(candidate_current_sub_bit) > state.mem_output_width:
+                # Block is full! Save WITHOUT padding
+                # CRITICAL: Save exact bit count for later reopening
+                actual_length = len(state.current_sub_bit)
+
+                # NO PADDING HERE! Save exact bits
+                state.sub_line.append((state.current_sub_bit, actual_length))
+
+                # Start new block with overflow
+                state.current_sub_bit = i_part
+
+                # Check if we have complete word (2 blocks)
+                if len(state.sub_line) == state.sub_line_number:
+                    # Finalize this word (padding OK here, it's a complete word)
+                    _finalize_word(state)
+            else:
+                state.current_sub_bit = candidate_current_sub_bit
+
+    # If finalize flag is set, add padding and complete remaining data
+    if finalize:
+        _finalize_remaining(state)
+
+    return state
+
+
+def create_mem_with_validation(list_str_nummers, mem_cmd_resolution, mem_input_width=256, mem_output_width=128):
+    """
+    Wrapper function that calls both old and new create_mem functions and validates results
+
+    This is used for debugging: ensures create_mem_updated produces identical results to create_mem
+
+    Args:
+        list_str_nummers: List of command objects with to_bits() method
+        mem_cmd_resolution: Command resolution (bits)
+        mem_input_width: Word width (default 256)
+        mem_output_width: Block width (default 128)
+
+    Returns:
+        bytearray: Memory bytes (from old create_mem)
+
+    Raises:
+        AssertionError: If old and new functions produce different results
+    """
+    import sys
+
+    # Call old function
+    result_old = create_mem(list_str_nummers, mem_cmd_resolution, mem_input_width, mem_output_width)
+
+    # Call new function (single call with finalize=True should be identical)
+    state_new = create_mem_updated(
+        list_str_nummers,
+        previous_state=None,
+        finalize=True,
+        mem_cmd_resolution=mem_cmd_resolution,
+        mem_input_width=mem_input_width,
+        mem_output_width=mem_output_width
+    )
+    result_new = state_new.mem_created
+
+    # Compare results
+    # Convert to bytes for proper comparison (result_old might be list, result_new is bytearray)
+    if isinstance(result_old, list):
+        result_old_bytes = bytes(result_old)
+    else:
+        result_old_bytes = bytes(result_old)
+    result_new_bytes = bytes(result_new)
+
+    if result_old_bytes != result_new_bytes:
+        # Detailed error information
+        error_msg = "\n" + "="*80 + "\n"
+        error_msg += "ERROR: create_mem vs create_mem_updated MISMATCH!\n"
+        error_msg += "="*80 + "\n"
+        error_msg += f"Number of commands: {len(list_str_nummers)}\n"
+        error_msg += f"mem_cmd_resolution: {mem_cmd_resolution}\n"
+        error_msg += f"mem_input_width: {mem_input_width}\n"
+        error_msg += f"mem_output_width: {mem_output_width}\n"
+        error_msg += f"OLD type: {type(result_old)}\n"
+        error_msg += f"NEW type: {type(result_new)}\n"
+        error_msg += f"\nOLD result length: {len(result_old_bytes)} bytes\n"
+        error_msg += f"NEW result length: {len(result_new_bytes)} bytes\n"
+
+        # Find first difference
+        min_len = min(len(result_old_bytes), len(result_new_bytes))
+        first_diff_idx = None
+        for i in range(min_len):
+            if result_old_bytes[i] != result_new_bytes[i]:
+                first_diff_idx = i
+                break
+
+        if first_diff_idx is not None:
+            error_msg += f"\nFirst difference at byte {first_diff_idx}:\n"
+            error_msg += f"  OLD: 0x{result_old_bytes[first_diff_idx]:02x}\n"
+            error_msg += f"  NEW: 0x{result_new_bytes[first_diff_idx]:02x}\n"
+
+            # Show context (10 bytes before and after)
+            start_ctx = max(0, first_diff_idx - 10)
+            end_ctx = min(min_len, first_diff_idx + 10)
+            error_msg += f"\nContext (bytes {start_ctx} to {end_ctx}):\n"
+            error_msg += f"  OLD: {' '.join(f'{b:02x}' for b in result_old_bytes[start_ctx:end_ctx])}\n"
+            error_msg += f"  NEW: {' '.join(f'{b:02x}' for b in result_new_bytes[start_ctx:end_ctx])}\n"
+        elif len(result_old_bytes) != len(result_new_bytes):
+            error_msg += f"\nLength mismatch but first {min_len} bytes are identical\n"
+        else:
+            error_msg += f"\nWARNING: Bytes appear identical but comparison failed!\n"
+            error_msg += f"This might be a type mismatch issue.\n"
+
+        # Show command bit sizes
+        error_msg += f"\nCommand bit sizes:\n"
+        for i, cmd in enumerate(list_str_nummers[:10]):  # First 10 commands
+            bits = cmd.to_bits()
+            error_msg += f"  Cmd[{i}]: {len(bits)-2} bits\n"
+        if len(list_str_nummers) > 10:
+            error_msg += f"  ... ({len(list_str_nummers) - 10} more commands)\n"
+
+        error_msg += "="*80 + "\n"
+
+        # Print to stderr for visibility
+        print(error_msg, file=sys.stderr, flush=True)
+
+        # Assert with error message
+        assert False, error_msg
+
+    return result_old
+
 
 '''
 Alexander Logvinenko 11.07.2024
@@ -220,7 +454,7 @@ class WLOCEntry:
         
         # if freeze_wloc is requerd, make sure, there is weight_value, weight_index, long_entry
         if self.freeze_wloc:
-            if sum(self.weight_value+self.weight_index+ (not self.long_entry)) !=0:
+            if self.weight_value != 0 or self.weight_index != 0 or not self.long_entry:
                 raise ValueError('Alex, check the freeze comand insert')
             
             self.weight_value = 0
@@ -231,8 +465,37 @@ class WLOCEntry:
     def get_zero_mul_entry(cls):        
         if cls.ZERO_MUL_ENTRY is None:
             cls.ZERO_MUL_ENTRY = cls(weight_value=0, weight_index=1, weight_offset=1, long_entry=True)
-        return copy.deepcopy(cls.ZERO_MUL_ENTRY)
+        return cls.ZERO_MUL_ENTRY.clone()
 
+    @classmethod
+    def get_empty_cell_entry(cls):
+        entery = cls.get_zero_mul_entry()
+        entery.long_entry = False
+        entery.nop_reason = 'EMPTY SELL NOP'
+        return entery
+
+    @classmethod
+    def get_stall_nop_entry(cls):
+        entry = cls()
+        entry.weight_value=0
+        entry.weight_index=0
+        entry.long_entry=False
+        entry.nop_reason='DDR STALL'
+        return entry
+
+    def set_zero_mul_entry_remain_the_flags(self):
+        self.weight_value  = self.ZERO_MUL_ENTRY.weight_value
+        self.weight_index  = self.ZERO_MUL_ENTRY.weight_index
+        self.weight_offset = self.ZERO_MUL_ENTRY.weight_offset
+        self.long_entry    = True
+        self.nop           = False
+
+    def clone(self):
+        # All attributes are scalars (int/bool/str), so a shallow copy is equivalent to deepcopy.
+        new = WLOCEntry.__new__(WLOCEntry)
+        new.__dict__.update(self.__dict__)
+        return new
+    
     def is_oc_end(self):
         return self.end_of_oc
     
@@ -297,15 +560,14 @@ class WLOCEntry:
             str = str + ' EOC'
         if self.freeze_wloc:
             str = str + ' FREEZE'
-        if True or self.nop:
-            str = str + 'NOP ' +'REASON: ' + self.nop_reason
+        str = str + 'NOP ' +'REASON: ' + self.nop_reason
         if self.shift_down:
             str = str + 'SHD'  
         if self.shift_right:
             str = str + 'SHR'  
 
         
-        #mark end of channal
+        #mark end of channel
         str = str + ('(%d)' % self.oc)
 
         return str
@@ -321,24 +583,6 @@ class WLOCEntry:
         shift = (self.shift_down or self.shift_right)
         pad_line   = (self.pad_line_first   or self.pad_line_last  )
         pad_column = (self.pad_column_first or self.pad_column_last) 
-        
-        if self.nop==True:
-            if self.long_entry==True:
-                raise ValueError('NOP command must be long entry')
-            if self.is_pair==True:
-                raise ValueError('NOP command cant be pair entry')
-            if self.weight_value!=0:
-                raise ValueError('NOP command must have zero weight value, index and offset')
-            if self.weight_offset!=0:
-                raise ValueError('NOP command must have zero offset')
-            
-            # For NOP we will use a short CMD with zero offset
-            bits = ('0b'                                                      + # Prefix to indicate that the string value is written in binary format                    
-                    bin(0)[2:].zfill(SHORT_ENTRY_JUMP_BITS)                   + # Offset [2:0] 
-                    '0'                                                       + # Code of the command
-                    weight_value                                                # Weight
-                    )
-            return bits
         
         #for Pairs do the calculations
         if self.is_pair:
@@ -370,12 +614,13 @@ class WLOCEntry:
        
         # Short Pair
         if not self.long_entry and self.is_pair:
+            
             offest_A = bin(self.weight_offset)[2:].zfill(SHORT_PAIR_ENTRY_JUMP_BITS+1)
             if offest_A[-1]!='0':
                 raise ValueError('Offset have to be even, because of even-odd logic')
             bits = ('0b'                    + # Prefix to indicate that the string value is written in binary format                    
                     bin(self.sub_sel_preadder_minus_mode)[2:]                + # ADD_SUB_sel for preadder
-                    offest_A[     :-1]                                       + # Offset 7-bits 
+                    offest_A[     :-1]                                       + # Offset 7-bits                     
                     pair_add_part[:-1]                                       + # Address B [9:0] +1K
                     '01'                                                     + # Code of the command
                     weight_value                               # Weight
@@ -426,8 +671,13 @@ class RQParamEntry:
                  # for ~nope node
                  self.nop_count = nop_count
                  self.shift_count = shift_count
-                 self.clc_nr = clc_nr       
-                
+                 self.clc_nr = clc_nr
+
+    def clone(self):
+        new = RQParamEntry.__new__(RQParamEntry)
+        new.__dict__.update(self.__dict__)
+        return new
+
     def __str__(self):
         if (self.is_config_cmd ==True):
             #set command
@@ -493,6 +743,11 @@ class RTEntry:
               self.CMD_complete = CMD_complete
               self.clc_nr = clc_nr
 
+    def clone(self):
+        new = RTEntry.__new__(RTEntry)
+        new.__dict__.update(self.__dict__)
+        return new
+
     def to_bits(self):  # Converts to 32 bits entry
         bits = ('0b' + 
                     bin(0)[2:].zfill(3)                         +  # reserved
@@ -504,7 +759,6 @@ class RTEntry:
                     bin(self.AMM_write_mask)[2:].zfill(4)       +  # AMM write mask                                                                                                                                                                                    +  # NOP bit
                     bin(self.AMM_write_add)[2:].zfill(11)          # AMM write address
                    )
-        ddd = int(bits[2:]) # check if the number is valide
         if len(bits)!=(32+2):
             raise ValueError('RT entry must be 32 bits. Found %d bits' % (len(bits)-2))
         return bits
@@ -580,21 +834,27 @@ class CommandList(ABC):
         self.mem_cmd_resolution = 0
 
     def add_entry(self,entry):
-        # is_last_entry_nop =  (len(self.cmd_list)!=0) and (self.cmd_list[-1].nop==True)        
-                
+        # is_last_entry_nop =  (len(self.cmd_list)!=0) and (self.cmd_list[-1].nop==True)
+
         # if entry.nop and is_last_entry_nop:
         #     self.cmd_list[-1].nop_count+=1
         # else:
-        self.cmd_list.append(copy.deepcopy(entry))
+        self.cmd_list.append(entry.clone())
 
     def create_cmd_mem(self, is_clal_only = False):
-        cmd_bytes_array = create_mem( list_str_nummers = self.cmd_list, mem_cmd_resolution = self.mem_cmd_resolution, mem_input_width=self.mem_input_width, mem_output_width=self.mem_output_width)
+        # Use validation wrapper to test create_mem_updated
+        cmd_bytes_array = create_mem_with_validation(
+            list_str_nummers=self.cmd_list,
+            mem_cmd_resolution=self.mem_cmd_resolution,
+            mem_input_width=self.mem_input_width,
+            mem_output_width=self.mem_output_width
+        )
 
         if not is_clal_only:
             debug_whatch = len(cmd_bytes_array)
             if (len(cmd_bytes_array))>((self.mem_output_depth*self.mem_output_width)//8//2):
                     raise ValueError ('MEM_SIZE size (0x%d) exceeds max mem size (0x%d) - (size in bytes)' % (len(cmd_bytes_array),self.mem_output_depth))
-            
+
         self.cmd_mem = cmd_bytes_array
 
 
@@ -607,7 +867,7 @@ class WLOCList (CommandList):
             self.mem_output_depth   = WLOC_OUTPUT_MEM_DEPTH
             self.mem_cmd_resolution = WLOC_CMD_RESOLUTION
 
-            self.cmd_list = copy.deepcopy(cmd_list) if cmd_list is not None else [] 
+            self.cmd_list = [e.clone() for e in cmd_list] if cmd_list is not None else []
 
   
  
@@ -631,9 +891,9 @@ class WLOCList (CommandList):
         #     raise ValueError('Pair not ready yet.  ')
 
 
-    # if posible, replase long to short
+    # if possible, replace long to short
     def add_entry_smart(self,entry):
-        entry_to_add = copy.deepcopy(entry)
+        entry_to_add = entry.clone()
         if entry.is_pair:
             raise ValueError('Pair not ready yet.')
         if  (0<entry_to_add.weight_offset) and (entry_to_add.weight_offset <= MAX_OFFSET_VALUE_FOR_SHORT_ENTRY) and (entry_to_add.long_entry):
@@ -652,20 +912,23 @@ class WLOCList (CommandList):
             
             
             # this case is to find NOPs
-            if ((act_el.is_pair == False) and (act_el.is_always_long==False) and (act_el.long_entry)   and (act_el.end_of_oc == False) and (act_el.freeze_wloc==False) and (act_el.nop == False) and 
-                (act_el.pad_column_first == False) and (act_el.pad_column_last== False) and (act_el.pad_line_first== False) and (act_el.pad_line_last == False) and 
+            if ((act_el.is_pair == False) and (act_el.is_always_long==False) and (act_el.long_entry)   and
+                (act_el.end_of_oc == False)  and (act_el.freeze_wloc==False) and (act_el.nop == False) and                
                 (act_el.shift_down == False) and (act_el.shift_right == False) and 
-                (act_el.weight_offset == 1) and  (act_el.weight_value == 0)):
+                (act_el.weight_offset == 1)  and  (act_el.weight_value == 0) and
+                #previous cmd is not STALL NOP
+                not((self.cmd_list[inx_el-1].long_entry==False) and (self.cmd_list[inx_el-1].weight_value == 0) and self.cmd_list[inx_el-1].weight_offset==0)
+            ):
 
                 act_el.nop           = True
                 act_el.long_entry    = False
-                act_el.weight_offset = 0
-                act_el.weight_index  = 0
+                act_el.weight_offset = 1 
+                act_el.weight_index  = 1
 
                 
             # this is for short without pair
-            elif ((act_el.is_pair == False) and  (act_el.long_entry)   and (act_el.end_of_oc == False) and (act_el.freeze_wloc==False) and (act_el.nop == False) and 
-                (act_el.pad_column_first == False) and (act_el.pad_column_last== False) and (act_el.pad_line_first== False) and (act_el.pad_line_last == False) and 
+            elif ((act_el.is_always_long == False) and (act_el.is_pair == False) and  (act_el.long_entry)   and (act_el.end_of_oc == False) and (act_el.freeze_wloc==False) and (act_el.nop == False) and (act_el.weight_value != 0) and
+                #(act_el.pad_column_first == False) and (act_el.pad_column_last== False) and (act_el.pad_line_first== False) and (act_el.pad_line_last == False) and 
                 (act_el.shift_down == False) and (act_el.shift_right == False) and 
                 (ch_not_init == False)):
 
@@ -677,11 +940,12 @@ class WLOCList (CommandList):
                     act_inx = act_el.weight_index
             
             #this is for pairing short            
-            elif (SHORT_PAIRING_USED and
-                  (act_el.is_pair == True) and  (act_el.long_entry)   and (act_el.end_of_oc == False) and (act_el.freeze_wloc==False) and 
-                  (act_el.nop == False)    and  (act_el.pad_column_first == False) and               (act_el.pad_column_last== False) and 
-                  (act_el.pad_line_first== False)                                  and                (act_el.pad_line_last == False) and 
-                  (act_el.shift_down == False) and   (act_el.shift_right == False) and                (ch_not_init == False)):
+            elif ((SHORT_PAIRING_USED) and
+                  (act_el.is_pair == True) and  (act_el.long_entry) and (act_el.is_always_long == False)  and (act_el.end_of_oc == False) and 
+                  (act_el.freeze_wloc==False) and (act_el.nop == False)    and   (act_el.shift_down == False) and   (act_el.shift_right == False) and 
+                  (ch_not_init == False) and 
+                  (self.cmd_list[inx_el-1].is_pair == True) # important - previous cmd also have to be pair
+                  ):
                 cmd_offset  = act_el.weight_index - act_inx
                 if (0 <= cmd_offset and  cmd_offset <= MAX_OFFSET_VALUE_FOR_PIAR_ENTRY):
                     act_el.long_entry    = False
@@ -711,6 +975,7 @@ class WLOCList (CommandList):
         sub_bit_len           = 0
         block_128_count       = 0
         ops_per_oc_channel    = 0 # min operation per oc have to be HARDWARE_NOP_REQ + shift_reg_length+num_of_AMM_write_cmd+extra_3x3_shifts
+        cmd_inx_split         = None # set once the first end_of_oc boundary is seen; see overflow check below
 
         if (block_num_pro_input_block==0):
             raise ValueError('This version do not support mem_input_width < mem_output_width')
@@ -718,13 +983,13 @@ class WLOCList (CommandList):
         # Process the input list 'list_str_nummers'
         for cmd_inx, cand_cmd in enumerate (self.cmd_list):
 
-            #count the operation per_output_channal
+            #count the operation per_output_channel
             ops_per_oc_channel    +=1
 
             # Mark the last EOC in block  
             if cand_cmd.end_of_oc == True:
                 cmd_inx_split = cmd_inx
-                # each output chanal have to be minimum 11 operation
+                # each output channel has to be minimum 11 operations
                 extra_nop_to_add      = max(0, min_per_oc_channel-ops_per_oc_channel) 
                 extra_cmd = extra_cmd + [WLOC_SINGLE_SHORT_SIZE]*extra_nop_to_add
                 ops_per_oc_channel    = 0
@@ -747,10 +1012,20 @@ class WLOCList (CommandList):
                     
                     # If memory is full stop
                     if block_128_count == mem_full_block_count-1:
+                        if cmd_inx_split is None:
+                            # Overflow happened before any end_of_oc boundary was seen in this pass - a
+                            # single output channel's own WLOC commands alone exceed available_mem, so
+                            # there is no OC boundary to split at (splitting is OC-granular only). Surface
+                            # this plainly instead of the UnboundLocalError this used to raise.
+                            raise ValueError(
+                                'find_EOC_to_split: a single output channel\'s WLOC commands (>%d bits so '
+                                'far, at cmd_inx=%d) exceed available_mem=%d bits with no end_of_oc '
+                                'boundary reached yet - this output channel cannot be split.' % (
+                                    sub_bit_len, cmd_inx, available_mem))
                         mem_size_bit  = ((1+block_128_count)//block_num_pro_input_block)*self.mem_input_width//8 #+1 for round ceil
                         return cmd_inx_split, mem_size_bit
                      
-            # each channal needs 2 NOP for write AMM and extra DMA sync nops for each chanal
+            # each channel needs 2 NOP for write AMM and extra DMA sync nops for each channel
             if (cand_cmd.end_of_oc == True):
                 extra_cmd = [WLOC_SINGLE_SHORT_SIZE]*cmd_num_AMM_sync
             else:
@@ -767,19 +1042,7 @@ class WLOCList (CommandList):
         return cmd_inx,mem_size_bit              
              
     def calc_mem_size_in_bit(self):
-
-        # size_in_bit = 0
-        # for i_cmd in self.cmd_list:
-        #     if       i_cmd.long_entry and     i_cmd.is_pair:
-        #         raise ValueError('No Pairing yet')
-        #     elif not i_cmd.long_entry and     i_cmd.is_pair:
-        #         raise ValueError('No Pairing yet')
-        #     elif     i_cmd.long_entry and not i_cmd.is_pair:
-        #         size_in_bit+=WLOC_SINGLE_LONG_SIZE
-        #     elif not i_cmd.long_entry and not i_cmd.is_pair:
-        #         size_in_bit+=WLOC_SINGLE_SHORT_SIZE  
-
-        # TODO - write the calculation without the call of create_cmd_mem 
+        # TODO - write the calculation without the call of create_cmd_mem
         self.create_cmd_mem(is_clal_only = True)             
         return  len(self.cmd_mem)
       
@@ -800,7 +1063,7 @@ class WLOCList (CommandList):
         else:
             self.cmd_list.insert(pos,entry)
         
-    def replace_posible_nop_with_zero_mul(self, pos):
+    def replace_possible_nop_with_zero_mul(self, pos):
         if self.cmd_list[pos].nop == False:
             # this is not nop
             return
@@ -808,7 +1071,7 @@ class WLOCList (CommandList):
             #the pos is out of list len
             return
         
-        self.cmd_list[pos] = WLOCEntry.get_zero_mul_entry()
+        self.cmd_list[pos].set_zero_mul_entry_remain_the_flags()
         i_pos = pos+1
         find_next_valid_cmd = False
         while (i_pos< len (self.cmd_list)) and (find_next_valid_cmd == False):
@@ -877,13 +1140,7 @@ class NonLinearFunctionList(CommandList):
 class CBC_IR:
     def __init__(self, num_grids):
         self.num_grids = num_grids
-        # this have to be removed
-        #self.wlocs = [] # This contains a list of wlocs lists as each conv have several lists of wlocs. Each list has num_grids WLOCList
-        #self.rqlocs = [] # This contains a list of rqlocs as each conv can have several RQLOCList
-        #self.rqparams = RQParamList()
         self.per_oc_non_empty_ic_groups = {}
-        #----------------------- alex new format    
-           
         self.alex_wlocs     = [] # create of array of WLOCList
         self.alex_rqParam   = [] # create of array of 2*split RQParamList. For example 
         self.RTable         = [] 
@@ -1004,93 +1261,3 @@ class WLOC_spliter:
     ########################################
 
     
-    
-
-
-
-
-# TODO: Change name to DSP State and add values to it
-# class Grid:
-#     def __init__(self):
-#         # TODO: 4 is hardcoded
-#         self.shiftEntry = FirstWLOCEntry()
-#         self.gridMacResults = []
-#         self.gridMacOCResults = [[0] * 14 for _ in range(14)]
-#         self.readShiftEntry = True
-#         self.runningOffset = 0
-#         self.offsetToAdvance = 0
-
-#         self.frozenChannel = False
-
-#         # for k=3 positioning, set to default
-#         self.left = 1
-#         self.right = 15
-#         self.up = 15
-#         self.down = 1
-
-
-# class Clock:
-#     def __init__(self):
-#         #self.AMMWriteMask = 0
-#         self.AMM0EvenCounter = 0
-#         self.AMM0OddCounter = 0
-#         self.AMM1EvenCounter = 0
-#         self.AMM1OddCounter = 0
-#         self.firstAddCommand = True
-#         self.currentClockRQMult = False
-#         self.nextClockRQMult = False
-
-
-# class ConvolutionBitsToParse:
-#     def __init__(self):
-#         self.WlocBits = []
-#         self.RQCMDEntriesBits = ""
-#         self.paramEntriesBits = ""
-
-
-# class SimulatorState:
-#     def __init__(self, AMMGRIDSIZEX, AMMGRIDSIZEY, AMMROWS, NUMBEROFAMMS, DDR):
-#         self.grids = [Grid() for i in range(4)]
-#         self.AMMMemory = [["00" * AMMGRIDSIZEX * AMMGRIDSIZEY] * AMMROWS for i in range(NUMBEROFAMMS)]
-#         #self.AMMWriteMask = []
-#         self.clockData = Clock()
-#         self.BitsToParse = ConvolutionBitsToParse()
-
-#         self.DDR = DDR
-
-#         # For debug
-#         self.destResults = []
-
-#         self.paramEntryList = []
-#         self.paramEntryListCounterMult = 0
-#         self.paramEntryListCounterWrite = 0
-#         self.resetCounter = 0
-
-#         self.ParseRQCommands = ""
-#         self.ParseRQParams = ""
-
-#         self.finalRQInAMM = []
-
-    # def writeToAMMMemory(self, writeTo0Even, writeTo0Odd, writeTo1Even, writeTo1Odd, EvenOffset, OddOffset, grid):
-    #     stringRows = ""
-    #     for row in grid:
-    #         tempRow = ""
-    #         for element in row:
-    #             tempRow += format(element, "02x")
-    #         stringRows += tempRow
-
-    #     if writeTo0Even:
-    #         self.AMMMemory[0][EvenOffset + self.clockData.AMM0EvenCounter] = stringRows
-    #         self.clockData.AMM0EvenCounter += 1
-
-    #     if writeTo0Odd:
-    #         self.AMMMemory[0][OddOffset + self.clockData.AMM0OddCounter] = stringRows
-    #         self.clockData.AMM0OddCounter += 1
-
-    #     if writeTo1Even:
-    #         self.AMMMemory[1][EvenOffset + self.clockData.AMM1EvenCounter] = stringRows
-    #         self.clockData.AMM1EvenCounter += 1
-    #     if writeTo1Odd:
-    #         self.AMMMemory[1][OddOffset + self.clockData.AMM1OddCounter] = stringRows
-    #         self.clockData.AMM1OddCounter += 1
-

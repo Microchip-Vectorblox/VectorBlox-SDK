@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1.1                                                 #
+# v3.2                                                   #
 #                                                        #
 ##########################################################
 
@@ -37,13 +37,6 @@ wget -q --no-check-certificate https://media.githubusercontent.com/media/onnx/mo
     if [ ! -f calibration_image_sample_data_20x128x128x3_float32.npy ]; then
         wget -q --no-check-certificate https://github.com/Microchip-Vectorblox/assets/raw/refs/heads/main/npy_files/calibration_image_sample_data_20x128x128x3_float32.npy
     fi
-fi
-
-if [ -f resnet101-v1-7.onnx ]; then
-   if ! echo "5603f2b5eeaa02640cb3e54861d60a24 resnet101-v1-7.onnx" | md5sum -c; then
-       echo -e "\n There is an issue with the onnx_resnet101-v1 model file as the expected checksum does not match.\n The model source can be found at: https://github.com/onnx/models/tree/main/validated/vision/classification/resnet.\n If the model information has changed, please update this script and re-run the tutorial."
-       exit 1
-   fi
 fi
 
 

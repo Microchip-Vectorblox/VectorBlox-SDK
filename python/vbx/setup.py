@@ -25,6 +25,7 @@ setuptools.setup(
                    'tflite_transform=vbx.generate.transform_tflite:main',
                    'tflite_split=vbx.generate.split_tflite:main',
                    'tflite_json=vbx.generate.transform_tflite:convert',
+                   'tflite_clean=vbx.generate.transform_tflite:clean',
                    'generate_vbx3_model=vbx.generate.generate_vbx3_model:main',
                    'generate_npy=vbx.generate.generate_npy:main']},
     packages=setuptools.find_packages(),

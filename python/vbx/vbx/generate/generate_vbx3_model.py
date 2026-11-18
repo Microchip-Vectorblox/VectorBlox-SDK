@@ -47,7 +47,7 @@ def get_io_offset_and_size(path_to_vnnx):
 def get_header_section(vnnx_path, vnnx_num_bytes, nx_num_bytes):
     # First get the offset and size for each input and output
     inputs, outputs = get_io_offset_and_size(vnnx_path)
-
+    
     # Header size is 5 (size of 3 sections, num inputs, num outputs) + 2 (size/offset) per
     # input and output
     num_ints = 5 + 2*len(inputs) + 2*len(outputs)
@@ -85,23 +85,21 @@ def main():
 
     # Get the size of each file
     vnnx_num_bytes = get_file_size(args.vnnx)
-    vnnx_num_bytes_padded = math.ceil(vnnx_num_bytes/16) * 16
     nx_num_bytes = get_file_size(args.nx_bin)
 
     # Create a new header section
-    header = get_header_section(args.vnnx, vnnx_num_bytes_padded, nx_num_bytes)
+    header = get_header_section(args.nx_bin, vnnx_num_bytes, nx_num_bytes)
 
     # Open the files and read their content
     with open(args.vnnx, 'rb') as f:
         vnnx_data = f.read()
-    padded_vnnx_data = vnnx_data.ljust(vnnx_num_bytes_padded, b'\0')
     with open(args.nx_bin, 'rb') as f:
         nx_data = f.read()
 
     # Create the new combined file
     with open(args.ucomp, 'wb') as out_file:
         out_file.write(header)
-        out_file.write(padded_vnnx_data)
+        out_file.write(vnnx_data)
         out_file.write(nx_data)
 
     print(f"Model file '{args.ucomp}' has been created.")

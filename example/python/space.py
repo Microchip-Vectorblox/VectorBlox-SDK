@@ -13,7 +13,7 @@ from vbx.postprocess.linemod import *
 import vbx.postprocess.yolo as yolo
 
 
-def create_anchors(image_size=(768, 512), scales=[2**0, 2**(1.0/3.0), 2** (2.0/3.0)], ratios=[[1.0,1.0],[1.4,0.7],[0.7,1.4]]):
+def create_anchors(image_size=(768, 512), pyramid_levels=[3,4,5,6,7], scales=[2**0, 2**(1.0/3.0), 2** (2.0/3.0)], ratios=[[1.0,1.0],[1.4,0.7],[0.7,1.4]]):
     """
     adapted and modified from https://github.com/google/automl/blob/master/efficientdet/anchors.py by Zylo117
 
@@ -27,7 +27,7 @@ def create_anchors(image_size=(768, 512), scales=[2**0, 2**(1.0/3.0), 2** (2.0/3
     # Pyramid levels from EfficientDet to use
     # Even if segmentation head exists that uses P2, ignore it
     # (otherwise too many anchor boxes)
-    pyramid_levels = [3, 4, 5, 6, 7]
+    # for yolo-spn use pyramid_levels = [3, 4, 5]
 
     strides = [2 ** x for x in pyramid_levels]
     if scales is None: scales = np.array([2 ** 0, 2 ** (1.0 / 3.0), 2 ** (2.0 / 3.0)], dtype=np.float32)
@@ -100,6 +100,9 @@ def delta_xy_tz_to_translation(translation_raw, image_size, input_size, anchors,
     # (cx, cy) are in terms of input image size, so convert to original size
     cx = cx / input_size[0] * image_size[0]
     cy = cy / input_size[1] * image_size[1]
+
+    # scale z to original model size
+    tz *= (1920/768)/(image_size[0]/input_size[0])  # this should be the same scale, whether done by width or height
 
     tx = (cx - cameraMatrix[0,2]) * tz / cameraMatrix[0,0]
     ty = (cy - cameraMatrix[1,2]) * tz / cameraMatrix[1,1]
@@ -225,8 +228,6 @@ if __name__ == "__main__":
     parser.add_argument('--output', '-o', default="output.png", help='output image to write labels to')
     args = parser.parse_args()
 
-    anchors, strides = create_anchors()
-
     # from spnv2/core/utils/models/tangoPoints.mat
     cameraMatrix = np.asarray([[2988.5795163815555,0,960],[0,2988.3401159176124,600],[0,0,1]])
     distCoeffs = np.asarray([ -0.22383016606510672, 0.51409797089106379, -0.00066499611998340662, -0.00021404771667484594, -0.13124227429077406])
@@ -235,57 +236,51 @@ if __name__ == "__main__":
                                  [0.,-0.385, 0.385, 0.385, -0.385, -0.264, 0.304, 0.304, -0.264, 0.4877, 0.4877, -0.579],
                                  [0.,0.3215, 0.3215, 0.3215, 0.3215, 0., 0., 0., 0., 0.2535, 0.2591, 0.2515]], dtype=np.float32)
 
-
     img = cv2.imread(args.image)
+    image_height, image_width = img.shape[0:2]
+    cameraMatrix[0,2] = image_width/2.0     # original size is 1920x1200
+    cameraMatrix[1,2] = image_height/2.0    # if smaller, assume it has been cropped
     arr, input_height, input_width, channels_last = mr.preprocess_img_to_input_array(img, args.model, args.bgr, args.scale, args.mean)
     outputs, output_shapes = mr.model_run(arr, args.model)
 
-
     bbox_pr = None
-    if len(outputs) == 9: #yolo backbone
+    if len(outputs) == 15: # yolo-spn with split outputs
+        anchors, strides = create_anchors(image_size=(input_width,input_height), pyramid_levels=[3,4,5])
         if channels_last: #if model is NHWC outputs need to be converted to
             outputs=mr.transpose_outputs(outputs)
 
-        scores, yolo_outputs, pose_outputs = [],[],[]
-        max_idx, max_score, max_set, max_y, max_x = -1, -999, -1, -1, -1
+        bbox = [outputs[i] for i in [0,5,10]]
+        det = [outputs[i] for i in [1,6,11]]
+        pose_xy = [outputs[i] for i in [2,7,12]]
+        pose_z = [outputs[i] for i in [3,8,13]]
+        pose_rot = [outputs[i] for i in [4,9,14]]
 
-        for o,output in enumerate(outputs):
-            if output.shape[1] in [1,64]:
-                yolo_outputs.append(output)
-            else:
-                pose_outputs.append(output)
-            if output.shape[1] in [1]:
-                scores.append(output)
+        det_max = [d.max() for d in det]
+        max_score = max(det_max)
+        if max_score > args.threshold:
+            stride_ind = np.argmax(det_max)
+            stride = [32,16,8][stride_ind]
+            max_ind = det[stride_ind].argmax()
+            N = det[stride_ind].shape[-1]
+            max_y, max_x = max_ind // N, max_ind % N
 
-        scores = sorted(scores, key=lambda x: -np.prod(x.shape))
-        pose_outputs = sorted(pose_outputs, key=lambda x: -np.prod(x.shape))
+            anchor_x, anchor_y = max_x*stride + stride//2, max_y*stride + stride//2
+            raw_pos = np.concatenate((pose_xy[stride_ind][0,:,max_y,max_x], pose_z[stride_ind][0,:,max_y,max_x]))
+            raw_rot = pose_rot[stride_ind][0,:,max_y,max_x]
+            t_pr = delta_xy_tz_to_translation(raw_pos, (image_width,image_height), (input_width,input_height), [anchor_x, anchor_y, anchor_x, anchor_y], stride, cameraMatrix)
+            R_pr = rot_6d_to_matrix(raw_rot)
 
-        for o,output in enumerate(scores):
-            score = np.max(output)
-            if np.max(output) > max_score:
-                max_score, max_idx, max_set = np.max(output), np.argmax(output), o
-                max_y, max_x = max_idx // output.shape[-1], max_idx % output.shape[-1]
-
-        max_pose = pose_outputs[max_set][0,:,max_y, max_x]
-        stride = [8,16,32][max_set]
-        # ax, ay = np.arange(input_width // stride), np.arange(input_height // stride)
-        # anchor_x, anchor_y = ax[max_x]*stride + stride//2, ay[max_y]*stride + stride//2
-        anchor_x, anchor_y = max_x*stride + stride//2, max_y*stride + stride//2
-
-        t_pr = delta_xy_tz_to_translation(max_pose[:3], (Nu,Nv), (768,512), [anchor_x, anchor_y, anchor_x, anchor_y], stride, cameraMatrix)
-        R_pr = rot_6d_to_matrix(max_pose[3:])
-
-        post = yolo.ultralytics_post_process(yolo_outputs, input_height, input_width, args.threshold, num_classes=1)
-
+        post = yolo.ultralytics_post_process(det+bbox, input_height, input_width, args.threshold, num_classes=1)
         if len(post):
             [x,y,w,h,score] = sorted(post, key=lambda x: -x[-1])[0]
 
-            left = (x - w / 2) * input_width
-            top = (y - h / 2) * input_height
-            width = (w * input_width)
-            height = (h * input_height)
+            left = (x - w / 2) * image_width
+            top = (y - h / 2) * image_height
+            width = (w * image_width)
+            height = (h * image_height)
             bbox_pr = [left, top, left+width, top+height]
     else:
+        anchors, strides = create_anchors(image_size=(input_width,input_height))
         if len(outputs) == 4: # concatenated efficientnet backbone
             classification, translation, bbox_prediction, rotation_raw = sorted(outputs, key=lambda x: np.prod(x.shape))
         else: # split efficientnet backbone
@@ -330,16 +325,16 @@ if __name__ == "__main__":
     if bbox_pr is None:
         print('No spacecraft detected')
     else:
-        output_img = cv2.resize(cv2.imread(args.image), (768,512))
-
         # Draw bounding box
         [xmin, ymin, xmax, ymax] = bbox_pr
         p1 = (int(xmin), int(ymin))
         p2 = (int(xmax), int(ymax))
-        cv2.rectangle(output_img, p1, p2, dataset.coco91_colors[0], 1)
+        cv2.rectangle(img, p1, p2, dataset.coco91_colors[0], 1)
 
         # Project 3D keypoints to 2D
         keypoints = project_keypoints(R_pr, t_pr, cameraMatrix, distCoeffs, tangoKeypoints)
+        
         # Draw the projected pose wireframe.
-        draw_pose(output_img, keypoints, scale_x=((768 / 1920)), scale_y=((512 / 1200)), thickness=2)
-        cv2.imwrite('output.png', output_img)
+        draw_pose(img, keypoints, thickness=2)
+        cv2.imwrite('output.png', img)
+        print('Saved output.png')

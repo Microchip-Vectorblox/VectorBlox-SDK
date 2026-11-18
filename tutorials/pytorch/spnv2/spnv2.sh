@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1.1                                                 #
+# v3.2                                                   #
 #                                                        #
 ##########################################################
 
@@ -45,10 +45,10 @@ if [ ! -f spnv2.tflite ]; then
 if [ ! -f spnv2.onnx ]; then
     git clone https://github.com/tpark94/spnv2
     cd spnv2
-    python3.8 -m venv venv
+    uv venv venv --python 3.8
     source venv/bin/activate
-    pip install --upgrade pip
-    pip install albumentations==1.4.18 matplotlib==3.4.2 pandas==1.3.1 plyfile==0.7.4 PyYAML==6.0.2 scipy==1.10.0 torch==1.13.1 torchinfo==1.8.0 torchvision==0.14.1 tqdm==4.67.1 yacs==0.1.8 onnx==1.17.0
+    uv pip install --upgrade pip
+    uv pip install albumentations==1.4.18 matplotlib==3.4.2 pandas==1.3.1 plyfile==0.7.4 PyYAML==6.0.2 scipy==1.10.0 torch==1.13.1 torchinfo==1.8.0 torchvision==0.14.1 tqdm==4.67.1 yacs==0.1.8 onnx==1.17.0
     cp ../spnv2.export.py .
     python spnv2.export.py
     deactivate

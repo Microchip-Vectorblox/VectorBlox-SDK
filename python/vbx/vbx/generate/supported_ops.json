@@ -34,6 +34,7 @@
     "allocation": ["default"]
   },
   "ARG_MAX": {
+    "control_inputs": [1],
     "type": [
       "INT8",
       "UINT8"
@@ -50,6 +51,7 @@
     "allocation": ["full map"]
   },
   "ARG_MIN": {
+    "control_inputs": [1],
     "type": [
       "INT8",
       "UINT8"
@@ -89,9 +91,10 @@
       "INT8",
       "UINT8"
     ],
-    "vectorized": [0]
+    "vectorized": [1]
   },
   "BATCH_TO_SPACE_ND": {
+    "control_inputs": [1, 2],
     "type": [
       "INT8",
       "UINT8"
@@ -193,6 +196,7 @@
       ]
   },
   "DILATE": {
+    "control_inputs": [1],
     "type": [
       "INT8",
       "UINT8"
@@ -259,6 +263,7 @@
       ]
   },
   "EXPAND_DIMS": {
+    "control_inputs": [1],
     "type": [
       "INT8",
       "UINT8"
@@ -297,6 +302,7 @@
       ]
   },
   "GATHER": {
+    "control_inputs": [1],
     "type": [
       "INT8",
       "UINT8",
@@ -505,6 +511,7 @@
       ]
   },
   "MEAN": {
+    "control_inputs": [1],
     "type": [
       "INT8",
       "UINT8"
@@ -533,6 +540,7 @@
       ]
   },
   "MIRROR_PAD": {
+    "control_inputs": [1],
     "type": [
       "INT8",
       "UINT8"
@@ -612,6 +620,7 @@
       ]
   },
   "PAD": {
+    "control_inputs": [1],
     "type": [
       "INT8",
       "UINT8"
@@ -625,6 +634,7 @@
       ]
   },
   "PADV2": {
+    "control_inputs": [1, 2],
     "type": [
       "INT8",
       "UINT8"
@@ -677,6 +687,7 @@
       ]
   },
   "REDUCE_MAX": {
+    "control_inputs": [1],
     "type": [
       "INT8",
       "UINT8"
@@ -695,6 +706,7 @@
       ]
   },
   "REDUCE_MIN": {
+    "control_inputs": [1],
     "type": [
       "INT8",
       "UINT8"
@@ -713,6 +725,7 @@
       ]
   },
   "REDUCE_PROD": {
+    "control_inputs": [1],
     "type": [
       "INT8",
       "UINT8"
@@ -778,6 +791,7 @@
       ]
   },
   "RESHAPE": {
+    "control_inputs": [1],
     "type": [
       "INT8",
       "UINT8",
@@ -791,6 +805,7 @@
       ]
   },
   "RESIZE_BILINEAR": {
+    "control_inputs": [1],
     "type": [
       "INT8",
       "UINT8"
@@ -803,6 +818,7 @@
       ]
   },
   "RESIZE_NEAREST_NEIGHBOR": {
+    "control_inputs": [1],
     "type": [
       "INT8",
       "UINT8"
@@ -841,6 +857,7 @@
       ]
   },
   "SLICE": {
+    "control_inputs": [1, 2],
     "type": [
       "INT8",
       "UINT8"
@@ -872,6 +889,7 @@
       ]
   },
   "SPACE_TO_BATCH_ND": {
+    "control_inputs": [1, 2],
     "type": [
       "INT8",
       "UINT8"
@@ -886,6 +904,7 @@
     "vectorized": [0]
   },
   "SPLIT": {
+    "control_inputs": [0],
     "type": [
       "INT8",
       "UINT8",
@@ -904,6 +923,7 @@
       ]
   },
   "SPLIT_V": {
+    "control_inputs": [1, 2],
     "type": [
       "INT8",
       "UINT8"
@@ -952,6 +972,7 @@
       ]
   },
   "STRIDED_SLICE": {
+    "control_inputs": [1, 2, 3],
     "type": [
       "INT8",
       "UINT8"
@@ -975,6 +996,7 @@
       ]
   },
   "SUM": {
+    "control_inputs": [1],
     "type": [
       "INT8",
       "UINT8"
@@ -1006,6 +1028,7 @@
       ]
   },
   "TILE": {
+    "control_inputs": [1],
     "type": [
       "INT8",
       "UINT8"
@@ -1019,6 +1042,7 @@
       ]
   },
   "TRANSPOSE": {
+    "control_inputs": [1],
     "type": [
       "INT8",
       "UINT8"
@@ -1031,6 +1055,7 @@
       ]
   },
   "TRANSPOSE_CONV": {
+    "control_inputs": [0],
     "type": [
       "INT8",
       "UINT8"

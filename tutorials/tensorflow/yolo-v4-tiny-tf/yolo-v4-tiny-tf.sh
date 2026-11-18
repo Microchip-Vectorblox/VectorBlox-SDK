@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1.1                                                 #
+# v3.2                                                   #
 #                                                        #
 ##########################################################
 
@@ -41,13 +41,6 @@ if [ ! -f yolo-v4-tiny-tf.tflite ]; then
 fi
 
 
-
-if [ -f yolo-v4-tiny.h5 ]; then
-   if ! echo "8911bf808aed305d6854c4ea48fcc731 public/yolo-v4-tiny-tf/yolov4-tiny.weights" | md5sum -c; then
-       echo -e "\n There is an issue with the yolo-v4-tiny-tf model file as the expected checksum does not match.\n The model source can be found at: https://github.com/openvinotoolkit/open_model_zoo/tree/2021.4.2/models/public/yolo-v4-tiny-tf/.\n If the model information has changed, please update this script and re-run the tutorial."
-       exit 1
-   fi
-fi
 
 
 # tflite_quantize is an internal tool designed to quantize a saved_model directory using the npy array

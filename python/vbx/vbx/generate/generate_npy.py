@@ -12,7 +12,7 @@ If user wants to calibrate with their own data, they can do so by using this scr
 '''
 
 # Example usage:
-# python generate_npy.py [path_to_data_dir] --count 20 --shape 227 227 --output_name imagenetv2_20x227x227x3.npy
+# python generate_npy.py [path_to_data_dir] --count 20 --shape 227 227 --output-name imagenetv2_20x227x227x3.npy
 
 random_seed = 342
 
