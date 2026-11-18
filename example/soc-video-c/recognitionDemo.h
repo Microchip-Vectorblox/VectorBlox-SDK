@@ -20,6 +20,7 @@ extern "C" {
 #endif
 
 typedef unsigned char uchar;
+
 void append_name(char* name_entered);
 bool not_duplicate(char* id);
 void print_list();

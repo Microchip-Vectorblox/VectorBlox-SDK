@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1.1                                                 #
+# v3.2                                                   #
 #                                                        #
 ##########################################################
 
@@ -37,13 +37,6 @@ python $VBX_SDK/tutorials/torchvision_to_onnx.py squeezenet1_0 -i 227
     if [ ! -f calibration_image_sample_data_20x128x128x3_float32.npy ]; then
         wget -q --no-check-certificate https://github.com/Microchip-Vectorblox/assets/raw/refs/heads/main/npy_files/calibration_image_sample_data_20x128x128x3_float32.npy
     fi
-fi
-
-if [ -f squeezenet1_0 ]; then
-   if ! echo "0ad906b637e800c3adb9abc4602d6261 squeezenet1_0" | md5sum -c; then
-       echo -e "\n There is an issue with the torchvision_squeezenet1_0 model file as the expected checksum does not match.\n The model source can be found at: https://pytorch.org/vision/0.14/models/generated/torchvision.models.squeezenet1_0.html#torchvision.models.squeezenet1_0.\n If the model information has changed, please update this script and re-run the tutorial."
-       exit 1
-   fi
 fi
 
 

@@ -153,7 +153,7 @@ class Parser:
                                                         w_scale=(orig_im_w/net_w)))
 
 
-def nms_post_process(output, confidence_thres=0.5, iou_thres=0.5, input_width=416, input_height=416, do_nms=True, num_classes=80, prescaled=False):
+def nms_post_process(output, confidence_thres=0.5, iou_thres=0.5, input_width=416, input_height=416, do_nms=True, num_classes=80, prescaled=False, xyxy=False):
     # Transpose and squeeze the output to match the expected shape
     outputs = np.squeeze(output)
     # if (outputs.shape[0] < outputs.shape[1]): # should be #box, box (8400,84)
@@ -186,8 +186,16 @@ def nms_post_process(output, confidence_thres=0.5, iou_thres=0.5, input_width=41
             # Get the class ID with the highest score
             class_id = np.argmax(classes_scores)
 
+
             # Extract the bounding box coordinates from the current row
-            x, y, w, h = outputs[i][0], outputs[i][1], outputs[i][2], outputs[i][3]
+            if xyxy:
+                x1, y1, x2, y2 = outputs[i][0], outputs[i][1], outputs[i][2], outputs[i][3]
+                x = (x2+x1)/2
+                y = (y2+y1)/2
+                w = x2-x1
+                h = y2-y1
+            else:
+                x, y, w, h = outputs[i][0], outputs[i][1], outputs[i][2], outputs[i][3]
 
             # Calculate the scaled coordinates of the bounding box
             left = int((x - w / 2) * x_factor)
@@ -250,7 +258,19 @@ def ultralytics_process_points(arr, x, y, image_height=640, image_width=640):
 
 
 def ultralytics_process_box(arr, x, y, ang=None):
-    _,bw,bh = arr.shape
+    d,bw,bh = arr.shape
+    scale = [bh,bw,bh,bw]
+
+    cx = 1/bh/2 + y/bh
+    cy = 1/bw/2 + x/bw
+
+    if d == 4:
+        v = arr[:,x,y] / scale
+        x1 = cx - v[0]
+        y1 = cy - v[1]
+        x2 = cx + v[2]
+        y2 = cy + v[3]
+        return [x1,y1,x2,y2]
 
     t = arr[:,x,y].reshape(4,16)
     v = np.zeros(4)
@@ -261,10 +281,7 @@ def ultralytics_process_box(arr, x, y, ang=None):
     v[2] = np.sum(softmax(t[2]) * np.asarray(range(16)))
     v[3] = np.sum(softmax(t[3]) * np.asarray(range(16)))
 
-    v /= [bh,bw,bh,bw]
-
-    cx = 1/bh/2 + y/bh
-    cy = 1/bw/2 + x/bw
+    v /= scale
 
     x = (v[2] - v[0]) / 2
     y = (v[3] - v[1]) / 2
@@ -303,6 +320,11 @@ def ultralytics_post_process(conv_outputs, input_height, input_width, threshold=
             else:
                 classes = [output] + classes
         elif output.shape[0] == 4*16:
+            if len(boxes) == 0 or output.shape[1]*output.shape[2] < boxes[-1].shape[1]*boxes[-1].shape[2]:
+                boxes += [output]
+            else:
+                boxes = [output] + boxes
+        elif output.shape[0] == 4:
             if len(boxes) == 0 or output.shape[1]*output.shape[2] < boxes[-1].shape[1]*boxes[-1].shape[2]:
                 boxes += [output]
             else:

@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1.1                                                 #
+# v3.2                                                   #
 #                                                        #
 ##########################################################
 
@@ -27,13 +27,6 @@ if [ ! -f efficientnet_lite2.tflite ]; then
     wget -q --no-check-certificate https://storage.googleapis.com/mediapipe-models/image_classifier/efficientnet_lite2/int8/latest/efficientnet_lite2.tflite
 fi
 
-
-if [ -f efficientnet_lite2.tflite ]; then
-   if ! echo "10f29d1723296eec4aa36386175d0f58 efficientnet_lite2.tflite" | md5sum -c; then
-       echo -e "\n There is an issue with the efficientnet_lite2 model file as the expected checksum does not match.\n The model source can be found at: https://developers.google.com/mediapipe/solutions/vision/image_classifier#efficientnet-lite0_model_recommended.\n If the model information has changed, please update this script and re-run the tutorial."
-       exit 1
-   fi
-fi
 
 
 # tflite_preprocess is an internal tool used to add a preprocess layer to the start of the model

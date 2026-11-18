@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1.1                                                 #
+# v3.2                                                   #
 #                                                        #
 ##########################################################
 
@@ -41,13 +41,6 @@ if [ ! -f mobilenet_v2_140_224.tflite ]; then
 fi
 
 
-
-if [ -f mobilenet_v2_140_224.tar.gz ]; then
-   if ! echo "e5f59e37b10937434fa86661930431e9 mobilenet_v2_140_224.tar.gz" | md5sum -c; then
-       echo -e "\n There is an issue with the mobilenet_v2_140_224 model file as the expected checksum does not match.\n The model source can be found at: https://tfhub.dev/google/imagenet/mobilenet_v2_140_224/classification/5.\n If the model information has changed, please update this script and re-run the tutorial."
-       exit 1
-   fi
-fi
 
 
 # tflite_quantize is an internal tool designed to quantize a saved_model directory using the npy array

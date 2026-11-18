@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1.1                                                 #
+# v3.2                                                   #
 #                                                        #
 ##########################################################
 
@@ -37,13 +37,6 @@ if [ ! -f mobilenet-v2-1.4-224.tflite ]; then
 omz_downloader --name mobilenet-v2-1.4-224
 fi
 
-
-if [ -f public/mobilenet-v2-1.4-224/mobilenet_v2_1.4_224_frozen.pb ]; then
-   if ! echo "3e4d260efcf1d32bd9b37e7a48d38802 public/mobilenet-v2-1.4-224/mobilenet_v2_1.4_224_frozen.pb" | md5sum -c; then
-       echo -e "\n There is an issue with the mobilenet-v2-1.4-224 model file as the expected checksum does not match.\n The model source can be found at: https://github.com/openvinotoolkit/open_model_zoo/tree/2021.4.2/models/public/mobilenet-v2-1.4-224/.\n If the model information has changed, please update this script and re-run the tutorial."
-       exit 1
-   fi
-fi
 
 if [ ! -f mobilenet-v2-1.4-224.tflite ]; then
    echo "Running Model Optimizer..."

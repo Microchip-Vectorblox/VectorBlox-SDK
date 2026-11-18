@@ -56,6 +56,8 @@ static const int TSNP_OUT_STEP_SIZE_OFFSET = 535;
 //static const int TSNP_IP_TRACE_STATUS = 547;
 static const int MXP_BASE_LSB_OFFSET = 548;
 static const int MXP_BASE_MSB_OFFSET = 549;
+static const int TNS_BASE_LSB_OFFSET = 550;
+static const int TNS_BASE_MSB_OFFSET = 551;
 
 static const int CTRL_REG_SOFT_RESET = 0x00000001;
 static const int CTRL_REG_START = 0x00000002;
@@ -251,6 +253,7 @@ vbx_cnn_t *vbx_cnn_init(void *ctrl_reg_addr) {
 	write_register(the_cnn->ctrl_reg, TSNP_IN_BASE_MSB_OFFSET, 0);
 	write_register(the_cnn->ctrl_reg, TSNP_OUT_BASE_MSB_OFFSET, 0);
 	write_register(the_cnn->ctrl_reg, MXP_BASE_MSB_OFFSET, 0);
+	write_register(the_cnn->ctrl_reg, TNS_BASE_MSB_OFFSET, 0);
   }
   the_cnn->initialized = 1;
   the_cnn->output_valid = 0;
@@ -365,6 +368,7 @@ int vbx_tsnp_model_start(vbx_cnn_t *vbx_cnn, model_t *model, model_t *tsnp_model
 		write_register(vbx_cnn->ctrl_reg, TSNP_IN_BASE_LSB_OFFSET, (uint32_t)(uintptr_t)io_buffers[0] - input_offset);
 		write_register(vbx_cnn->ctrl_reg, TSNP_OUT_BASE_LSB_OFFSET, (uint32_t)(uintptr_t)virt_to_phys(vbx_cnn, model));
 		write_register(vbx_cnn->ctrl_reg, MXP_BASE_LSB_OFFSET, (uint32_t)(uintptr_t)virt_to_phys(vbx_cnn, model));
+		write_register(vbx_cnn->ctrl_reg, TNS_BASE_LSB_OFFSET, (uint32_t)(uintptr_t)virt_to_phys(vbx_cnn, tsnp_model));
 		write_register(vbx_cnn->ctrl_reg, TSNP_TABLE_BASE_LSB_OFFSET, (uint32_t)(uintptr_t)virt_to_phys(vbx_cnn, tsnp_model));
 		write_register(vbx_cnn->ctrl_reg, TSNP_IN_STEP_SIZE_OFFSET, input_length);
 		write_register(vbx_cnn->ctrl_reg, TSNP_OUT_STEP_SIZE_OFFSET, output_length);

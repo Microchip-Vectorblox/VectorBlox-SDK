@@ -7,9 +7,9 @@ import faceDemoClass
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--modelDet', default='../../../tutorials/onnx/scrfd_500m_bnkps/scrfd_500m_bnkps.xml')
-    parser.add_argument('--modelRec', default='../../../tutorials/mxnet/mobilefacenet-arcface/model-0000.xml')
-    parser.add_argument('--modelAtr', default='../../../tutorials/onnx/genderage/genderage.xml')
+    parser.add_argument('--modelDet', default='../../../tutorials/onnx/face_detection_yunet_2023mar/face_detection_yunet_2023mar_V1000_ncomp.vnnx')
+    parser.add_argument('--modelRec', default='../../../tutorials/onnx/face_recognition_sface_2021dec/face_recognition_sface_2021dec_V1000_ncomp.vnnx')
+    parser.add_argument('--modelAtr', default=None)
     parser.add_argument('--imageDir', default='dbImages')
     parser.add_argument('--debugDir', default='dbDebug')
     parser.add_argument('--db', default='faceDb')

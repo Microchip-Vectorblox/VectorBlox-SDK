@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1.1                                                 #
+# v3.2                                                   #
 #                                                        #
 ##########################################################
 
@@ -26,18 +26,19 @@ source $VBX_SDK/vbx_env/bin/activate
 #  - Required Inputs: source dataset, output name, size
 #  - Output: npy array
 echo "Checking for Numpy calibration data file..."
-if [ ! -f $VBX_SDK/tutorials/spin_mono_norm_20x512x768x3.npy ]; then
-    wget -q --no-check-certificate https://github.com/Microchip-Vectorblox/assets/releases/download/assets/spin_mono_norm_20x512x768x3.npy -O $VBX_SDK/tutorials/spin_mono_norm_20x512x768x3.npy
+if [ ! -f $VBX_SDK/tutorials/spin_rgb_60x512x768x3.npy ]; then
+    wget -q --no-check-certificate https://github.com/Microchip-Vectorblox/assets/releases/download/assets/spin_rgb_60x512x768x3.npy -O $VBX_SDK/tutorials/spin_rgb_60x512x768x3.npy
 fi
 
 echo "Checking for yolov9s-spn files..."
 
-# model details @ https://github.com/tpark94/spnv2
-if [ ! -f yolov9s-spn.tflite ]; then
-   if [ ! -f yolov9s-spn.onnx ]; then
-       wget -q --no-check-certificate  https://github.com/Microchip-Vectorblox/assets/releases/download/assets/yolov9s-spn.onnx
-   fi
-
+# model details @ 
+if [ ! -f yolov9s-spn_spin126_768x512.onnx ]; then
+    wget -q --no-check-certificate  https://github.com/Microchip-Vectorblox/assets/releases/download/assets/yolov9s-spn_spin126_768x512.onnx
+fi
+if [ ! -f yolov9s-spn_spin126_768x512.13.onnx ]; then
+   python $VBX_SDK/tutorials/onnx_opset.py yolov9s-spn_spin126_768x512.onnx
+fi
 if [ ! -f yolov9s-spn.cut.onnx ]; then
 python - <<EOF
 import onnx
@@ -45,13 +46,14 @@ model_inputs = ['x']
 model_outputs = ['conv2d_211', 'conv2d_214', 'conv2d_217',
 'conv2d_220', 'conv2d_223', 'conv2d_226',
 'conv2d_229', 'conv2d_232', 'conv2d_235']
-onnx.utils.extract_model('yolov9s-spn.onnx', 'yolov9s-spn.cut.onnx', model_inputs, model_outputs)
+onnx.utils.extract_model('yolov9s-spn_spin126_768x512.13.onnx', 'yolov9s-spn.cut.onnx', model_inputs, model_outputs)
 EOF
 fi
-
+if [ ! -f yolov9s-spn.cut.prep.onnx ]; then
+   python $VBX_SDK/tutorials/yolo-spn_prep_onnx.py yolov9s-spn.cut.onnx
+fi
 if [ ! -f yolov9s-spn.opt.onnx ]; then
-       onnxsim yolov9s-spn.cut.onnx yolov9s-spn.opt.onnx
-   fi
+   onnxsim yolov9s-spn.cut.prep.onnx yolov9s-spn.opt.onnx
 fi
     if [ ! -f calibration_image_sample_data_20x128x128x3_float32.npy ]; then
         wget -q --no-check-certificate https://github.com/Microchip-Vectorblox/assets/raw/refs/heads/main/npy_files/calibration_image_sample_data_20x128x128x3_float32.npy
@@ -66,7 +68,7 @@ fi
 #  - Output: int8 tflite model
 if [ ! -f yolov9s-spn.tflite ]; then
    echo "Running ONNX2TF..."
-   onnx2tf -cind x $VBX_SDK/tutorials/spin_mono_norm_20x512x768x3.npy [[[[0.,0.,0.]]]] [[[[1.,1.,1.]]]] \
+   onnx2tf -cind x $VBX_SDK/tutorials/spin_rgb_60x512x768x3.npy [[[[0.,0.,0.]]]] [[[[1.,1.,1.]]]] \
 -dgc \
 -ois x:1,3,512,768 \
 -i yolov9s-spn.opt.onnx \
@@ -98,9 +100,9 @@ fi
 #   *Currently C simulation is not supported for unstructured compression
 if [ -f yolov9s-spn_V1000_ncomp.vnnx ]; then
     echo "Running Simulation..."
-    python $VBX_SDK/example/python/space.py yolov9s-spn_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/spin.mono.img000019.jpg 
+    python $VBX_SDK/example/python/space.py yolov9s-spn_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/spin_rgb_1920x1200.png 
     echo "C Simulation Command:"
-    echo '$VBX_SDK/example/sim-c/sim-run-model yolov9s-spn_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/spin.mono.img000019.jpg SPACE'
+    echo '$VBX_SDK/example/sim-c/sim-run-model yolov9s-spn_V1000_ncomp.vnnx $VBX_SDK/tutorials/test_images/spin_rgb_1920x1200.png SPACE'
 fi
 
 deactivate

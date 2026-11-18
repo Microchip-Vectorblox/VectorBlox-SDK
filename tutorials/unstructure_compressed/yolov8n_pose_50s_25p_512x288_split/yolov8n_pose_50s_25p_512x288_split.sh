@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1.1                                                 #
+# v3.2                                                   #
 #                                                        #
 ##########################################################
 
@@ -31,13 +31,22 @@ fi
 
 
 
+# tflite_preprocess is an internal tool used to add a preprocess layer to the start of the model
+#  Purpose: adds a preprocess layer to the start of the model (if none, will just preprocess by adding a uint8->int8 layer)
+#  - Required Inputs: tflite source model, additional arguments 
+#  - Outputs: preprocessed tflite model
+if [ -f yolov8n_pose_50s_25p_512x288_split.tflite ]; then
+   tflite_preprocess yolov8n_pose_50s_25p_512x288_split.tflite  --scale 255
+fi
+
+
 # vnnx_compile is an internal tool that converts an int8 tflite file to a binary file that can be run on the SDK and VectorBlox FPGA
 #  Purpose: converts int8 tflite to binary
 #  - Required Inputs: int8 tflite, size configuration, compression configuration, output file name
 #  - Outputs: binary object files(.hex and binary file)
-if [ -f yolov8n_pose_50s_25p_512x288_split.tflite ]; then
+if [ -f yolov8n_pose_50s_25p_512x288_split.pre.tflite ]; then
     echo "Generating VNNX for V1000 ucomp configuration..."
-    vnnx_compile -s V1000 -c ucomp -t yolov8n_pose_50s_25p_512x288_split.tflite --uint8 -o yolov8n_pose_50s_25p_512x288_split.ucomp
+    vnnx_compile -s V1000 -c ucomp -t yolov8n_pose_50s_25p_512x288_split.pre.tflite  -o yolov8n_pose_50s_25p_512x288_split.ucomp
 fi
 
 

@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1.1                                                 #
+# v3.2                                                   #
 #                                                        #
 ##########################################################
 
@@ -53,13 +53,6 @@ if [ ! -f yolov8n-pose_512x288_split.tflite ]; then
 fi
 
 
-
-if [ -f yolov8n-pose.pt ]; then
-   if ! echo "fce9c3a495cc42f597c8191798b1445b yolov8n-pose.pt" | md5sum -c; then
-       echo -e "\n There is an issue with the yolov8n-pose_512x288_split model file as the expected checksum does not match.\n The model source can be found at: https://github.com/ultralytics/ultralytics/.\n If the model information has changed, please update this script and re-run the tutorial."
-       exit 1
-   fi
-fi
 
 
 # tflite_preprocess is an internal tool used to add a preprocess layer to the start of the model

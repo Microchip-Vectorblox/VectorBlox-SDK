@@ -6,9 +6,9 @@ import faceTracker
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--modelDet', default='../../../tutorials/onnx/scrfd_500m_bnkps/scrfd_500m_bnkps.vnnx')
-    parser.add_argument('--modelRec', default='../../../tutorials/mxnet/mobilefacenet-arcface/mobilefacenet-arcface.vnnx')
-    parser.add_argument('--modelAtr', default='../../../tutorials/onnx/genderage/genderage.vnnx')
+    parser.add_argument('--modelDet', default='../../../tutorials/onnx/face_detection_yunet_2023mar/face_detection_yunet_2023mar_V1000_ncomp.vnnx')
+    parser.add_argument('--modelRec', default='../../../tutorials/onnx/face_recognition_sface_2021dec/face_recognition_sface_2021dec_V1000_ncomp.vnnx')
+    parser.add_argument('--modelAtr', default=None)
     parser.add_argument('--video', default='gardenIn.mp4')
     parser.add_argument('--videoOut', default='demoOutput.mp4')
     parser.add_argument('--imgOutDir',default='videoOut')

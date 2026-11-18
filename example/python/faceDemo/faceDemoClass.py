@@ -2,8 +2,10 @@ import numpy as np
 import cv2
 import vbx.postprocess.retinaface
 import vbx.postprocess.scrfd
+import vbx.postprocess.yunet as yunet_post
 import os
 
+import vbx.sim.model_run as mr
 # SphereFace uses five facial landmarks (two eyes, nose point and two mouth corners)
 # https://github.com/wy1iu/sphereface/blob/master/preprocess/code/face_align_demo.m
 sphereface_coord5 = np.array([[30.2946, 51.6963],
@@ -68,6 +70,11 @@ class faceDemo:
                             assert(0)
                     elif 'scrfd' in modelDet.lower():
                         if self.detector.input_lengths[0] == 512*288*3:   # retinaface 512x288
+                            self.detectorInputDims = [288,512]
+                        else:
+                            assert(0)
+                    elif 'yunet' in modelDet.lower():
+                        if self.detector.input_lengths[0] == 512*288*3:   # yunet 512x288
                             self.detectorInputDims = [288,512]
                         else:
                             assert(0)
@@ -136,7 +143,7 @@ class faceDemo:
                 if 'sphere' in modelRec.lower():
                     self.coord5 = sphereface_coord5
                     self.coord4 = sphereface_coord4
-                elif 'arc' in modelRec.lower():
+                elif 'arc' or 'mcp' in modelRec.lower():
                     self.coord5 = arcface_coord5
                     self.coord4 = arcface_coord4
                 else:
@@ -172,6 +179,8 @@ class faceDemo:
             faces = self.runRetinaFace(img)
         elif 'scrfd' in self.modelDet.lower():
             faces = self.runScrfd(img)
+        elif 'yunet' in self.modelDet.lower():
+            faces = self.runYunet(img)
         elif 'mtcnn' == self.modelDet.lower():
             faces = self.detector.detect_faces(img)
             for f in faces:
@@ -371,15 +380,46 @@ class faceDemo:
 
         return faces
     
+
+    def runYunet(self, img): 
+        inputImg, meta = self.preProcess(img, self.detectorInputDims)
+        self.meta = meta
+
+        if '.vnnx' in self.modelDet:
+            modelInput = inputImg.transpose(2,0,1).copy()
+            unsorted_outputs, _ = mr.model_run(modelInput, self.modelDet)
+            outputs = yunet_post.order_outputs(unsorted_outputs) 
+
+        raw_faces = yunet_post.yunet(outputs, self.detectorInputDims[1], self.detectorInputDims[0], detectThresh=0.60, maxIou=0.2,  maxPreDetects=500, presigmoid=True)
+
+        faces = []
+        for f in raw_faces:
+            f['box'][0] = (f['box'][0] - meta['padLeft'])/meta['resizeX']*meta['imageX']  # scale to original image
+            f['box'][2] = (f['box'][2] - meta['padLeft'])/meta['resizeX']*meta['imageX']  # scale to original image
+            f['box'][1] = (f['box'][1] - meta['padTop'])/meta['resizeY']*meta['imageY']  # scale to original image
+            f['box'][3] = (f['box'][3] - meta['padTop'])/meta['resizeY']*meta['imageY']  # scale to original image
+
+            for n in range(len(f['landmarks'])):
+                f['landmarks'][n] = (f['landmarks'][n] - [meta['padLeft'],meta['padTop']])
+                f['landmarks'][n] = (f['landmarks'][n] / [meta['resizeX'],meta['resizeY']])
+                f['landmarks'][n] = (f['landmarks'][n] * [meta['imageX'],meta['imageY']])
+            face = dict(box=f['box'], keypoints=f['landmarks'], detectScore=f['score'])
+            faces.append(face)
+
+        return faces
+
+
     def runScrfd(self, img):
         inputImg,meta = self.preProcess(img,self.detectorInputDims)
         self.meta = meta
 
         if '.vnnx' in self.modelDet:
             modelInput = inputImg.transpose(2,0,1).copy()
-            outputs = self.detector.run([modelInput.flatten()])
-            outputs = [o/(1<<16) for o in outputs]
-            outputs = [outputs[2],outputs[5],outputs[8],outputs[1],outputs[4],outputs[7],outputs[0],outputs[3],outputs[6]]
+            unsorted_outputs, _ = mr.model_run(modelInput, self.modelDet)
+            idx = sorted(enumerate(_.shape for _ in unsorted_outputs), key = lambda x: (x[1][-3],-x[1][-2]))
+            outputs = []
+            for i,l in enumerate(idx):
+                outputs.append(unsorted_outputs[idx[i][0]].flatten().squeeze())
         elif '.xml' in self.modelDet:
             modelInput = inputImg.transpose(2,0,1).copy()
             inputName = list(self.detector.requests[0].input_blobs.keys())[0]
@@ -397,7 +437,7 @@ class faceDemo:
         else:
             assert(0)
 
-        raw_faces = vbx.postprocess.scrfd.scrfd(outputs,self.detectorInputDims[1],self.detectorInputDims[0],detectThresh=0.76, maxIou=0.34)
+        raw_faces = vbx.postprocess.scrfd.scrfd(outputs,self.detectorInputDims[1],self.detectorInputDims[0],detectThresh=0.40, maxIou=0.34) #lowered threshold to properly detect Nancy's face from dbImages with SCRFD 
        
         faces = []
         for f in raw_faces:

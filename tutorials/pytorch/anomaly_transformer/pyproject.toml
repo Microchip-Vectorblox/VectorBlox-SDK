@@ -1,0 +1,40 @@
+[project]
+name = "anomaly-transformer"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "torchao==0.17.0",
+    "litert-torch==0.9.1",
+    "ai-edge-litert==2.1.5",
+    "ai-edge-quantizer==0.7.0",
+    "numpy==2.2.6",
+    "matplotlib",
+    "scikit-learn",
+    "pandas",
+]
+
+# uv sync --group cpu   (CPU — for export/quantization)
+# uv sync --group cuda  (CUDA 13.0 — change cu130 → cu121/cu124/cu126/cu128 as needed)
+[dependency-groups]
+cpu  = ["torch==2.12.1",        "torchvision==0.27.1"]
+cuda = ["torch==2.12.1+cu130",  "torchvision==0.27.1+cu130"]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url  = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cuda"
+url  = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch       = [{ index = "pytorch-cpu", group = "cpu" },
+               { index = "pytorch-cuda", group = "cuda" }]
+torchvision = [{ index = "pytorch-cpu", group = "cpu" },
+               { index = "pytorch-cuda", group = "cuda" }]
+
+[tool.uv]
+default-groups = []
+conflicts = [[{ group = "cpu" }, { group = "cuda" }]]

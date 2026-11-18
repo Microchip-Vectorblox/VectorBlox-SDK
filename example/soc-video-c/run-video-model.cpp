@@ -81,8 +81,9 @@ static int swap_model(int model_idx) {
 		model_idx -=1;
 		use_attribute_model =0;
 		printf("Face Recognition + GenderAge\n");
-	} else if ((!strcmp(models[model_idx].post_process_type, "RETINAFACE") || 
-				!strcmp(models[model_idx].post_process_type, "SCRFD"))) {
+	} else if ((!strcmp(models[model_idx].post_process_type, "RETINAFACE") ||
+				!strcmp(models[model_idx].post_process_type, "SCRFD") ||
+				!strcmp(models[model_idx].post_process_type, "YUNET"))) {
 		
 		if(use_attribute_model == 1) {
 			use_attribute_model = 0;
@@ -444,7 +445,7 @@ int main(int argc, char **argv) {
 	
 	//Initialize models	
 	for(int i = 0; i < (int)(sizeof(models)/sizeof(*models));i++){
-		if(!strcmp(models[i].post_process_type, "RETINAFACE") || !strcmp(models[i].post_process_type, "SCRFD")) {
+		if(!strcmp(models[i].post_process_type, "RETINAFACE") || !strcmp(models[i].post_process_type, "SCRFD") || !strcmp(models[i].post_process_type, "YUNET")) {
 			demo_setup = recognitionDemoInit(vbx_cnn,models, i, 0, 1080, 1920, 0, 0);
 			i+=1;
 		} else if(!strcmp(models[i].post_process_type, "LPD")) {
@@ -501,7 +502,7 @@ int main(int argc, char **argv) {
 					int split = 1;
 					privacy_draw(split);
 				}		
-			if(!strcmp(models[mode].post_process_type, "RETINAFACE") || !strcmp(models[mode].post_process_type, "SCRFD") || !strcmp(models[mode].post_process_type, "LPD")) {
+			if(!strcmp(models[mode].post_process_type, "RETINAFACE") || !strcmp(models[mode].post_process_type, "SCRFD") || !strcmp(models[mode].post_process_type, "YUNET") || !strcmp(models[mode].post_process_type, "LPD")) {
 				status = runRecognitionDemo(models, vbx_cnn, mode, use_attribute_model, 1080, 1920, y_offset, x_offset);
 			} else {
 				status = runDetectionDemo(models, vbx_cnn, mode);
@@ -530,7 +531,7 @@ int main(int argc, char **argv) {
 		
         capture_embedding = 0;
 		if (fgets(input_buf, sizeof(input_buf), stdin)) {
-			embedding_modify = !strcmp(models[mode].post_process_type, "RETINAFACE") || !strcmp(models[mode].post_process_type, "SCRFD");
+			embedding_modify = !strcmp(models[mode].post_process_type, "RETINAFACE") || !strcmp(models[mode].post_process_type, "SCRFD") || !strcmp(models[mode].post_process_type, "YUNET");
 			//Embedding capture mode enabled
 			if(add_embedding_mode){
 				if (tolower(input_buf[0]) == 'a' && name_input == 0) {

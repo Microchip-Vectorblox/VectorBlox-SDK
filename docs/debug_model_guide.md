@@ -129,7 +129,7 @@ vnnx_infer onnx_resnet18-v1_V1000_ncomp.vnnx
 
 ### vnnx_compile with -d flag
 
-Compiles a `.tflite` to `.vnnx` in debug mode, preserving all intermediate files in a `temp/` subdirectory. The most useful artifact is `model.tr.tflite`. Here you can see whether the transformed TFLite graph is problematic (you can do this with a Python simulation, as shown below) or with vnnx_compile. If a bug with vnnx_compile is noticed, contact the VectorBlox team at <vectorblox@microchip.com>.
+Compiles a `.tflite` to `.vnnx` in debug mode, preserving all intermediate files in a `temp/` subdirectory. The most useful artifact is `model.tr.tflite`. Here you can see whether the transformed TFLite graph is problematic (you can do this with a Python simulation, as shown below) or the issue is with vnnx_compile. If a bug with vnnx_compile is noticed, contact the VectorBlox team at <vectorblox@microchip.com>.
 
 Use Case: investigating unexpected compilation failures and verifying the transformed tflite is correct.
 

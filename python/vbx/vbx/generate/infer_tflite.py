@@ -3,7 +3,7 @@ import tensorflow as tf
 import cv2
 import numpy as np
 import argparse
-from .utils import existing_dir, existing_file
+from .utils import existing_dir, existing_file, json_dump
 import os
 import glob
 import vbx.sim
@@ -45,10 +45,7 @@ def default_input_arr(shape, dtype, seed=42):
 
 def get_tflite_io(tflite_model, input_files, subdir, mean=0., scale=1., rgb=False, all_tensors=False):
 
-    if all_tensors:
-        interpreter= tf.lite.Interpreter(model_path=tflite_model, experimental_preserve_all_tensors=True)
-    else:
-        interpreter= tf.lite.Interpreter(model_path=tflite_model)
+    interpreter= tf.lite.Interpreter(model_path=tflite_model, experimental_preserve_all_tensors=all_tensors)
     interpreter.allocate_tensors()
 
     input_details = get_input_details(tflite_model)
@@ -121,7 +118,10 @@ def get_tflite_io(tflite_model, input_files, subdir, mean=0., scale=1., rgb=Fals
     tensors = {}
     if all_tensors:
         for t in interpreter.get_tensor_details():
-            tensors[t['name']] = interpreter.get_tensor(t['index'])
+            try:
+                tensors[t['name']] = interpreter.get_tensor(t['index'])
+            except:
+                pass
 
     return inputs, outputs, tensors
 
@@ -197,7 +197,7 @@ def compare_tflite(tflite_graph_name, size_conf='V1000', compression_vbx='ncomp'
     with open(tflite_graph_name, 'rb') as f:
         tflite_model_binary = f.read()
         # run tflite with tf inputs to get tflite outputs
-        baseline_input_map_tfl, baseline_output_map_tfl = generate_inputs_outputs(tflite_model_binary)
+        baseline_input_map_tfl, baseline_output_map_tfl, _ = generate_inputs_outputs(tflite_model_binary)
         
         example = { "inputs": baseline_input_map_tfl, "outputs": baseline_output_map_tfl }
 
@@ -372,7 +372,21 @@ def main():
         else:
             images = args.input
     else:
-        images = [None]
+        print("WARNING: No inputs provided. Saving randomly generated inputs and outputs")
+        with open(args.model, 'rb') as f:
+            tflite_model_binary = f.read()
+            # run tflite with tf inputs to get tflite outputs
+            tfl_inputs, tfl_outputs , tfl_acts = generate_inputs_outputs(tflite_model_binary, True, True)
+            
+            for (inp_name, inp) in tfl_inputs.items():
+                npy_input_name = args.model.replace('.tflite', '.' + inp_name + '.npy')
+                np.save(npy_input_name, inp)
+            for (outp_name, outp) in tfl_outputs.items():
+                npy_output_name = args.model.replace('.tflite', '.' + outp_name + '.npy')
+                np.save(npy_output_name, outp)
+
+            np.savez(args.model.replace('.tflite', '.acts.npz'), **tfl_acts)
+        return
 
     # Clean up old i/o activations data
     old_subdirs = glob.glob(os.path.join(model_dir, "input*"))
@@ -381,7 +395,6 @@ def main():
             shutil.rmtree(sub, ignore_errors=True)
 
     for num, img in enumerate(images):
-        print(num, img)
         subdir = os.path.join(model_dir, 'input{}'.format(num)) 
         os.mkdir(subdir)
 
@@ -430,7 +443,10 @@ def main():
         else:
             inputs = [img]
             for idx, model in enumerate(models):
-                tf_inputs, outputs, _ = get_tflite_io(model, inputs, subdir)
+                tf_inputs, outputs, _ = get_tflite_io(model, inputs, subdir, args.mean, args.scale, (not args.bgr))
+                input_details = get_input_details(model)
+                output_details = get_output_details(model)
+
                 if idx in layer_ids_subbed:
                     v_inputs, v_outputs = get_vnnx_io(vnnx_models[idx], tf_inputs.keys(), inputs, True, subdir)
                     
@@ -442,11 +458,20 @@ def main():
                         np.save(os.path.join(subdir, 'activations.{}.npy'.format(k)), v_output)
                         outputs[k] = v_output
                 else:
+                    data = {'inputs': [], 'outputs': []}
                     for k in tf_inputs.keys():
-                        np.save(os.path.join(subdir, 'activations.{}.npy'.format(k)), tf_inputs[k])
+                        kb = os.path.basename(k)
+                        np.save(os.path.join(subdir, 'activations.{}.npy'.format(kb)), tf_inputs[k])
+                        input_detail = [i for i in input_details if i['name'] == k][0]
+                        scale,zero = input_detail.get('quantization', (0.0, 0))
+                        data['inputs'].append({'data': tf_inputs[k].tolist(), 'shape': tf_inputs[k].shape, 'zero': zero, 'scale': scale, 'dtype': tf_inputs[k].dtype.name.upper()})
                     for k in outputs.keys():
-                        np.save(os.path.join(subdir, 'activations.{}.npy'.format(k)), outputs[k])
-                inputs = outputs
+                        kb = os.path.basename(k)
+                        np.save(os.path.join(subdir, 'activations.{}.npy'.format(kb)), outputs[k])
+                        output_detail = [o for o in output_details if o['name'] == k][0]
+                        scale,zero = output_detail.get('quantization', (0.0, 0))
+                        data['outputs'].append({'data': outputs[k].tolist(), 'shape': outputs[k].shape, 'zero': zero, 'scale': scale, 'dtype': outputs[k].dtype.name.upper()})
+                    json_dump(data, os.path.join(subdir, 'tflite.io.json'))
 
 
     if args.vnnx:

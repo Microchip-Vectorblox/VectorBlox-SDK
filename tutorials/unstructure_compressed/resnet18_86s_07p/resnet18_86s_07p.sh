@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1.1                                                 #
+# v3.2                                                   #
 #                                                        #
 ##########################################################
 
@@ -29,13 +29,22 @@ fi
 
 
 
+# tflite_preprocess is an internal tool used to add a preprocess layer to the start of the model
+#  Purpose: adds a preprocess layer to the start of the model (if none, will just preprocess by adding a uint8->int8 layer)
+#  - Required Inputs: tflite source model, additional arguments 
+#  - Outputs: preprocessed tflite model
+if [ -f resnet18_86s_07p.tflite ]; then
+   tflite_preprocess resnet18_86s_07p.tflite  --mean 123.675 116.28 103.53 --scale 58.4 57.1 57.38
+fi
+
+
 # vnnx_compile is an internal tool that converts an int8 tflite file to a binary file that can be run on the SDK and VectorBlox FPGA
 #  Purpose: converts int8 tflite to binary
 #  - Required Inputs: int8 tflite, size configuration, compression configuration, output file name
 #  - Outputs: binary object files(.hex and binary file)
-if [ -f resnet18_86s_07p.tflite ]; then
+if [ -f resnet18_86s_07p.pre.tflite ]; then
     echo "Generating VNNX for V1000 ucomp configuration..."
-    vnnx_compile -s V1000 -c ucomp -t resnet18_86s_07p.tflite --uint8 --mean 123.675 116.28 103.53 --scale 58.4 57.1 57.38  -o resnet18_86s_07p.ucomp
+    vnnx_compile -s V1000 -c ucomp -t resnet18_86s_07p.pre.tflite  -o resnet18_86s_07p.ucomp
 fi
 
 

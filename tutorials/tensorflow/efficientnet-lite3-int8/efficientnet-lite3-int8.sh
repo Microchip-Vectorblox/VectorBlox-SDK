@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1.1                                                 #
+# v3.2                                                   #
 #                                                        #
 ##########################################################
 
@@ -39,13 +39,6 @@ if [ ! -f efficientnet-lite3-int8.tflite ]; then
    cp efficientnet-lite3/efficientnet-lite3-int8.tflite .
 fi
 
-
-if [ -f efficientnet-lite3.tar.gz ]; then
-   if ! echo "c8bcffb764c77a2fee359d8b96ca1977 efficientnet-lite3.tar.gz" | md5sum -c; then
-       echo -e "\n There is an issue with the efficientnet-lite3-int8 model file as the expected checksum does not match.\n The model source can be found at: https://www.kaggle.com/models/google/efficientnet/tensorFlow1/b3-classification/1.\n If the model information has changed, please update this script and re-run the tutorial."
-       exit 1
-   fi
-fi
 
 
 # tflite_cut is an internal tool used to split an existing model into smaller models

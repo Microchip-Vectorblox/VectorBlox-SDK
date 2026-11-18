@@ -354,7 +354,7 @@ void trackerInit(Tracker_t* tracker, int max_tracks, track_t* pTracks[], track_t
 		tracker->maxResidual = F16(50);
 		tracker->similarityAlphaUp = F16(0.95);
 		tracker->similarityAlphaDown = F16(0.05);
-		tracker->detectThresh = F16(0.45);
+		tracker->detectThresh = F16(0.363);
 		tracker->maxMisses = 2;
 	}
 	tracker->ageAlphaUp = F16(0.2);

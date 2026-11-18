@@ -19,6 +19,9 @@ The table also lists relevant C function calls used to perform the post-processi
 | `OBJECT_DETECT_FULL` | Object detection using Ultralytics models with a single combined output tensor for COCO classes. Applies NMS directly on the combined output. Returns detected objects with bounding boxes, confidence, and class information. | `post_process_ultra_nms_int8()`, `post_process_ultra_nms()` |
 | `POSE_DETECT` | Human pose estimation using Ultralytics pose models with COCO classes. Returns detected persons with bounding boxes and 17 keypoints per person (x, y coordinates and confidence scores). | `post_process_ultra_int8()`, `post_process_ultra_nms()` |
 | `OBB_DETECT` | Oriented bounding box object detection using Ultralytics OBB models with DOTA classes (15 classes). Returns detected objects with oriented bounding boxes (x, y, w, h, angle) and confidence scores. | `post_process_ultra_int8()`, `post_process_ultra_nms()` |
+| `YUNET` | Face detection using YuNet models. Returns bounding boxes with confidence scores and 5 facial landmarks per detected face. | `post_process_yunet_int8()` |
+| `SPACE` | Pose estimation for the SPNv2 network. Returns the confidence score of the highest scoring detection and the 2D projection points of its 3D bounding box. | `post_process_space_int8()` |
+| `SPACE_T` | Same as `SPACE`, but transposes the model outputs before decoding. Use when the model's output buffers are in transposed layout. | `post_process_space_int8()` |
 
 
 ### Options Available Prior to 2.x
@@ -89,37 +92,40 @@ Post-processing for classifiers such as MNIST or ImageNet networks. Returns the 
     Parameters
         outputs	            Unsorted outputs obtained from the model
         output_size	        Number of outputs
-        output_index	    The returned indices, sorted by scores lowest to highest
+        output_index	    The returned indices, sorted by scores highest to lowest
         topk	            Number of indices to return sorted
 
-### post_process_scrfd_int8()
-Post-processing on detected objects that store the bounding box and keypoints within the face object.
+### post_process_lpr_int8()
+Post-processing for license plate recognition. Decodes the plate characters into a label string and returns the recognition confidence.
 
-    int post_process_scrfd_int8	(object_t	faces[],
-                                int	max_faces,
-                                int8_t *	network_outputs[9],
-                                int	zero_points[],
-                                fix16_t	scale_outs[],
-                                int	image_width,
-                                int	image_height,
-                                fix16_t	confidence_threshold,
-                                fix16_t	nms_threshold,
-                                model_t *	model )
-    
+    fix16_t post_process_lpr_int8(int8_t *	output,
+                                model_t *	model,
+                                char *	label )
+
 
     Parameters
-        faces	                Array of faces found, one per detection
-        max_faces	            Max number of faces that can be found in a model
-        network_outputs	        Output buffers obtained from VectorBlox
-        zero_points	            Mean offset for int8
-        scale_outs	            fix16 scaling multiplier for int8
-        image_width	            Width of input image sent to the network
-        image_height	        Height of input image sent to the network
-        confidence_threshold	Confidence threshold, ranged from 0-1.0
-        nms_threshold	        Non-max suppression for overlapping detections, ranged from 0-1.0
-        model	                Network model
+        output	            Output buffer obtained from VectorBlox
+        model	            Network model
+        label	            Returned string containing the recognized plate ID
     Returns
-        int                     Number of detected objects
+        fix16_t             Recognition confidence score
+
+### post_process_space_int8()
+Post-processing for SPNv2 spacecraft pose estimation. Finds the highest scoring detection and returns the 2D projection of its 3D keypoints.
+
+    fix16_t post_process_space_int8(fix16_t *	points2D,
+                                    int8_t **	output_buffers_int8,
+                                    model_t *	model,
+                                    int	transpose_first )
+
+
+    Parameters
+        points2D	            Returned 2D projected points (x coordinates followed by y coordinates)
+        output_buffers_int8	    Output buffers obtained from VectorBlox
+        model	                Network model
+        transpose_first	        Flag indicating the output ordering is transposed (set for SPACE_T)
+    Returns
+        fix16_t                 Confidence score of the highest scoring detection
 
 ### post_process_ssd_torch_int8()
 Post-processing for SSD V2. Returns the number of detected objects, along with boxes, confidence, and class information.
@@ -237,7 +243,7 @@ Performs non-maximal suppression on detected objects.
         int             Number of valid detections
 
 ### post_process_yolo_int8()
-Post-processing for Yolov2/V3/V4/V5. Returns the number of detected objects, along with boxes containing coordinates, confidence, and class information.
+Post-processing for YOLOv2/v3/v4/v5. Returns the number of detected objects, along with boxes containing coordinates, confidence, and class information.
 
     int post_process_yolo_int8(int8_t **	outputs,
                                 const int	num_outputs,
@@ -262,6 +268,33 @@ Post-processing for Yolov2/V3/V4/V5. Returns the number of detected objects, alo
         max_boxes	    Limit to the number of possible detection boxes found
     Returns
         int             Number of detected boxes
+
+### post_process_yunet_int8()
+Post-processing for YuNet face detection. Stores the bounding box and 5 facial landmarks within each face object.
+
+    int post_process_yunet_int8(object_t	faces[],
+                                int	max_faces,
+                                int8_t *	network_outputs[12],
+                                int	zero_points[],
+                                fix16_t	scale_outs[],
+                                int	image_width,
+                                int	image_height,
+                                fix16_t	confidence_threshold,
+                                fix16_t	nms_threshold )
+
+
+    Parameters
+        faces	                Array of faces found, one per detection
+        max_faces	            Max number of faces that can be found in a model
+        network_outputs	        Output buffers obtained from VectorBlox
+        zero_points	            Mean offset for int8
+        scale_outs	            fix16 scaling multiplier for int8
+        image_width	            Width of input image sent to the network
+        image_height	        Height of input image sent to the network
+        confidence_threshold	Confidence threshold, ranged from 0-1.0
+        nms_threshold	        Non-max suppression for overlapping detections, ranged from 0-1.0
+    Returns
+        int                     Number of detected faces
 
 ### pprint_post_process()
 Post-process wrapper function.

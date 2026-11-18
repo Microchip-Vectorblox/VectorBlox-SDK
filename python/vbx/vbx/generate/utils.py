@@ -110,9 +110,12 @@ def json_load(path):
         return orjson.loads(f.read())
 
 
-def json_dump(obj, path):
+def json_dump(obj, path, verbose=False):
     with open(path, 'wb') as f:
+        if verbose:
+            return f.write(orjson.dumps(obj, option=orjson.OPT_INDENT_2))
         return f.write(orjson.dumps(obj))
+
 
 
 # compress and decompress mux controls
@@ -362,8 +365,11 @@ MAP_TF_TO_NUMPY_TYPE = {
 }
 
 
-def create_tensor_data(dtype, shape, min_value=-100, max_value=100, int8_range=False):
+def create_tensor_data(dtype, shape, min_value=-100, max_value=100, int8_range=False, seed=None):
   """Build tensor data spreading the range [min_value, max_value)."""
+
+  if not seed is None:
+      np.random.seed(seed)
 
   if dtype in MAP_TF_TO_NUMPY_TYPE:
     dtype = MAP_TF_TO_NUMPY_TYPE[dtype]
@@ -391,14 +397,15 @@ def create_tensor_data(dtype, shape, min_value=-100, max_value=100, int8_range=F
   return np.dtype(dtype).type(value) if np.isscalar(value) else value.astype(dtype)
 
 
-def generate_inputs_outputs(tflite_model, int8_range=False):
+def generate_inputs_outputs(tflite_model, int8_range=False, all_tensors=False, seed=None):
     if isinstance(tflite_model, bytes):
-        interpreter = tf.lite.Interpreter(model_content=tflite_model)
+        interpreter = tf.lite.Interpreter(model_content=tflite_model, experimental_preserve_all_tensors=all_tensors)
     elif isinstance(tflite_model, str):
-        interpreter = tf.lite.Interpreter(model_path=tflite_model)
+        interpreter = tf.lite.Interpreter(model_path=tflite_model, experimental_preserve_all_tensors=all_tensors)
     else:
         print('WARNING: invalid tflite model')
-        return None
+        return None, None, None
+
     interpreter.allocate_tensors()
     input_details = interpreter.get_input_details()
     input_values = {}
@@ -419,7 +426,8 @@ def generate_inputs_outputs(tflite_model, int8_range=False):
                 input_detail["shape"],
                 min_value=min_value,
                 max_value=max_value,
-                int8_range=int8_range)
+                int8_range=int8_range,
+                seed=seed)
         interpreter.set_tensor(input_detail["index"], input_value)
         input_values.update({"i{}".format(i): input_value})
     interpreter.invoke()
@@ -428,7 +436,15 @@ def generate_inputs_outputs(tflite_model, int8_range=False):
     output_values = {}
     for o, output_detail in enumerate(sorted(output_details, key=lambda x: x['index'])):
         output_values.update({ "o{}".format(o): interpreter.get_tensor(output_detail["index"])})
-    return input_values, output_values
+
+    tensors = {}
+    if all_tensors:
+        for t in interpreter.get_tensor_details():
+            try:
+                tensors[t['name']] = interpreter.get_tensor(t['index'])
+            except:
+                pass
+    return input_values, output_values, tensors
 
 
 def one_elem(l):
@@ -567,7 +583,7 @@ def onnx_input_shape(model_file):
     for input in model.graph.input:
         tensor_type = input.type.tensor_type
         if (tensor_type.HasField("shape")):
-             input_shapes.append([d.dim_value for d in tensor_type.shape.dim if (d.HasField("dim_value") or  d.HasField("dim_param"))])
+            input_shapes.append([d.dim_value for d in tensor_type.shape.dim if (d.HasField("dim_value") or  d.HasField("dim_param"))])
     return input_shapes
 
 def onnx_output_shape(model_file):

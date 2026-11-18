@@ -22,7 +22,7 @@ if __name__ == "__main__":
     parser.add_argument('-o', '--output', default="output.png")
     parser.add_argument('-t', '--threshold', type=float, default=0.5)
     parser.add_argument('-i', '--iou', type=float, default=0.4)
-    parser.add_argument('-v', '--version', type=str, choices=['2','3','5','7','x','ultra5','8','ultra'], required='true')
+    parser.add_argument('-v', '--version', type=str, choices=['2','3','5','7','x','ultra5','8','ultra','26'], required='true')
     parser.add_argument('-b', '--bgr', action='store_true')
     parser.add_argument('-m', '--mean', type=float, nargs='+', default=0.)
     parser.add_argument('-sc', '--scale', type=float, nargs='+', default=[1.])
@@ -47,14 +47,14 @@ if __name__ == "__main__":
     if channels_last: #if model is NHWC outputs need to be converted to
         outputs=mr.transpose_outputs(outputs)
 
-    if args.version in ['8', 'ultra']:
+    if args.version in ['8', 'ultra', '26']:
         predictions = []
         if len(outputs) == 1:
-            predictions = yolo.nms_post_process(outputs[0], args.threshold, args.iou, input_width, input_height, prescaled=args.prescaled)
+            predictions = yolo.nms_post_process(outputs[0], args.threshold, args.iou, input_width, input_height, prescaled=args.prescaled, xyxy=args.version=='26')
         else:
             post = yolo.ultralytics_post_process(outputs, input_height, input_width, args.threshold)
             if(len(post)>1):
-                predictions = yolo.nms_post_process(post, args.threshold, args.iou, input_width, input_height, prescaled=args.prescaled)
+                predictions = yolo.nms_post_process(post, args.threshold, args.iou, input_width, input_height, prescaled=args.prescaled, xyxy=args.version=='26')
     else:
         # load config
         config = None

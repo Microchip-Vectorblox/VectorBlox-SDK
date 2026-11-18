@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1.1                                                 #
+# v3.2                                                   #
 #                                                        #
 ##########################################################
 
@@ -35,16 +35,19 @@ echo "Checking for yolov9-t_512x288_argmax files..."
 # model details @ https://github.com/LibreYOLO/libreyolo
 [ -f coco.names ] || wget -q https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names
 if [ ! -f v9-t.onnx ]; then
+    LIBREYOLO_VERSION=v1.6.0
     [ -d libreyolo ] || git clone https://github.com/LibreYOLO/libreyolo
+    git -C libreyolo fetch --tags -q
+    git -C libreyolo checkout -q $LIBREYOLO_VERSION
     if [ -d libreyolo ]; then
-       python3 -m venv yolo_venv
+       uv venv yolo_venv --python 3.10
        source yolo_venv/bin/activate
-       pip install torch==2.8.0 torchvision==0.23 typing_extensions==4.15.0 --index-url https://download.pytorch.org/whl/cpu
-       pip install lightning hydra-core requests rich pillow einops wandb pycocotools onnx onnxscript scipy
+       uv pip install torch==2.8.0 torchvision==0.23 typing_extensions==4.15.0 --index-url https://download.pytorch.org/whl/cpu
+       uv pip install lightning hydra-core requests rich pillow einops wandb pycocotools onnx onnxscript scipy
        cd libreyolo
-       pip install -e .
-       pip uninstall opencv-python opencv-contrib-python -y
-       pip install opencv-python-headless
+       uv pip install -e .
+       uv pip uninstall opencv-python opencv-contrib-python -y
+       uv pip install opencv-python-headless
        python - << EOF
 from libreyolo import LibreYOLO
 model = LibreYOLO("LibreYOLO9t.pt")

@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1.1                                                 #
+# v3.2                                                   #
 #                                                        #
 ##########################################################
 
@@ -72,13 +72,6 @@ fi
         wget -q --no-check-certificate https://github.com/Microchip-Vectorblox/assets/raw/refs/heads/main/npy_files/calibration_image_sample_data_20x128x128x3_float32.npy
     fi
 
-
-if [ -f FFNet-122NS-LowRes.onnx ]; then
-   if ! echo "489070f04812e87310ee734d31ec4af6 FFNet-122NS-LowRes.onnx" | md5sum -c; then
-       echo -e "\n There is an issue with the FFNet-122NS-LowRes_512x288 model file as the expected checksum does not match.\n The model source can be found at: .\n If the model information has changed, please update this script and re-run the tutorial."
-       exit 1
-   fi
-fi
 
 
 # onnx2tf is an external model conversion tool to convert an onnx model to int8 tflite

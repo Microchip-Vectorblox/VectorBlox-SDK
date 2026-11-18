@@ -38,7 +38,9 @@ typedef enum{
 	LUT=303,
 	PIXEL_SHUFFLE=304,
 	OUTPUT_SHAPER=305,
-	UNKNOWN_SUBGRAPH=306
+	NORM=306,
+	WPACK=307,
+	UNKNOWN_SUBGRAPH=308
 } VNNXOperator;
 
 typedef enum{
@@ -519,6 +521,10 @@ typedef STRUCT_PACKED vnnx_layer{
 			int32_t dims;
 		}PackOptions;
 		STRUCT_PACKED{
+			int32_t k;
+			int32_t n;
+		}WeightPackOptions;
+		STRUCT_PACKED{
 			float scale[2];
             int32_t mode;
             int32_t num_c_inc;
@@ -686,20 +692,41 @@ typedef STRUCT_PACKED vnnx_subgraph_node {
 			int32_t filter_shape_dims[2];
 			int32_t input_stride;
 			int32_t use_fia;
+			int32_t is_ucomp;
 			int32_t first_fia;
 			int32_t last_fia;
 			int32_t fia_collision;
 			int32_t mxp_double_buffer;
+			int32_t adj_x;
+			int32_t adj_y;
+			int32_t adj_c;
+			int32_t live_weights;
 			obj_off_t filter_data;
 			obj_off_t bias_data;
 			obj_off_t quantization_records;
 			obj_off_t nlf_data;
 		} FullyConnectedOptions;
 		STRUCT_PACKED {
+			int32_t filter;
+			int32_t use_fia;
+			int32_t first_fia;
+			int32_t last_fia;
+			int32_t fia_collision;
+			int32_t optimized;
+			int32_t size_x;
+			int32_t adj_c;
 			int32_t adj_x;
 			int32_t adj_y;
 			int32_t asym;
 		} BatchMatMulOptions;
+		STRUCT_PACKED {
+			float bias;
+			int32_t scale;
+			obj_off_t W32;
+			obj_off_t B32;
+			obj_off_t W;
+			obj_off_t B;
+		} NormOptions;
 		STRUCT_PACKED {
 			int32_t axis;
 		} ConcatOptions;

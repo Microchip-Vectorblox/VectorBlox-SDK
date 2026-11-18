@@ -1,4 +1,4 @@
-# VectorBlox 3.1.1 SDK
+# VectorBlox 3.2 SDK
 
 The VectorBlox™ SDK compiles quantized INT8 TFLite models into binaries that can be evaluated in the SDK simulator or deployed on Microchip PolarFire® and PolarFire® SoC FPGAs running the VectorBlox™ accelerator.  
 
@@ -58,8 +58,10 @@ deactivate
 
 We recommend reviewing our tutorials to understand the workflow. These examples demonstrate how to generate CoreVectorBlox-compatible binary files using shell scripts in the [tutorials directory](./tutorials/).
 
-Tutorials download the model and convert it to a quantized `.tflite`file if needed.y.
-The model is then compiled into a VectorBlox binary file (`.vnnx, `.hex`, or `.ucomp` extensions) and simulated.
+Tutorials download the model and convert it to a quantized `.tflite` file if needed.
+The model is then compiled into a VectorBlox binary file (`.vnnx`, `.hex`, or `.ucomp` extensions) and simulated.
+
+>Important: When getting started, we recommend using the no compression (NCOMP) tutorials. Before compiling a model with compression (COMP) or Unstructured Compression (UCOMP), please refer to the [VectorBlox Compression](./docs/vectorblox_compression.md) document to learn more about compression.
 
 To run a tutorial shell script, follow these steps:
 
@@ -76,7 +78,7 @@ The docs folder also contains a [Tutorial Metrics Appendix](./docs/tutorial_metr
 
 ### After Generating a Binary File with the SDK
 
-After generating a model’s binary file with the SDK, you can run it on a PolarFire FPGA. The 3.1.1 SDK does not support the PolarFire Non-SoC Video Kit.
+After generating a model’s binary file with the SDK, you can run it on a PolarFire FPGA. 
 
 More information on setting up the PolarFire SoC Video Kit for VectorBlox can be found in the [VectorBlox-SoC-Video-Kit-Demo](https://github.com/Microchip-Vectorblox/VectorBlox-SoC-Video-Kit-Demo/tree/main) repository.
 
@@ -87,6 +89,8 @@ See the Adding Models Markdown file in the VectorBlox-SoC-Video-Kit-Demo reposit
 ## Known Issues
 
 For up-to-date information on known issues for the VectorBlox SDK and Demos, please refer to the [known issues page](./docs/known_issues.md).
+
+
 
 ## Resources
 

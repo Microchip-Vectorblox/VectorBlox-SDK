@@ -1,24 +1,6 @@
 from enum import Enum
- 
-class GridConfig(Enum):
-    H56xW28 = 1
-    H28xW28 = 2
-    H14xW14 = 3
-    H7xW7 = 4
-    H14xW8 = 5
-    H14xW16 = 6
-    H14xW32 = 7
-    NONE = 8
 
-class RqDSPCommand(Enum):
-    NOP = 1
-    MULTIPLY = 2
-    MULTIPLY_AND_ADD_PREVIOUS = 3
     
-class RqOP(Enum):
-    MUX_IN = 1
-    NOP = 2
-    END = 3
 
 class DDREntryType(Enum):
     INPUT_TENSOR = 1
@@ -61,14 +43,8 @@ class SequencerOPCode(Enum):
 
 class EngineOpCode(Enum):
     CONV = 0
-    MAXPOOL = 1
-#    DEEPCONV = 2
-    DEEPCONV = 0
+    MAXPOOL = 1 
     
-class PadMode(Enum):
-    GRIDH14XW32 = 0
-    GRIDH14XW16 = 1
-    GRIDH14XW8 = 2
 
 class ScalingMode(Enum):
     RQDIRECT = 0
@@ -94,14 +70,6 @@ class DDRCommandDstSrcType(Enum):
     
     def __repr__(self):
         return(str(self.name)+',')
-        if self.value == AMM_WRT_MASK:
-            return('WR Mask,')
-        else:
-            return(str(self.name))+','
-
-class DDRPriority(Enum):
-    LOW = 0
-    HIGH = 1
 
 class AMMType(Enum):
     BRAM_BASED_AMM = 0
@@ -109,8 +77,8 @@ class AMMType(Enum):
 
 class DDRReadOffsetType(Enum):
     INPUT_TENSOR = 0
-    MODEL_MEM = 1
-    MXP_BASE = 2
+    MODEL_MEM = 2
+    MXP_BASE = 3
     def __str__(self):
         return('DDROffset:'+str(self.name))
     def __repr__(self):
@@ -118,8 +86,8 @@ class DDRReadOffsetType(Enum):
 
 class DDRWriteOffsetType(Enum):
     OUTPUT_TENSOR = 0
-    MODEL_MEM = 1
-    MXP_BASE = 2
+    MODEL_MEM = 2
+    MXP_BASE = 3
     def __str__(self):
         return('DDROffset:'+str(self.name))
     def __repr__(self):

@@ -7,7 +7,7 @@
 # |___/\___/\___/\__/\____/_/  /_____/_/\____/_/|_|      #
 #                                                        #
 # https://github.com/Microchip-Vectorblox/VectorBlox-SDK #
-# v3.1.1                                                 #
+# v3.2                                                   #
 #                                                        #
 ##########################################################
 
@@ -28,13 +28,6 @@ if [ ! -f ResNet50Quantized.tflite ]; then
     mv ResNet50_w8a8.tflite ResNet50Quantized.tflite
 fi
 
-
-if [ -f ResNet50Quantized.tflite ]; then
-   if ! echo "26eda65755a9340f642b00f9fabc4d06 ResNet50Quantized.tflite" | md5sum -c; then
-       echo -e "\n There is an issue with the ResNet50Quantized model file as the expected checksum does not match.\n The model source can be found at: https://huggingface.co/qualcomm/ResNet50.\n If the model information has changed, please update this script and re-run the tutorial."
-       exit 1
-   fi
-fi
 
 
 # tflite_preprocess is an internal tool used to add a preprocess layer to the start of the model

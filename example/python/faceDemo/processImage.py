@@ -6,10 +6,11 @@ import glob
 import faceDemoClass
 
 def main():
+
     parser = argparse.ArgumentParser()
-    parser.add_argument('--modelDet', default='../../../tutorials/onnx/scrfd_500m_bnkps/scrfd_500m_bnkps.vnnx')
-    parser.add_argument('--modelRec', default='../../../tutorials/mxnet/mobilefacenet-arcface/mobilefacenet-arcface.vnnx')
-    parser.add_argument('--modelAtr', default='../../../tutorials/onnx/genderage/genderage.vnnx')
+    parser.add_argument('--modelDet', default='../../../tutorials/onnx/face_detection_yunet_2023mar/face_detection_yunet_2023mar_V1000_ncomp.vnnx')
+    parser.add_argument('--modelRec', default='../../../tutorials/onnx/face_recognition_sface_2021dec/face_recognition_sface_2021dec_V1000_ncomp.vnnx')
+    parser.add_argument('--modelAtr', default=None)
     parser.add_argument('--image', default='garden.jpg')
     parser.add_argument('-d', '--debug', default=False)
     parser.add_argument('--db', default='faceDb.npy')
@@ -39,12 +40,6 @@ def main():
         else:
             resText = '{:.3}%'.format(face['similarity'])
             color = (0,0,250)
-        if face['gender']>0:
-            atrText = 'F'
-        else:
-            atrText = 'M'
-        atrText += ' {}'.format(int(face['age']))
-        print(atrText)
         box = face['box']
         p1 = (int(box[0]),int(box[1]))
         p2 = (int(box[2]),int(box[3]))
@@ -52,7 +47,7 @@ def main():
         p3 = (int(box[0]),int(box[3]+12*width))
         cv2.putText(img, resText, p3, cv2.FONT_HERSHEY_SIMPLEX, width*.35, color, width, cv2.LINE_AA)
         p4 = (int(box[0]),int(box[1]-4*width))
-        cv2.putText(img, atrText, p4, cv2.FONT_HERSHEY_SIMPLEX, width*.35, color, width, cv2.LINE_AA)
+        cv2.putText(img, None, p4, cv2.FONT_HERSHEY_SIMPLEX, width*.35, color, width, cv2.LINE_AA)
         
     cv2.imwrite("demoOutput.png",img)
     print('saved output to demoOutput.png')

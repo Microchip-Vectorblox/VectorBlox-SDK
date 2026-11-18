@@ -1,0 +1,30 @@
+[project]
+name = "quant"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "torchao==0.17.0",
+    "litert-torch==0.9.1",
+    "ai-edge-litert==2.1.5",
+    "ai-edge-quantizer==0.7.0",
+    "numpy==2.2.6",
+    "datasets",
+    "matplotlib",
+    "scikit-learn",
+    "pandas",
+]
+
+[dependency-groups]
+cpu  = ["torch==2.12.1+cpu", "torchvision==0.27.1+cpu", "ultralytics>=8.0.0"]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url  = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch       = [{ index = "pytorch-cpu", group = "cpu" }]
+torchvision = [{ index = "pytorch-cpu", group = "cpu" }]
+
+[tool.uv]
+default-groups = []
