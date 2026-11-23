@@ -33,31 +33,33 @@ To run a tutorial script, change into the model's tutorial directory and run:
 | Source | Tutorial | Input<br>(H,W,C) | Runtime<br>(ms) | Task | Metric | TFLITE | VNNX |
 |:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | PINTO | [081_MiDaS_v2](PINTO/081_MiDaS_v2/081_MiDaS_v2.sh) | [256, 256, 3] | 122.564 | depth estimation | depthdelta1 (nyuv2) | 60.89 | 59.93 |
-| onnx | [onnx_resnet18-v1](onnx/onnx_resnet18-v1/onnx_resnet18-v1.sh) | [224, 224, 3] | 25.982 |  | Top1 | 69.1 | 68.9 |
-| openvino | [mobilenet-v1-1.0-224](openvino/mobilenet-v1-1.0-224/mobilenet-v1-1.0-224.sh) | [224, 224, 3] | 11.814 |  | Top1 | 70.1 | 70.1 |
-| qualcomm | [FFNet-122NS-LowRes_512x288](qualcomm/FFNet-122NS-LowRes_512x288/FFNet-122NS-LowRes_512x288.sh) | [288, 512, 3] | 76.451 | segmentation | meanIoU (cityscapes) | 44.82 | 44.45 |
-| qualcomm | [MobileNet-v3-Large-Quantized](qualcomm/MobileNet-v3-Large-Quantized/MobileNet-v3-Large-Quantized.sh) | [224, 224, 3] | 23.02 |  | Top1 | 69.6 | 68.8 |
+| onnx | [onnx_resnet18-v1](onnx/onnx_resnet18-v1/onnx_resnet18-v1.sh) | [224, 224, 3] | 25.982 | classification | Top1 | 69.1 | 68.9 |
+| openvino | [mobilenet-v1-1.0-224](openvino/mobilenet-v1-1.0-224/mobilenet-v1-1.0-224.sh) | [224, 224, 3] | 11.814 | classification | Top1 | 70.1 | 70.1 |
+| qualcomm | [FFNet-122NS-LowRes_512x288](qualcomm/FFNet-122NS-LowRes_512x288/FFNet-122NS-LowRes_512x288.sh) | [288, 512, 3] | 76.451 | segmentation | meanIoU (cityscapes) | 48.34 | 48.7 |
+| qualcomm | [MobileNet-v3-Large-Quantized](qualcomm/MobileNet-v3-Large-Quantized/MobileNet-v3-Large-Quantized.sh) | [224, 224, 3] | 23.02 | classification | Top1 | 68.9 | 68.8 |
 | qualcomm | [QuickSRNetMedium-Quantized](qualcomm/QuickSRNetMedium-Quantized/QuickSRNetMedium-Quantized.sh) | [128, 128, 3] | 9.367 | image enhancement | PSNR (bsd300) | 26.79 | 26.81 |
-| tensorflow | [mobilenet_v2](tensorflow/mobilenet_v2/mobilenet_v2.sh) | [224, 224, 3] | 13.085 |  | Top1 | 70.2 | 70.1 |
-| ultralytics | [yolov8n](ultralytics/yolov8n/yolov8n.sh) | [640, 640, 3] | 55.727 | object detection | mAP⁵⁰⁻⁹⁵ | 37.4 | 37.38 |
+| tensorflow | [mobilenet_v2](tensorflow/mobilenet_v2/mobilenet_v2.sh) | [224, 224, 3] | 13.085 | classification | Top1 | 70.6 | 70.1 |
+| ultralytics | [yolov8n](ultralytics/yolov8n/yolov8n.sh) | [640, 640, 3] | 55.727 | object detection | mAP⁵⁰⁻⁹⁵ | 37.38 | 37.42 |
 | ultralytics | [yolov8n-cls](ultralytics/yolov8n-cls/yolov8n-cls.sh) | [224, 224, 3] | 4.24 | classification | Top1 | 67.2 | 67.3 |
 | ultralytics | [yolov8n-obb](ultralytics/yolov8n-obb/yolov8n-obb.sh) | [1024, 1024, 3] | 146.691 | obb detection | mAP⁵⁰⁻⁹⁵ |  |  |
 | ultralytics | [yolov8n-pose_512x288_split](ultralytics/yolov8n-pose_512x288_split/yolov8n-pose_512x288_split.sh) | [288, 512, 3] | 22.478 | pose detection | Pose Detection |  |  |
 | ultralytics | [yolov8n-seg](ultralytics/yolov8n-seg/yolov8n-seg.sh) | [640, 640, 3] | 72.522 | instance segmentation |  |  |  |
-| ultralytics | [yolov9t](ultralytics/yolov9t/yolov9t.sh) | [640, 640, 3] | 67.155 | object detection | mAP⁵⁰⁻⁹⁵ | 37.92 | 38.18 |
-
+| ultralytics | [yolov9t](ultralytics/yolov9t/yolov9t.sh) | [640, 640, 3] | 67.155 | object detection | mAP⁵⁰⁻⁹⁵ | 37.88 | 38.2 |
+| ultralytics | [yolo11n_sym](ultralytics/yolo11n_sym/yolo11n_sym.sh) | [640, 640, 3] | 70.54 | object detection | mAP⁵⁰⁻⁹⁵ | 39.02 | 38.85 |
+| ultralytics | [yolo26n_sym](ultralytics/yolo26n_sym/yolo26n_sym.sh) | [640, 640, 3] | 80.967 | object detection | mAP⁵⁰⁻⁹⁵ | 40.72 | 41.11 |
+| vectorblox | [yolov9s-spn](vectorblox/yolov9s-spn/yolov9s-spn.sh) | [512, 768, 3] | 216.766 | 6d pose |  |  |  |
 
 
 ## Compression
 
 | Source | Tutorial | Input<br>(H,W,C) | Runtime<br>(ms) | Task | Metric | TFLITE | VNNX |
 |:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| compressed | [yolov8m_comp69](compressed/yolov8m_comp69/yolov8m_comp69.sh) | [640, 640, 3] | 239.842 | object detection | mAP⁵⁰⁻⁹⁵ |  | 51.52 |
+| compressed | [yolov8m_comp69](compressed/yolov8m_comp69/yolov8m_comp69.sh) | [640, 640, 3] | 239.842 | object detection | mAP⁵⁰⁻⁹⁵ | 51.82 | 51.5 |
 | compressed | [yolov8n_comp66](compressed/yolov8n_comp66/yolov8n_comp66.sh) | [640, 640, 3] | 37.053 | object detection | mAP⁵⁰⁻⁹⁵ | 37.18 | 37.3 |
 | compressed | [yolov8s_comp68](compressed/yolov8s_comp68/yolov8s_comp68.sh) | [640, 640, 3] | 95.119 | object detection | mAP⁵⁰⁻⁹⁵ | 46.11 | 46.15 |
-| compressed | [yolov9m_comp67](compressed/yolov9m_comp67/yolov9m_comp67.sh) | [640, 640, 3] | 322.171 | object detection | mAP⁵⁰⁻⁹⁵ |  |  |
-| compressed | [yolov9s_comp68](compressed/yolov9s_comp68/yolov9s_comp68.sh) | [640, 640, 3] | 122.47 | object detection | mAP⁵⁰⁻⁹⁵ |  |  |
-| compressed | [yolov9t_comp61](compressed/yolov9t_comp61/yolov9t_comp61.sh) | [640, 640, 3] | 55.879 | object detection | mAP⁵⁰⁻⁹⁵ |  |  |
+| compressed | [yolov9m_comp67](compressed/yolov9m_comp67/yolov9m_comp67.sh) | [640, 640, 3] | 322.171 | object detection | mAP⁵⁰⁻⁹⁵ | 51.69 | 51.91 |
+| compressed | [yolov9s_comp68](compressed/yolov9s_comp68/yolov9s_comp68.sh) | [640, 640, 3] | 122.47 | object detection | mAP⁵⁰⁻⁹⁵ | 46.99 | 47.01 |
+| compressed | [yolov9t_comp61](compressed/yolov9t_comp61/yolov9t_comp61.sh) | [640, 640, 3] | 55.879 | object detection | mAP⁵⁰⁻⁹⁵ | 38.14 | 38.35 |
 
 
 ## Unstructured Compression
